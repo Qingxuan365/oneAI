@@ -46,7 +46,30 @@ d:/GitHub/OneDesktop/
 │       │   └── types/                    # 前端类型定义
 ```
 
-## 3. 编码与设计红线
+## 3. 核心数据模型约定
+
+```typescript
+// CLI 分组模型
+interface CliGroup {
+  id: string;             // 如 "codex", "kimi"
+  name: string;           // 显示名称 "Codex", "Kimi Code"
+  command: string;        // 启动命令模版
+  isExpanded: boolean;    // 分组展开/折叠状态
+  tasks: TaskSession[];   // 该 CLI 下并发运行的子任务列表
+}
+
+// 具体任务终端会话模型
+interface TaskSession {
+  id: string;             // 任务唯一标识（对应底层 ptyId）
+  groupId: string;        // 所属 CLI 分组
+  title: string;          // 任务标题，如 "Task 1: Auth Refactor"
+  status: 'running' | 'idle' | 'waiting' | 'stopped';
+  cwd: string;            // 工作目录
+  createdAt: number;
+}
+```
+
+## 4. 编码与设计红线
 
 1. **终端进程隔离与保活**：
    - 切换左侧会话时严禁销毁终端 DOM 或中断底层 PTY，必须使用隐藏（`display: none`）保活机制。
@@ -55,3 +78,4 @@ d:/GitHub/OneDesktop/
    - 必须保持顶栏单行横排纯文字（Inline Text），严禁添加悬浮卡片、弹窗或遮挡视窗的浮层。
 3. **平台兼容性**：
    - Windows 平台优先调用 Powershell / Cmd / Git Bash / WSL 作为底层 Shell，正确处理 Windows 换行符（CRLF）与 ConPTY 信号。
+
