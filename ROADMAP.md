@@ -1,18 +1,16 @@
 # OneDesktop 开发路线图与进度看板
 
 ## 1. 当前阶段
-- **阶段**：Phase 1 - 项目规范与脚手架工程搭建
-- **状态**：进行中
+- **阶段**：Phase 1 - 需求设计与架构规划（已定稿，暂不启动代码开发）
+- **状态**：就绪待命（Standby）
 
 ## 2. 进度看板
 
 ### 已完成
-- [x] 完成多 CLI 工作台 UI 效果图设计与确认（含顶栏单行横向纯文字额度显示）。
-- [x] 制定项目规范文档 [AGENTS.md](file:///d:/GitHub/OneDesktop/AGENTS.md) 。
-
-### 进行中
-- [ ] 初始化 Git 仓库与 `.gitignore` 规则。
-- [ ] 搭建 Electron + React + TypeScript + Tailwind CSS 基础工程骨架。
+- [x] 完成多 CLI 工作台 UI 效果图设计与确认（左侧导航 + 右侧终端 + 顶栏单行横排实时额度）。
+- [x] 确立项目级规范文档 [AGENTS.md](file:///d:/GitHub/OneDesktop/AGENTS.md) 。
+- [x] 初始化本地 Git 仓库与 `.gitignore` 规则。
+- [x] 完成实施方案规划与架构设计 [implementation_plan.md](file:///C:/Users/31317/.gemini/antigravity/brain/e1268a3a-17f8-419c-a5fd-ef3ba0c51fb0/implementation_plan.md) 。
 
 ### 待办
 - [ ] 实现 Electron 主进程 `node-pty` 多进程池调度器（创建、写入、读取、调整大小、退出）。
