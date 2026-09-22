@@ -11,6 +11,29 @@ interface TopbarProps {
   onRefreshQuota: () => Promise<void>;
 }
 
+// 数字日期转中文数字（1~30）
+function toChineseDay(n: number): string {
+  const digits = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+  if (n <= 10) return digits[n];
+  if (n < 20) return `十${digits[n - 10]}`;
+  if (n === 20) return '二十';
+  if (n < 30) return `二十${digits[n - 20]}`;
+  return '三十';
+}
+
+function getLunarStr(now: Date): string {
+  try {
+    const parts = new Intl.DateTimeFormat('zh-CN-u-ca-chinese', {
+      month: 'long', day: 'numeric',
+    }).formatToParts(now);
+    const month = parts.find(p => p.type === 'month')?.value ?? '';
+    const dayNum = parseInt(parts.find(p => p.type === 'day')?.value ?? '0', 10);
+    return `${month}${toChineseDay(dayNum)}日`;
+  } catch {
+    return '';
+  }
+}
+
 function getFormattedTime(): string {
   const now = new Date();
   const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -21,7 +44,9 @@ function getFormattedTime(): string {
   const m = String(now.getMinutes()).padStart(2, '0');
   const s = String(now.getSeconds()).padStart(2, '0');
   const w = weekdays[now.getDay()];
-  return `${Y}-${M}-${D} ${h}:${m}:${s} （${w}）`;
+  const lunar = getLunarStr(now);
+  const lunarPart = lunar ? `（${lunar}）` : '';
+  return `${Y}-${M}-${D}${lunarPart} ${h}:${m}:${s} （${w}）`;
 }
 
 export const Topbar: React.FC<TopbarProps> = ({
