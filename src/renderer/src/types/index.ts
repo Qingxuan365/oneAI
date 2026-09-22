@@ -29,7 +29,8 @@ export interface AppSettings {
 export interface QuotaData {
   cliId: string;                 // 'kimi' | 'codex' | 'claude' | 'opencode' | 'grok'
   cliName: string;               // 'Kimi Code' | 'Codex' | 'Grok' ...
-  model?: string;                // 如 'gpt-5.5' | 'k3' | 'claude-3.7-sonnet'
+  model?: string;                // 如 'deepseek-v4-pro' | 'gpt-5.5'
+  effort?: string;               // 推理思考等级: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   planType?: string;             // 如 'Plus' | 'Pro'
   fiveHourPercent: number;       // 5小时配额剩余百分比（0-100）
   fiveHourResetsIn: string;      // 5小时配额重置倒计时（例如 "2h 45m"）

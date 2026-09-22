@@ -25,25 +25,28 @@
 - [x] Phase 12: 侧边栏各模型官方专属正版矢量徽标恢复与 Grok 正版官方徽标对齐。
 - [x] Phase 13: 彻底根除右侧终端视窗滚动文字残影与左侧边缘拖影（WebGL 加速 + Win11 ConPTY 构建号 26200 对齐）。
 - [x] Phase 14: 集成系统原生终端菜单并打包为 Windows 原生 `.exe` 应用。
-- [x] Phase 15: 彻底消除所有 CLI 模型硬编码，实现全量动态感知与实时监听：
-  - **Codex 动态模型解析**：自动解析 `~/.codex/config.toml` 中配置的 `model`（当前解析为 `gpt-6-astra`），自动降级匹配最新会话 `turn_context`，并由 `fs.watch` 实时监听。
-  - **Claude Code 动态模型解析**：自动解析 `~/.claude/settings.json`（`env.ANTHROPIC_MODEL`，如 `deepseek-flash`）及 `~/.claude.json` 最近使用记录与别名映射，由 `fs.watch` 实时监听。
-  - **Grok CLI 动态模型解析**：自动解析 `~/.grok/settings_cache.json`、`models_cache.json` 及 `config.toml`（当前解析为最新 `Grok 4.7`），由 `fs.watch` 实时监听。
-  - **Kimi Code 动态感知与展示名还原**：自动解析 `~/.kimi-code/config.toml`（如 `K2.7 Code Highspeed`），并在切换后实时秒级联动。
-  - **OpenCode 动态感知**：读取 `OPENCODE_MODEL` 环境变量与本地配置，支持灵活自适应。
-  - **重新构建与打包**：重新执行 `electron-builder` 构建，输出最新带全部修复的 `release/OneDesktop-Portable-1.0.0.exe`（74.4 MB）与 `release/OneDesktop-Setup-1.0.0.exe`（74.6 MB）。
+- [x] Phase 15: 彻底消除所有 CLI 模型硬编码，实现全量动态感知与实时监听。
+- [x] Phase 16: 修复 Claude Code 切换模型动态生效与全量支持模型推理思考等级（Effort Level）徽标展示：
+  - **修复 Claude Code 切换模型优先级 Bug**：将 `~/.claude.json` 最近活跃项目使用记录（`lastModelUsage`）与 `settings.json` 的 `model`（及 `ANTHROPIC_DEFAULT_${model}_MODEL` 别名映射）提升为最高优先级，彻底解决此前被固定环境变量 `ANTHROPIC_MODEL: deepseek-flash` 劫持覆盖的问题；当用户切换为 opus 时，自动解析呈现为当前真实使用的 `deepseek-v4-pro`。
+  - **全量支持模型推理思考等级（Effort Level）感知与展示**：
+    - 动态解析 Claude Code 的 `effortLevel`（如 `medium`、`high` 等）。
+    - 动态解析 Codex 的 `model_reasoning_effort`（如 `medium`、`high` 等）。
+    - 动态解析 Grok CLI 的 `reasoning_effort`（如 `high`、`xhigh` 等）。
+  - **顶栏单行微标高亮设计**：在顶栏模型徽章内增加紧凑精致的等级徽标，按等级提供专属微光色彩（`low`: 蓝光，`medium`: 翡翠绿，`high`: 琥珀金，`xhigh`/`max`: 紫光），实时感知终端变动。
+  - **重新构建与打包**：成功编译输出最新带完整 Effort 徽标支持的 Windows 可执行文件：`release/OneDesktop-Portable-1.0.0.exe`（74.4 MB）与 `release/OneDesktop-Setup-1.0.0.exe`（74.6 MB）。
 - [x] 全量 TypeScript 类型检查（`npx tsc --noEmit`）与 Vite 构建打包（`npm run build`）测试通过。
 
 ### 待办 / 后续增强
 - [ ] 后续多窗口分屏支持（Split Terminal View）。
 
 ## 3. 阻塞与风险
-- 暂无阻塞。各 CLI 模型动态解析与自动监听已上线，最新 `.exe` 安装包与便携版已重新打包发布。
+- 暂无阻塞。已完整修复模型切换联动与推理思考等级展示，已编译生成最新 Windows 可执行文件。
 
 ## 4. 最近验证
 - **2026-09-22**：
-  - 在用户本地真实环境提取 Codex（`gpt-6-astra`）、Claude（`deepseek-flash`）、Grok（`Grok 4.7`）及 Kimi（`K2.7 Code Highspeed`）验证通过，无任何硬编码残留。
-  - 执行 `npm run build` 和 `npx electron-builder --win` 成功打包生成最新版便携式与安装向导 `.exe`。
+  - 针对主人当前真实运行的 Claude Code 执行解析，精准提取出 `{ model: 'deepseek-v4-pro', effort: 'medium' }`，与终端提示完全一致。
+  - 执行 `npm run build` 和 `npx electron-builder --win` 成功打包生成最新版便携式与安装向导 `.exe`（生成时间：11:33）。
+
 
 
 

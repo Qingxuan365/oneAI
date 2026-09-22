@@ -8,6 +8,7 @@ export interface QuotaData {
   cliId: string;
   cliName: string;
   model?: string;
+  effort?: string;              // 推理思考等级: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   planType?: string;
   fiveHourPercent: number;      // 5h remaining pct (0-100)
   fiveHourResetsIn: string;     // e.g. "2h 45m"
@@ -52,6 +53,10 @@ export class QuotaService {
   private readonly CACHE_TTL_MS = 25000;
 
   constructor() {
+    const codexInfo = this.getCodexInfo();
+    const claudeInfo = this.getClaudeInfo();
+    const grokInfo = this.getGrokInfo();
+
     this.quotasCache = {
       kimi: {
         cliId: 'kimi',
@@ -68,7 +73,8 @@ export class QuotaService {
       codex: {
         cliId: 'codex',
         cliName: 'Codex',
-        model: this.getCodexCurrentModel(),
+        model: codexInfo.model,
+        effort: codexInfo.effort,
         planType: 'Plus',
         fiveHourPercent: 100,
         fiveHourResetsIn: '--',
@@ -80,7 +86,8 @@ export class QuotaService {
       claude: {
         cliId: 'claude',
         cliName: 'Claude Code',
-        model: this.getClaudeCurrentModel(),
+        model: claudeInfo.model,
+        effort: claudeInfo.effort,
         planType: 'Pro',
         fiveHourPercent: 100,
         fiveHourResetsIn: '--',
@@ -104,7 +111,8 @@ export class QuotaService {
       grok: {
         cliId: 'grok',
         cliName: 'Grok CLI',
-        model: this.getGrokCurrentModel(),
+        model: grokInfo.model,
+        effort: grokInfo.effort,
         planType: 'xAI Premium',
         fiveHourPercent: 100,
         fiveHourResetsIn: '--',
@@ -277,112 +285,163 @@ export class QuotaService {
     return 'K3';
   }
 
-  private getCodexCurrentModel(): string {
+  public getCodexInfo(): { model: string; effort?: string } {
+    let model = 'Auto';
+    let effort: string | undefined = undefined;
     const configPath = path.join(os.homedir(), '.codex', 'config.toml');
     if (fs.existsSync(configPath)) {
       try {
         const content = fs.readFileSync(configPath, 'utf8');
-        const m = content.match(/model\s*=\s*["']([^"']+)["']/);
-        if (m && m[1]) return m[1];
+        const mm = content.match(/model\s*=\s*["']([^"']+)["']/);
+        if (mm && mm[1]) model = mm[1];
+        const me = content.match(/model_reasoning_effort\s*=\s*["']([^"']+)["']/);
+        if (me && me[1]) effort = me[1];
       } catch (e) {
         console.warn('[QuotaService] Error reading Codex config:', e);
       }
     }
-    if (process.env.CODEX_MODEL) return process.env.CODEX_MODEL;
-    return 'Auto';
+    if (model === 'Auto' && process.env.CODEX_MODEL) {
+      model = process.env.CODEX_MODEL;
+    }
+    return { model, effort };
   }
 
-  private getClaudeCurrentModel(): string {
-    // 1. 优先读取 ~/.claude/settings.json
+  public getClaudeInfo(): { model: string; effort?: string } {
+    let model = '';
+    let effort: string | undefined = undefined;
+
+    // 1. 优先读取 ~/.claude/settings.json 中的 effortLevel
     const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+    let settings: any = null;
     if (fs.existsSync(settingsPath)) {
       try {
-        const s = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-        if (s.env && s.env.ANTHROPIC_MODEL) {
-          return s.env.ANTHROPIC_MODEL;
-        }
-        if (s.model) {
-          const m = String(s.model).toLowerCase();
-          if (m === 'sonnet') return 'Claude 3.7 Sonnet';
-          if (m === 'opus') return 'Claude 3 Opus';
-          if (m === 'haiku') return 'Claude 3.5 Haiku';
-          return s.model;
+        settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+        if (settings.effortLevel || settings.effort) {
+          effort = settings.effortLevel || settings.effort;
         }
       } catch (e) {
         console.warn('[QuotaService] Error reading Claude settings:', e);
       }
     }
 
-    // 2. 读取 ~/.claude.json 中的最近使用记录
+    // 2. 检查 ~/.claude.json 中的项目最近使用记录（最真实反映当前交互使用的模型）
     const claudeJsonPath = path.join(os.homedir(), '.claude.json');
     if (fs.existsSync(claudeJsonPath)) {
       try {
         const c = JSON.parse(fs.readFileSync(claudeJsonPath, 'utf8'));
-        for (const key of Object.keys(c)) {
-          if (c[key] && c[key].lastModelUsage) {
-            const used = Object.keys(c[key].lastModelUsage);
-            if (used.length > 0) return used[used.length - 1];
+        const projs = Object.entries(c)
+          .filter(([_, val]: [string, any]) => val && typeof val === 'object' && val.lastModelUsage)
+          .sort((a: any, b: any) => (b[1].lastStartTime || 0) - (a[1].lastStartTime || 0));
+        if (projs.length > 0) {
+          const keys = Object.keys((projs[0][1] as any).lastModelUsage);
+          if (keys.length > 0) model = keys[keys.length - 1];
+        }
+      } catch {}
+    }
+
+    // 3. 如果 ~/.claude.json 没命中，看 settings.json 的 model 与别名映射
+    if (!model && settings) {
+      if (settings.model) {
+        const m = String(settings.model).toLowerCase();
+        const envKey = `ANTHROPIC_DEFAULT_${m.toUpperCase()}_MODEL`;
+        if (settings.env && settings.env[envKey]) {
+          model = settings.env[envKey];
+        } else if (m === 'sonnet') {
+          model = 'Claude 3.7 Sonnet';
+        } else if (m === 'opus') {
+          model = 'Claude 3 Opus';
+        } else if (m === 'haiku') {
+          model = 'Claude 3.5 Haiku';
+        } else {
+          model = settings.model;
+        }
+      } else if (settings.env && settings.env.ANTHROPIC_MODEL) {
+        model = settings.env.ANTHROPIC_MODEL;
+      }
+    }
+
+    // 4. token-tracker 降级
+    if (!model) {
+      const statusFile = path.join(os.homedir(), '.config', 'token-tracker', 'tt-status.json');
+      if (fs.existsSync(statusFile)) {
+        try {
+          const data = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
+          if (data.model?.display_name || data.model?.id) {
+            model = data.model.display_name || data.model.id;
           }
-        }
-      } catch {}
+        } catch {}
+      }
     }
 
-    // 3. 读取 token-tracker 状态
-    const statusFile = path.join(os.homedir(), '.config', 'token-tracker', 'tt-status.json');
-    if (fs.existsSync(statusFile)) {
-      try {
-        const data = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
-        if (data.model?.display_name || data.model?.id) {
-          return data.model.display_name || data.model.id;
-        }
-      } catch {}
-    }
+    if (!model && process.env.ANTHROPIC_MODEL) model = process.env.ANTHROPIC_MODEL;
+    if (!model && process.env.CLAUDE_MODEL) model = process.env.CLAUDE_MODEL;
 
-    if (process.env.ANTHROPIC_MODEL) return process.env.ANTHROPIC_MODEL;
-    if (process.env.CLAUDE_MODEL) return process.env.CLAUDE_MODEL;
-
-    return 'Claude 3.7 Sonnet';
+    return {
+      model: model || 'Claude 3.7 Sonnet',
+      effort,
+    };
   }
 
-  private getGrokCurrentModel(): string {
+  public getGrokInfo(): { model: string; effort?: string } {
+    let model = 'Grok 4.7';
+    let effort: string | undefined = undefined;
+
     // 1. 读取 ~/.grok/settings_cache.json
     const grokSettings = path.join(os.homedir(), '.grok', 'settings_cache.json');
+    let defaultModelId = 'grok-4.7';
     if (fs.existsSync(grokSettings)) {
       try {
         const raw = JSON.parse(fs.readFileSync(grokSettings, 'utf8'));
         const payload = typeof raw.payload === 'string' ? JSON.parse(raw.payload) : raw.payload;
-        if (payload && payload.settings && payload.settings.default_model) {
-          const modelId = payload.settings.default_model;
-          const modelsCache = path.join(os.homedir(), '.grok', 'models_cache.json');
-          if (fs.existsSync(modelsCache)) {
-            try {
-              const mc = JSON.parse(fs.readFileSync(modelsCache, 'utf8'));
-              if (mc.models && mc.models[modelId]?.info?.name) {
-                return mc.models[modelId].info.name;
-              }
-            } catch {}
-          }
-          return modelId;
+        if (payload?.settings?.default_model) {
+          defaultModelId = payload.settings.default_model;
         }
       } catch (e) {
         console.warn('[QuotaService] Error reading Grok settings_cache:', e);
       }
     }
 
-    // 2. 读取 ~/.grok/config.toml
+    // 2. 查看 models_cache.json 获取友好名称和 reasoning_effort
+    const modelsCache = path.join(os.homedir(), '.grok', 'models_cache.json');
+    if (fs.existsSync(modelsCache)) {
+      try {
+        const mc = JSON.parse(fs.readFileSync(modelsCache, 'utf8'));
+        const targetModel = mc.models?.[defaultModelId] || Object.values(mc.models || {})[0];
+        if (targetModel?.info) {
+          if (targetModel.info.name) model = targetModel.info.name;
+          if (targetModel.info.reasoning_effort) effort = targetModel.info.reasoning_effort;
+        }
+      } catch {}
+    } else {
+      model = defaultModelId;
+    }
+
+    // 3. ~/.grok/config.toml
     const grokConfig = path.join(os.homedir(), '.grok', 'config.toml');
     if (fs.existsSync(grokConfig)) {
       try {
         const content = fs.readFileSync(grokConfig, 'utf8');
         const m = content.match(/model\s*=\s*["']([^"']+)["']/);
-        if (m && m[1]) return m[1];
+        if (m && m[1]) model = m[1];
       } catch {}
     }
 
-    if (process.env.GROK_MODEL) return process.env.GROK_MODEL;
-    if (process.env.XAI_MODEL) return process.env.XAI_MODEL;
+    if (process.env.GROK_MODEL) model = process.env.GROK_MODEL;
+    if (process.env.XAI_MODEL) model = process.env.XAI_MODEL;
 
-    return 'Grok 4.7';
+    return { model, effort };
+  }
+
+  private getCodexCurrentModel(): string {
+    return this.getCodexInfo().model;
+  }
+
+  private getClaudeCurrentModel(): string {
+    return this.getClaudeInfo().model;
+  }
+
+  private getGrokCurrentModel(): string {
+    return this.getGrokInfo().model;
   }
 
   private getOpenCodeCurrentModel(): string {
@@ -509,13 +568,16 @@ export class QuotaService {
   }
 
   private async fetchCodexQuota(): Promise<QuotaData> {
-    const currentModel = this.getCodexCurrentModel();
+    const codexInfo = this.getCodexInfo();
+    const currentModel = codexInfo.model;
+    const currentEffort = codexInfo.effort;
     const codexSessionsDir = path.join(os.homedir(), '.codex', 'sessions');
     if (!fs.existsSync(codexSessionsDir)) {
       return {
         cliId: 'codex',
         cliName: 'Codex',
         model: currentModel,
+        effort: currentEffort,
         planType: 'Plus',
         fiveHourPercent: 100,
         fiveHourResetsIn: '--',
@@ -618,6 +680,7 @@ export class QuotaService {
           cliId: 'codex',
           cliName: 'Codex',
           model,
+          effort: currentEffort,
           planType,
           fiveHourPercent,
           fiveHourResetsIn,
@@ -632,6 +695,7 @@ export class QuotaService {
         cliId: 'codex',
         cliName: 'Codex',
         model,
+        effort: currentEffort,
         planType,
         fiveHourPercent: 100,
         fiveHourResetsIn: '--',
@@ -647,13 +711,16 @@ export class QuotaService {
   }
 
   private async fetchClaudeQuota(): Promise<QuotaData> {
-    const currentModel = this.getClaudeCurrentModel();
+    const claudeInfo = this.getClaudeInfo();
+    const currentModel = claudeInfo.model;
+    const currentEffort = claudeInfo.effort;
     const statusFile = path.join(os.homedir(), '.config', 'token-tracker', 'tt-status.json');
     if (!fs.existsSync(statusFile)) {
       return {
         cliId: 'claude',
         cliName: 'Claude Code',
         model: currentModel,
+        effort: currentEffort,
         planType: 'Pro',
         fiveHourPercent: 100,
         fiveHourResetsIn: '--',
@@ -666,7 +733,7 @@ export class QuotaService {
 
     try {
       const data = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
-      const model = data.model?.display_name || data.model?.id || currentModel;
+      const model = currentModel || data.model?.display_name || data.model?.id;
       const rl = data.rate_limits || {};
       const five = rl.five_hour || {};
       const seven = rl.seven_day || {};
@@ -699,6 +766,7 @@ export class QuotaService {
         cliId: 'claude',
         cliName: 'Claude Code',
         model,
+        effort: currentEffort,
         planType: 'Pro',
         fiveHourPercent,
         fiveHourResetsIn,
@@ -731,6 +799,7 @@ export class QuotaService {
 
   private async fetchGrokQuota(): Promise<QuotaData> {
     try {
+      const grokInfo = this.getGrokInfo();
       const hasApiKey = !!(process.env.XAI_API_KEY || process.env.GROK_API_KEY);
       const xaiDir = path.join(os.homedir(), '.xai');
       const grokDir = path.join(os.homedir(), '.grok');
@@ -739,7 +808,8 @@ export class QuotaService {
       return {
         cliId: 'grok',
         cliName: 'Grok CLI',
-        model: this.getGrokCurrentModel(),
+        model: grokInfo.model,
+        effort: grokInfo.effort,
         planType: 'xAI Premium',
         fiveHourPercent: 100,
         fiveHourResetsIn: '--',

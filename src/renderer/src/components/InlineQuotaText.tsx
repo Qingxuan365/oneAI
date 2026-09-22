@@ -68,13 +68,37 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = ({ quota, onRefre
     return 'text-rose-400';
   };
 
+  // 根据推理思考等级（low | medium | high | xhigh | max）呈现专属微光色彩
+  const getEffortBadge = (effort: string) => {
+    const eff = effort.toLowerCase();
+    let colorClass = 'text-slate-300 bg-slate-500/10 border-slate-600/40';
+    if (eff === 'low') {
+      colorClass = 'text-sky-400 bg-sky-500/10 border-sky-500/30';
+    } else if (eff === 'medium') {
+      colorClass = 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30';
+    } else if (eff === 'high') {
+      colorClass = 'text-amber-400 bg-amber-500/10 border-amber-500/30';
+    } else if (eff === 'xhigh' || eff === 'max') {
+      colorClass = 'text-purple-400 bg-purple-500/10 border-purple-500/30';
+    }
+    return (
+      <span
+        className={`font-mono text-[10px] px-1.5 py-0.2 rounded border font-semibold uppercase tracking-wider ${colorClass}`}
+        title={`推理思考等级: ${effort}`}
+      >
+        {effort}
+      </span>
+    );
+  };
+
   return (
     <div className="flex items-center space-x-2 text-xs font-mono select-none text-slate-300">
-      {/* CLI 模型标识 */}
+      {/* CLI 模型与等级徽标 */}
       {quota.model && (
-        <span className="text-slate-300 font-semibold bg-[#1a1f2c] px-1.5 py-0.5 rounded border border-[#2a3346] text-[11px]">
-          {quota.model}
-        </span>
+        <div className="flex items-center space-x-1.5 bg-[#1a1f2c] px-2 py-0.5 rounded border border-[#2a3346] text-[11px]">
+          <span className="text-slate-200 font-semibold">{quota.model}</span>
+          {quota.effort && getEffortBadge(quota.effort)}
+        </div>
       )}
 
       {/* 5小时配额 */}
