@@ -155,7 +155,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="p-2.5 border-t border-[#232936] text-[11px] text-slate-500 flex items-center space-x-2 bg-[#10131b]">
         <FolderGit2 size={13} className="text-slate-400 shrink-0" />
         <span className="truncate font-mono" title="当前工作区目录">
-          {process.cwd?.() || 'D:\\GitHub\\OneDesktop'}
+          D:\GitHub\OneDesktop
         </span>
       </div>
     </aside>

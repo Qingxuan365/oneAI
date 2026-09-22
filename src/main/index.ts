@@ -21,7 +21,7 @@ function createWindow() {
     backgroundColor: '#0e1117',
     title: 'OneDesktop - 多 CLI AI 编程工作台',
     webPreferences: {
-      preload: path.join(__dirname, '../preload/index.js'),
+      preload: path.join(__dirname, '../preload/index.cjs'),
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
@@ -34,6 +34,14 @@ function createWindow() {
   ptyManager.setWindow(mainWindow);
   quotaService.setWindow(mainWindow);
   quotaService.startPolling(30000); // 每 30 秒轮询一次大模型配额
+
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    console.log(`[Renderer Log ${level}]: ${message} (${sourceId}:${line})`);
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error(`[Renderer Failed Load] code=${errorCode}, desc=${errorDescription}, url=${validatedURL}`);
+  });
 
   // 区分开发与生产环境加载路径
   if (process.env.VITE_DEV_SERVER_URL) {

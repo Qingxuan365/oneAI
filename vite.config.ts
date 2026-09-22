@@ -5,6 +5,7 @@ import renderer from 'vite-plugin-electron-renderer'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
+  base: './',
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src/renderer/src'),
@@ -32,6 +33,18 @@ export default defineConfig({
         vite: {
           build: {
             outDir: 'dist-electron/preload',
+            lib: {
+              entry: 'src/preload/index.ts',
+              formats: ['cjs'],
+              fileName: () => 'index.cjs',
+            },
+            rollupOptions: {
+              external: ['electron'],
+              output: {
+                format: 'cjs',
+                exports: 'auto',
+              },
+            },
           },
         },
       },
