@@ -10,6 +10,7 @@ interface CreateSessionOptions {
 
 export class PtyManager {
   private sessions: Map<string, pty.IPty> = new Map();
+  private dataBuffers: Map<string, string> = new Map();
   private mainWindow: BrowserWindow | null = null;
 
   constructor() {}
@@ -18,32 +19,72 @@ export class PtyManager {
     this.mainWindow = win;
   }
 
-  public createSession(options: CreateSessionOptions): { success: boolean; error?: string } {
+  public getSessionBuffer(id: string): string {
+    return this.dataBuffers.get(id) || '';
+  }
+
+  public createSession(options: CreateSessionOptions): { success: boolean; buffer?: string; error?: string } {
     const { id, command, cwd } = options;
 
-    // 如果该 session 已经存在，则直接返回
+    // 如果该 session 已经存在，则返回当前缓冲区
     if (this.sessions.has(id)) {
-      return { success: true };
+      return { success: true, buffer: this.dataBuffers.get(id) || '' };
     }
 
     try {
       const isWindows = os.platform() === 'win32';
-      // 默认 shell
       const defaultShell = isWindows ? 'powershell.exe' : (process.env.SHELL || '/bin/bash');
-      const shellToUse = command || defaultShell;
+      const rawCommand = (command || defaultShell).trim();
       const workDir = cwd || process.env.USERPROFILE || process.cwd();
 
-      const ptyProcess = pty.spawn(shellToUse, [], {
+      // 正确拆分可执行文件与命令行参数
+      let file = defaultShell;
+      let args: string[] = [];
+
+      if (isWindows) {
+        if (rawCommand.toLowerCase() === 'kimi' || rawCommand.toLowerCase().includes('kimi')) {
+          file = 'powershell.exe';
+          args = ['-NoExit', '-Command', 'kimi'];
+        } else if (rawCommand.toLowerCase() === 'codex' || rawCommand.toLowerCase().includes('codex')) {
+          file = 'powershell.exe';
+          args = ['-NoExit', '-Command', 'codex'];
+        } else if (rawCommand.toLowerCase() === 'opencode' || rawCommand.toLowerCase().includes('opencode')) {
+          file = 'powershell.exe';
+          args = ['-NoExit', '-Command', 'opencode'];
+        } else if (rawCommand.includes(' ')) {
+          const parts = rawCommand.split(/\s+/);
+          file = parts[0];
+          args = parts.slice(1);
+        } else {
+          file = rawCommand;
+        }
+      } else {
+        file = rawCommand;
+      }
+
+      console.log(`[PTY] Spawning session ${id}: file=${file}, args=${JSON.stringify(args)}, cwd=${workDir}`);
+
+      const ptyProcess = pty.spawn(file, args, {
         name: 'xterm-256color',
-        cols: 80,
-        rows: 24,
+        cols: 100,
+        rows: 30,
         cwd: workDir,
         env: process.env as Record<string, string>,
-        useConpty: isWindows, // Windows 下启用 ConPTY 原生支持
+        useConpty: isWindows,
       });
 
-      // 监听 PTY 输出数据并发送到渲染进程
+      this.dataBuffers.set(id, '');
+
+      // 监听 PTY 输出数据并缓存与实时发送
       ptyProcess.onData((data: string) => {
+        const currentBuf = this.dataBuffers.get(id) || '';
+        // 保留最近 50KB 缓冲
+        if (currentBuf.length > 50000) {
+          this.dataBuffers.set(id, currentBuf.slice(-40000) + data);
+        } else {
+          this.dataBuffers.set(id, currentBuf + data);
+        }
+
         if (this.mainWindow && !this.mainWindow.isDestroyed()) {
           this.mainWindow.webContents.send('terminal:data', { id, data });
         }
@@ -51,6 +92,7 @@ export class PtyManager {
 
       // 监听进程退出
       ptyProcess.onExit(({ exitCode }) => {
+        console.log(`[PTY] Session ${id} exited with code ${exitCode}`);
         if (this.mainWindow && !this.mainWindow.isDestroyed()) {
           this.mainWindow.webContents.send('terminal:exit', { id, exitCode });
         }
@@ -58,7 +100,7 @@ export class PtyManager {
       });
 
       this.sessions.set(id, ptyProcess);
-      return { success: true };
+      return { success: true, buffer: '' };
     } catch (err: any) {
       console.error(`[PTY] Failed to spawn session ${id}:`, err);
       return { success: false, error: err.message };

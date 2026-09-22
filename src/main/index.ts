@@ -63,6 +63,10 @@ function setupIPC() {
     return ptyManager.createSession(options);
   });
 
+  ipcMain.handle('terminal:get-buffer', async (_event, { id }) => {
+    return ptyManager.getSessionBuffer(id);
+  });
+
   ipcMain.handle('terminal:write', async (_event, { id, data }) => {
     ptyManager.writeSession(id, data);
   });

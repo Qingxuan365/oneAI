@@ -28,7 +28,8 @@ export interface QuotaData {
 }
 
 export interface ElectronTerminalAPI {
-  createSession: (options: { id: string; command?: string; cwd?: string }) => Promise<{ success: boolean; error?: string }>;
+  createSession: (options: { id: string; command?: string; cwd?: string }) => Promise<{ success: boolean; buffer?: string; error?: string }>;
+  getSessionBuffer: (id: string) => Promise<string>;
   writeSession: (id: string, data: string) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => Promise<void>;
   killSession: (id: string) => Promise<void>;

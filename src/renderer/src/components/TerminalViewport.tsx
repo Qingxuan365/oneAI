@@ -106,6 +106,18 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({ tasks, activ
           window.electronAPI?.resizeSession(task.id, cols, rows);
         });
 
+        // 立即拉取并回放主进程中的已有缓冲区
+        window.electronAPI?.getSessionBuffer(task.id).then((buf) => {
+          if (buf) {
+            term.write(buf);
+          }
+        });
+
+        // 点击视窗任意位置自动聚焦
+        termContainer.addEventListener('click', () => {
+          term.focus();
+        });
+
         instancesRef.current.set(task.id, {
           term,
           fitAddon,
@@ -128,10 +140,17 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({ tasks, activ
             instance.term.focus();
             const { cols, rows } = instance.term;
             window.electronAPI?.resizeSession(id, cols, rows);
+
+            // 检查如果界面为空，补齐拉取一次历史 buffer
+            window.electronAPI?.getSessionBuffer(id).then((buf) => {
+              if (buf && instance.term.buffer.active.length <= 1) {
+                instance.term.write(buf);
+              }
+            });
           } catch {
             // ignore
           }
-        }, 30);
+        }, 50);
       }
     });
   }, [activeTaskId]);

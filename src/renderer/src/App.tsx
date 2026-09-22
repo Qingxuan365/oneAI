@@ -5,44 +5,19 @@ import { TerminalViewport } from './components/TerminalViewport';
 import { NewTaskModal } from './components/NewTaskModal';
 import { CliGroup, TaskSession, QuotaData } from './types';
 
-// 初始化默认 CLI 分组（带专属官方品牌 Logo 与预设并发子任务）
+// 初始化默认 CLI 分组（绑定各 AI CLI 的真实执行命令）
 const INITIAL_GROUPS: CliGroup[] = [
-  {
-    id: 'codex',
-    name: 'Codex',
-    icon: 'codex',
-    defaultCommand: 'powershell.exe -NoLogo',
-    isExpanded: true,
-    tasks: [
-      {
-        id: 'codex-task-1',
-        groupId: 'codex',
-        title: 'Task 1: Auth Refactor',
-        status: 'running',
-        cwd: 'd:\\GitHub\\OneDesktop',
-        createdAt: Date.now() - 1000 * 60 * 30,
-      },
-      {
-        id: 'codex-task-2',
-        groupId: 'codex',
-        title: 'Task 2: Test Gen',
-        status: 'waiting',
-        cwd: 'd:\\GitHub\\OneDesktop',
-        createdAt: Date.now() - 1000 * 60 * 10,
-      },
-    ],
-  },
   {
     id: 'kimi',
     name: 'Kimi Code',
     icon: 'kimi',
-    defaultCommand: 'powershell.exe -NoLogo',
+    defaultCommand: 'kimi',
     isExpanded: true,
     tasks: [
       {
         id: 'kimi-task-1',
         groupId: 'kimi',
-        title: 'Task 1: Dashboard UI',
+        title: 'Task 1: Kimi CLI',
         status: 'running',
         cwd: 'd:\\GitHub\\OneDesktop',
         createdAt: Date.now() - 1000 * 60 * 5,
@@ -50,16 +25,33 @@ const INITIAL_GROUPS: CliGroup[] = [
     ],
   },
   {
+    id: 'codex',
+    name: 'Codex',
+    icon: 'codex',
+    defaultCommand: 'codex',
+    isExpanded: true,
+    tasks: [
+      {
+        id: 'codex-task-1',
+        groupId: 'codex',
+        title: 'Task 1: Codex CLI',
+        status: 'running',
+        cwd: 'd:\\GitHub\\OneDesktop',
+        createdAt: Date.now() - 1000 * 60 * 30,
+      },
+    ],
+  },
+  {
     id: 'opencode',
     name: 'OpenCode',
     icon: 'opencode',
-    defaultCommand: 'powershell.exe -NoLogo',
+    defaultCommand: 'opencode',
     isExpanded: false,
     tasks: [
       {
         id: 'opencode-task-1',
         groupId: 'opencode',
-        title: 'Task 1: Core API Engine',
+        title: 'Task 1: OpenCode CLI',
         status: 'running',
         cwd: 'd:\\GitHub\\OneDesktop',
         createdAt: Date.now() - 1000 * 60 * 1,
@@ -70,7 +62,7 @@ const INITIAL_GROUPS: CliGroup[] = [
 
 export const App: React.FC = () => {
   const [groups, setGroups] = useState<CliGroup[]>(INITIAL_GROUPS);
-  const [activeTaskId, setActiveTaskId] = useState<string | null>('codex-task-1');
+  const [activeTaskId, setActiveTaskId] = useState<string | null>('kimi-task-1');
   const [quota, setQuota] = useState<QuotaData | null>(null);
 
   // 弹窗状态
@@ -113,13 +105,16 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // 为初始化任务在 Electron 主进程创建 PTY
+  // 为初始化任务在 Electron 主进程创建真实 CLI 终端 PTY
   useEffect(() => {
     if (window.electronAPI) {
-      allTasks.forEach((task) => {
-        window.electronAPI.createSession({
-          id: task.id,
-          cwd: task.cwd,
+      groups.forEach((group) => {
+        group.tasks.forEach((task) => {
+          window.electronAPI.createSession({
+            id: task.id,
+            command: group.defaultCommand,
+            cwd: task.cwd,
+          });
         });
       });
     }

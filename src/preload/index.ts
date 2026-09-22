@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createSession: (options: CreateSessionOptions) =>
     ipcRenderer.invoke('terminal:create', options),
 
+  getSessionBuffer: (id: string) =>
+    ipcRenderer.invoke('terminal:get-buffer', { id }),
+
   writeSession: (id: string, data: string) =>
     ipcRenderer.invoke('terminal:write', { id, data }),
 
