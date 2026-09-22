@@ -2,6 +2,7 @@ import React from 'react';
 import { ChevronDown, ChevronRight, Plus, X, FolderGit2, Settings } from 'lucide-react';
 import { CliGroup, TaskSession } from '../types';
 import { BrandIcon } from './BrandIcon';
+import { AppLogo } from './AppLogo';
 
 interface SidebarProps {
   groups: CliGroup[];
@@ -29,9 +30,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* 侧边栏顶部：应用品牌与标题 */}
       <div className="h-10 px-3.5 border-b border-[#232936] flex items-center justify-between">
         <div className="flex items-center space-x-2">
-          <div className="w-5 h-5 rounded bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 font-bold text-xs">
-            1
-          </div>
+          <AppLogo size={20} />
           <span className="font-semibold text-xs text-slate-200 tracking-wider uppercase">
             OneDesktop
           </span>
