@@ -28,7 +28,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     backgroundColor: '#0e1117',
-    title: 'OneDesktop - 多 CLI AI 编程工作台',
+    title: 'OneAI - 多 CLI AI 编程工作台',
     icon: appIcon,
     webPreferences: {
       preload: preloadPath,

@@ -1,8 +1,8 @@
 {
-  "name": "onedesktop",
+  "name": "oneai",
   "version": "1.0.0",
   "description": "Desktop workbench for managing multiple local AI coding CLIs with live quotas",
-  "author": "OneDesktop Team",
+  "author": "OneAI Team",
   "main": "dist-electron/main/index.js",
   "type": "module",
   "scripts": {

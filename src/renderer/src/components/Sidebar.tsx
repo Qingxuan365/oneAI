@@ -32,7 +32,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex items-center space-x-2">
           <AppLogo size={20} />
           <span className="font-semibold text-xs text-slate-200 tracking-wider uppercase">
-            OneDesktop
+            OneAI
           </span>
         </div>
         <button
