@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ptyManager } from './pty-manager';
 import { quotaService } from './quota-service';
@@ -13,6 +14,11 @@ const __dirname = path.dirname(__filename);
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow() {
+  const preloadCandidate = path.join(__dirname, '../preload/index.cjs');
+  const preloadPath = fs.existsSync(preloadCandidate)
+    ? preloadCandidate
+    : path.resolve(__dirname, '../../src/preload/index.cjs');
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -21,7 +27,7 @@ function createWindow() {
     backgroundColor: '#0e1117',
     title: 'OneDesktop - 多 CLI AI 编程工作台',
     webPreferences: {
-      preload: path.join(__dirname, '../preload/index.cjs'),
+      preload: preloadPath,
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
