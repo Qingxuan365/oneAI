@@ -42,21 +42,31 @@ export class PtyManager {
       let args: string[] = [];
 
       if (isWindows) {
-        if (rawCommand.toLowerCase() === 'kimi' || rawCommand.toLowerCase().includes('kimi')) {
+        if (rawCommand.toLowerCase() === 'kimi' || rawCommand.toLowerCase() === 'kimi code') {
           file = 'powershell.exe';
-          args = ['-NoExit', '-Command', 'kimi'];
-        } else if (rawCommand.toLowerCase() === 'codex' || rawCommand.toLowerCase().includes('codex')) {
+          args = ['-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', 'kimi'];
+        } else if (rawCommand.toLowerCase() === 'codex') {
           file = 'powershell.exe';
-          args = ['-NoExit', '-Command', 'codex'];
-        } else if (rawCommand.toLowerCase() === 'opencode' || rawCommand.toLowerCase().includes('opencode')) {
+          args = ['-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', 'codex'];
+        } else if (rawCommand.toLowerCase() === 'claude') {
           file = 'powershell.exe';
-          args = ['-NoExit', '-Command', 'opencode'];
+          args = ['-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', 'claude'];
+        } else if (rawCommand.toLowerCase() === 'opencode') {
+          file = 'powershell.exe';
+          args = [
+            '-NoExit',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-Command',
+            'if (Get-Command opencode -ErrorAction SilentlyContinue) { opencode } else { Write-Host "`n[OneDesktop 提示]: 本地尚未安装或配置 opencode 环境变量。当前已为您打开交互终端，可随时输入命令。" -ForegroundColor Yellow }',
+          ];
         } else if (rawCommand.includes(' ')) {
           const parts = rawCommand.split(/\s+/);
           file = parts[0];
           args = parts.slice(1);
         } else {
-          file = rawCommand;
+          file = 'powershell.exe';
+          args = ['-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', rawCommand];
         }
       } else {
         file = rawCommand;

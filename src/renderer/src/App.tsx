@@ -42,6 +42,23 @@ const INITIAL_GROUPS: CliGroup[] = [
     ],
   },
   {
+    id: 'claude',
+    name: 'Claude Code',
+    icon: 'claude',
+    defaultCommand: 'claude',
+    isExpanded: false,
+    tasks: [
+      {
+        id: 'claude-task-1',
+        groupId: 'claude',
+        title: 'Task 1: Claude CLI',
+        status: 'running',
+        cwd: 'd:\\GitHub\\OneDesktop',
+        createdAt: Date.now() - 1000 * 60 * 15,
+      },
+    ],
+  },
+  {
     id: 'opencode',
     name: 'OpenCode',
     icon: 'opencode',
