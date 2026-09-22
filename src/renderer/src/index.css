@@ -30,10 +30,10 @@ html, body, #root {
   background: #333d52;
 }
 
-/* xterm.js 容器样式适配 */
+/* xterm.js 容器样式适配：严禁在 .xterm 上加 padding，避免与字符矩阵发生错位与滚动拖影 */
 .xterm {
   height: 100%;
-  padding: 4px;
+  width: 100%;
 }
 
 .xterm .xterm-viewport {

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { TaskSession } from '../types';
 
@@ -16,6 +17,7 @@ interface TerminalViewportProps {
 interface TerminalInstance {
   term: Terminal;
   fitAddon: FitAddon;
+  webglAddon?: WebglAddon;
   container: HTMLDivElement;
   pendingData: string;
   flushTimer: NodeJS.Timeout | null;
@@ -87,6 +89,7 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
       if (!currentTaskIds.has(id)) {
         try {
           if (instance.flushTimer) clearTimeout(instance.flushTimer);
+          instance.webglAddon?.dispose();
           instance.term.dispose();
           instance.container.remove();
         } catch {
@@ -128,16 +131,18 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
             brightCyan: '#56d4dd',
             brightWhite: '#f0f6fc',
           },
-          fontFamily: 'Consolas, "Fira Code", monospace, "Segoe UI Emoji"',
+          fontFamily: 'Consolas, "Cascadia Code", "Fira Code", monospace',
           fontSize,
           lineHeight,
           cursorBlink,
           cursorStyle,
           cursorInactiveStyle: 'none',
-          convertEol: true,
+          convertEol: false, // 现代 Windows ConPTY 已自带规范 CRLF，禁止强制 convertEol 以免缩进文本被多余 \r 错打在第 1 列
           allowTransparency: false,
+          scrollback: 5000,
           windowsPty: {
             backend: 'conpty',
+            buildNumber: 26200, // 声明真实 Win11 构建号，防止 xterm.js 误判旧系统而禁用 Reflow 及导致行折叠首字拖影
           },
         });
 
@@ -145,6 +150,18 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
         term.loadAddon(fitAddon);
 
         term.open(termContainer);
+
+        // 挂载 GPU 硬件加速的 WebglAddon，由 GPU 显存缓冲接管整屏帧刷新，彻底根除 DOM 渲染器滚动时的文字残影与拖影
+        let webglAddon: WebglAddon | undefined;
+        try {
+          webglAddon = new WebglAddon();
+          webglAddon.onContextLoss(() => {
+            webglAddon?.dispose();
+          });
+          term.loadAddon(webglAddon);
+        } catch (e) {
+          console.warn('[OneDesktop] WebglAddon failed to load, fallback to DOM renderer:', e);
+        }
 
         fitAddon.fit();
 
@@ -173,6 +190,7 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
         const instance: TerminalInstance = {
           term,
           fitAddon,
+          webglAddon,
           container: termContainer,
           pendingData: '',
           flushTimer: null,
@@ -205,6 +223,7 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
           try {
             instance.fitAddon.fit();
             instance.term.focus();
+            instance.term.refresh(0, instance.term.rows - 1);
             const { cols, rows } = instance.term;
             window.electronAPI?.resizeSession(id, cols, rows);
 
@@ -300,7 +319,7 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
           </p>
         </div>
       ) : (
-        <div ref={containerRef} className="w-full h-full p-1.5 overflow-hidden" />
+        <div ref={containerRef} className="w-full h-full overflow-hidden" />
       )}
     </main>
   );

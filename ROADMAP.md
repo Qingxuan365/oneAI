@@ -1,7 +1,7 @@
 # OneDesktop 开发路线图与进度看板
 
 ## 1. 当前阶段
-- **阶段**：Phase 12 - 侧边栏各模型官方正版专属矢量 Logo 完整对齐完成
+- **阶段**：Phase 13 - 彻底根除右侧终端视窗滚动文字残影与拖影完成
 - **状态**：就绪可用（Ready & Verified）
 
 ## 2. 进度看板
@@ -22,24 +22,27 @@
 - [x] Phase 9: 全面升级各大模型官方品牌专属矢量徽标。
 - [x] Phase 10: 生成专属 Terminal 风格应用图标（应用于应用 Favicon、窗口标题栏及 AppLogo）。
 - [x] Phase 11: 深度集成 xAI Grok CLI 工作台支持。
-- [x] Phase 12: 侧边栏各模型官方专属正版矢量徽标恢复与 Grok 正版官方徽标对齐：
-  - **Moonshot Kimi Code**：官方极光蓝电光胶囊（`#1783FF`）与经典几何 K 字徽标。
-  - **OpenAI Codex**：官方六瓣连环螺旋徽标（官方品牌绿 `#10A37F`）。
-  - **Anthropic Claude Code**：官方原版暖赤陶多角星芒徽标（`#D97757`）。
-  - **OpenCode**：`opencode.ai` 官方像素方块 Terminal 徽标。
-  - **xAI Grok**：LobeHub 官方源提取的最新正版 Grok 矢量几何徽标。
+- [x] Phase 12: 侧边栏各模型官方专属正版矢量徽标恢复与 Grok 正版官方徽标对齐。
+- [x] Phase 13: 彻底根除右侧终端视窗滚动文字残影与左侧边缘拖影：
+  - **启用 `@xterm/addon-webgl`**：由 GPU 显存缓冲接管整屏帧绘制，杜绝 DOM 渲染器在快速滚动时的重绘撕裂与宽字符滞留。
+  - **声明真实 Windows 11 ConPTY 构建号（26200）**：解除 xterm.js 旧版 Win10 降级补丁，启用现代原生文本重排（Reflow），修复行折叠误判。
+  - **移除破坏字符矩阵的 CSS padding**：彻底清理 `.xterm` 与容器上的内边距，实现 FitAddon 矩阵与视口像素 1:1 绝对对齐。
+  - **关闭 `convertEol: true`**：防止现代规范 ConPTY 数据流在换行被强制插入额外 `\r` 导致缩进文字错位打印在第 1 列。
+  - **切换视口主动刷新**：切换会话时执行 `instance.term.refresh(0, rows - 1)` 彻底重置屏幕帧。
 - [x] 全量 TypeScript 类型检查（`npx tsc --noEmit`）与 Vite 构建打包（`npm run build`）测试通过。
 
 ### 待办 / 后续增强
 - [ ] 打包为 Windows 便携版单文件可执行程序（`.exe`）。
 
 ## 3. 阻塞与风险
-- 暂无阻塞。应用主标与各大模型专属官方矢量 Logo 职责明确，辨识度拉满，全站构建正常。
+- 暂无阻塞。WebGL GPU 加速渲染丝滑流畅，滚动无残影，类型校验与构建全部通过。
 
 ## 4. 最近验证
 - **2026-09-22**：
-  - 更新 `BrandIcon.tsx`，将红框所示的所有大模型图标完整恢复并对齐为各自官方正版矢量徽标（Kimi、Codex、Claude、OpenCode、Grok）。
+  - 完成 WebglAddon 挂载与 Windows 11 ConPTY 构建号（26200）校正。
+  - 修复 CSS padding 像素错位并调整 `convertEol`。
   - 执行 `npx tsc --noEmit` 与 `npm run build` 均 0 报错通过。
+
 
 
 
