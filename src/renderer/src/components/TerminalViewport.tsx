@@ -187,6 +187,29 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
           term.focus();
         });
 
+        // 右键粘贴：拦截右键菜单，从剪贴板读取文本写入 PTY
+        termContainer.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          navigator.clipboard.readText().then((text) => {
+            if (text) {
+              window.electronAPI?.writeSession(task.id, text);
+            }
+          }).catch(() => {});
+        });
+
+        // Ctrl+V / Ctrl+Shift+V 粘贴支持
+        term.attachCustomKeyEventHandler((e) => {
+          if (e.type === 'keydown' && e.ctrlKey && (e.key === 'v' || e.key === 'V')) {
+            navigator.clipboard.readText().then((text) => {
+              if (text) {
+                window.electronAPI?.writeSession(task.id, text);
+              }
+            }).catch(() => {});
+            return false; // 阻止 xterm 默认处理
+          }
+          return true;
+        });
+
         const instance: TerminalInstance = {
           term,
           fitAddon,
