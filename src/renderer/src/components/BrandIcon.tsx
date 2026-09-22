@@ -111,6 +111,23 @@ export const BrandIcon: React.FC<BrandIconProps> = ({ icon, className = '', size
         </svg>
       );
 
+    case 'terminal':
+      // 系统默认终端图标（精致微光极客 Terminal >_）
+      return (
+        <svg
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+          className={`shrink-0 ${className}`}
+        >
+          <rect x="2" y="3" width="20" height="18" rx="4" fill="#121820" stroke="#2A3848" strokeWidth="1.2" />
+          <polyline points="6 8 10 12 6 16" stroke="#34D399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <line x1="12" y1="16" x2="17" y2="16" stroke="#34D399" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+
     default:
       // 默认 Terminal 终端图标
       return (

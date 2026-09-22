@@ -111,6 +111,23 @@ const INITIAL_GROUPS: CliGroup[] = [
       },
     ],
   },
+  {
+    id: 'terminal',
+    name: '系统终端',
+    icon: 'terminal',
+    defaultCommand: 'powershell.exe',
+    isExpanded: false,
+    tasks: [
+      {
+        id: 'terminal-task-1',
+        groupId: 'terminal',
+        title: 'Task 1: PowerShell',
+        status: 'running',
+        cwd: 'd:\\GitHub\\OneDesktop',
+        createdAt: Date.now(),
+      },
+    ],
+  },
 ];
 
 export const App: React.FC = () => {

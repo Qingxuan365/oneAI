@@ -2,12 +2,15 @@
   "name": "onedesktop",
   "version": "1.0.0",
   "description": "Desktop workbench for managing multiple local AI coding CLIs with live quotas",
+  "author": "OneDesktop Team",
   "main": "dist-electron/main/index.js",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:win": "npm run build && electron-builder --win",
+    "build:portable": "npm run build && electron-builder --win portable"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
@@ -25,6 +28,7 @@
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.20",
     "electron": "^31.4.0",
+    "electron-builder": "^26.15.3",
     "postcss": "^8.4.45",
     "tailwindcss": "^3.4.10",
     "typescript": "^5.5.4",

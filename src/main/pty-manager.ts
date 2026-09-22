@@ -71,6 +71,12 @@ export class PtyManager {
             '-Command',
             'if (Get-Command grok -ErrorAction SilentlyContinue) { grok } else { Write-Host "`n[OneDesktop 提示]: 本地尚未安装或配置 grok CLI 环境变量。当前已为您打开交互终端，可随时输入命令。" -ForegroundColor Yellow }',
           ];
+        } else if (rawCommand.toLowerCase() === 'powershell' || rawCommand.toLowerCase() === 'powershell.exe') {
+          file = 'powershell.exe';
+          args = ['-NoExit', '-ExecutionPolicy', 'Bypass'];
+        } else if (rawCommand.toLowerCase() === 'cmd' || rawCommand.toLowerCase() === 'cmd.exe') {
+          file = 'cmd.exe';
+          args = [];
         } else if (rawCommand.includes(' ')) {
           const parts = rawCommand.split(/\s+/);
           file = parts[0];

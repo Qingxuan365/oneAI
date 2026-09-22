@@ -112,6 +112,19 @@ export class QuotaService {
         lastUpdated: Date.now(),
         status: 'normal',
       },
+      terminal: {
+        cliId: 'terminal',
+        cliName: '系统终端',
+        model: 'PowerShell / CMD',
+        planType: 'Local Shell',
+        fiveHourPercent: 100,
+        fiveHourResetsIn: '--',
+        sevenDayPercent: 100,
+        sevenDayResetsOn: '--',
+        lastUpdated: Date.now(),
+        status: 'normal',
+        message: 'PowerShell Ready',
+      },
     };
   }
 

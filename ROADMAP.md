@@ -1,7 +1,7 @@
 # OneDesktop 开发路线图与进度看板
 
 ## 1. 当前阶段
-- **阶段**：Phase 13 - 彻底根除右侧终端视窗滚动文字残影与拖影完成
+- **阶段**：Phase 14 - 集成系统原生终端菜单并完成 Windows 双格式 `.exe` 应用打包
 - **状态**：就绪可用（Ready & Verified）
 
 ## 2. 进度看板
@@ -23,25 +23,28 @@
 - [x] Phase 10: 生成专属 Terminal 风格应用图标（应用于应用 Favicon、窗口标题栏及 AppLogo）。
 - [x] Phase 11: 深度集成 xAI Grok CLI 工作台支持。
 - [x] Phase 12: 侧边栏各模型官方专属正版矢量徽标恢复与 Grok 正版官方徽标对齐。
-- [x] Phase 13: 彻底根除右侧终端视窗滚动文字残影与左侧边缘拖影：
-  - **启用 `@xterm/addon-webgl`**：由 GPU 显存缓冲接管整屏帧绘制，杜绝 DOM 渲染器在快速滚动时的重绘撕裂与宽字符滞留。
-  - **声明真实 Windows 11 ConPTY 构建号（26200）**：解除 xterm.js 旧版 Win10 降级补丁，启用现代原生文本重排（Reflow），修复行折叠误判。
-  - **移除破坏字符矩阵的 CSS padding**：彻底清理 `.xterm` 与容器上的内边距，实现 FitAddon 矩阵与视口像素 1:1 绝对对齐。
-  - **关闭 `convertEol: true`**：防止现代规范 ConPTY 数据流在换行被强制插入额外 `\r` 导致缩进文字错位打印在第 1 列。
-  - **切换视口主动刷新**：切换会话时执行 `instance.term.refresh(0, rows - 1)` 彻底重置屏幕帧。
+- [x] Phase 13: 彻底根除右侧终端视窗滚动文字残影与左侧边缘拖影（WebGL 加速 + Win11 ConPTY 构建号 26200 对齐）。
+- [x] Phase 14: 集成系统原生终端菜单并打包为 Windows 原生 `.exe` 应用：
+  - **集成系统原生终端（PowerShell）菜单**：内置「系统终端」常驻分组与多会话派生，配有专属极客微光 `>_` 面板徽标，直启 PowerShell 交互终端。
+  - **生成多尺寸 Windows 原生图标**：生成 256x256 高清 `resources/icon.ico` 与 `resources/icon.png`。
+  - **配置 `electron-builder` 打包工程**：配置 `asarUnpack` 保障 `node-pty` 原生模块免编译运行。
+  - **成功编译输出双格式 Windows 可执行文件**：
+    - 免安装单文件便携版：`release/OneDesktop-Portable-1.0.0.exe`（74.4 MB）
+    - 标准安装向导安装包：`release/OneDesktop-Setup-1.0.0.exe`（74.6 MB）
 - [x] 全量 TypeScript 类型检查（`npx tsc --noEmit`）与 Vite 构建打包（`npm run build`）测试通过。
 
 ### 待办 / 后续增强
-- [ ] 打包为 Windows 便携版单文件可执行程序（`.exe`）。
+- [ ] 后续多窗口分屏支持（Split Terminal View）。
 
 ## 3. 阻塞与风险
-- 暂无阻塞。WebGL GPU 加速渲染丝滑流畅，滚动无残影，类型校验与构建全部通过。
+- 暂无阻塞。`.exe` 应用已编译打包完成，可直接分发运行。
 
 ## 4. 最近验证
 - **2026-09-22**：
-  - 完成 WebglAddon 挂载与 Windows 11 ConPTY 构建号（26200）校正。
-  - 修复 CSS padding 像素错位并调整 `convertEol`。
+  - 执行 `electron-builder`，生成便携版与安装包双格式可执行程序并核验文件完整性。
+  - 验证系统终端菜单与 PowerShell 会话拉起逻辑。
   - 执行 `npx tsc --noEmit` 与 `npm run build` 均 0 报错通过。
+
 
 
 
