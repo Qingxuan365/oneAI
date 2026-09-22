@@ -1,7 +1,11 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ptyManager } from './pty-manager';
 import { quotaService } from './quota-service';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // 禁用硬件加速某些已知 Windows 终端闪烁问题（若需要可启用）
 // app.disableHardwareAcceleration();
@@ -17,7 +21,7 @@ function createWindow() {
     backgroundColor: '#0e1117',
     title: 'OneDesktop - 多 CLI AI 编程工作台',
     webPreferences: {
-      preload: path.join(__dirname, '../preload/index.mjs'),
+      preload: path.join(__dirname, '../preload/index.js'),
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
