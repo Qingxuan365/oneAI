@@ -51,8 +51,9 @@ d:/GitHub/OneDesktop/
 ```typescript
 // CLI 分组模型
 interface CliGroup {
-  id: string;             // 如 "codex", "kimi"
+  id: string;             // 如 "codex", "kimi", "opencode"
   name: string;           // 显示名称 "Codex", "Kimi Code"
+  icon: string;           // 对应大模型品牌 Logo（"codex" | "kimi" | "opencode" | "claude" 等）
   command: string;        // 启动命令模版
   isExpanded: boolean;    // 分组展开/折叠状态
   tasks: TaskSession[];   // 该 CLI 下并发运行的子任务列表
