@@ -38,6 +38,13 @@ export const BrandIcon: React.FC<BrandIconProps> = ({ icon, className = '', size
           border: '#1E3A5F',
           glow: 'rgba(56, 189, 248, 0.35)',
         };
+      case 'grok':
+        return {
+          stroke: '#F8FAFC', // xAI Grok 冷光星系白
+          bg: '#11141A',
+          border: '#2E384D',
+          glow: 'rgba(248, 250, 252, 0.4)',
+        };
       default:
         return {
           stroke: '#34D399', // 默认霓虹翠绿

@@ -94,6 +94,23 @@ const INITIAL_GROUPS: CliGroup[] = [
       },
     ],
   },
+  {
+    id: 'grok',
+    name: 'Grok CLI',
+    icon: 'grok',
+    defaultCommand: 'grok',
+    isExpanded: false,
+    tasks: [
+      {
+        id: 'grok-task-1',
+        groupId: 'grok',
+        title: 'Task 1: Grok CLI',
+        status: 'running',
+        cwd: 'd:\\GitHub\\OneDesktop',
+        createdAt: Date.now() - 1000 * 60 * 2,
+      },
+    ],
+  },
 ];
 
 export const App: React.FC = () => {

@@ -10,9 +10,9 @@ export interface TaskSession {
 }
 
 export interface CliGroup {
-  id: string;              // 分组ID，如 "codex", "kimi", "opencode", "claude", "shell"
-  name: string;            // 组名，如 "Codex", "Kimi Code"
-  icon: 'codex' | 'kimi' | 'opencode' | 'claude' | 'terminal'; // 品牌专属 Logo
+  id: string;              // 分组ID，如 "codex", "kimi", "opencode", "claude", "grok", "shell"
+  name: string;            // 组名，如 "Codex", "Kimi Code", "Grok"
+  icon: 'codex' | 'kimi' | 'opencode' | 'claude' | 'grok' | 'terminal'; // 品牌专属 Logo
   defaultCommand: string;  // 默认拉起命令模版
   isExpanded: boolean;     // 是否展开子任务列表
   tasks: TaskSession[];    // 子任务列表
@@ -27,8 +27,8 @@ export interface AppSettings {
 }
 
 export interface QuotaData {
-  cliId: string;                 // 'kimi' | 'codex' | 'claude' | 'opencode'
-  cliName: string;               // 'Kimi Code' | 'Codex' ...
+  cliId: string;                 // 'kimi' | 'codex' | 'claude' | 'opencode' | 'grok'
+  cliName: string;               // 'Kimi Code' | 'Codex' | 'Grok' ...
   model?: string;                // 如 'gpt-5.5' | 'k3' | 'claude-3.7-sonnet'
   planType?: string;             // 如 'Plus' | 'Pro'
   fiveHourPercent: number;       // 5小时配额剩余百分比（0-100）

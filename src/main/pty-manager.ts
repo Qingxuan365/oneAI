@@ -62,6 +62,15 @@ export class PtyManager {
             '-Command',
             'if (Get-Command opencode -ErrorAction SilentlyContinue) { opencode } else { Write-Host "`n[OneDesktop 提示]: 本地尚未安装或配置 opencode 环境变量。当前已为您打开交互终端，可随时输入命令。" -ForegroundColor Yellow }',
           ];
+        } else if (rawCommand.toLowerCase() === 'grok') {
+          file = 'powershell.exe';
+          args = [
+            '-NoExit',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-Command',
+            'if (Get-Command grok -ErrorAction SilentlyContinue) { grok } else { Write-Host "`n[OneDesktop 提示]: 本地尚未安装或配置 grok CLI 环境变量。当前已为您打开交互终端，可随时输入命令。" -ForegroundColor Yellow }',
+          ];
         } else if (rawCommand.includes(' ')) {
           const parts = rawCommand.split(/\s+/);
           file = parts[0];

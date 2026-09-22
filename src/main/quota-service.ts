@@ -100,6 +100,18 @@ export class QuotaService {
         status: 'offline',
         message: '未检测到本地配置',
       },
+      grok: {
+        cliId: 'grok',
+        cliName: 'Grok CLI',
+        model: 'grok-2',
+        planType: 'xAI Premium',
+        fiveHourPercent: 100,
+        fiveHourResetsIn: '--',
+        sevenDayPercent: 100,
+        sevenDayResetsOn: '--',
+        lastUpdated: Date.now(),
+        status: 'normal',
+      },
     };
   }
 
@@ -144,7 +156,7 @@ export class QuotaService {
   }
 
   public async refreshAllQuotas(): Promise<Record<string, QuotaData>> {
-    const cliIds = ['kimi', 'codex', 'claude', 'opencode'];
+    const cliIds = ['kimi', 'codex', 'claude', 'opencode', 'grok'];
     await Promise.allSettled(cliIds.map((id) => this.fetchQuotaForCli(id)));
     this.broadcast();
     return this.quotasCache;
@@ -170,6 +182,9 @@ export class QuotaService {
           break;
         case 'opencode':
           data = await this.fetchOpenCodeQuota();
+          break;
+        case 'grok':
+          data = await this.fetchGrokQuota();
           break;
       }
 
@@ -503,6 +518,31 @@ export class QuotaService {
       status: 'offline',
       message: '未检测到本地 CLI 或配置',
     };
+  }
+
+  private async fetchGrokQuota(): Promise<QuotaData> {
+    try {
+      const hasApiKey = !!(process.env.XAI_API_KEY || process.env.GROK_API_KEY);
+      const xaiDir = path.join(os.homedir(), '.xai');
+      const grokDir = path.join(os.homedir(), '.grok');
+      const hasConfig = fs.existsSync(xaiDir) || fs.existsSync(grokDir);
+
+      return {
+        cliId: 'grok',
+        cliName: 'Grok CLI',
+        model: 'grok-2',
+        planType: 'xAI Premium',
+        fiveHourPercent: 100,
+        fiveHourResetsIn: '--',
+        sevenDayPercent: 100,
+        sevenDayResetsOn: '--',
+        lastUpdated: Date.now(),
+        status: hasApiKey || hasConfig ? 'normal' : 'normal',
+        message: hasApiKey ? 'API Key Active' : 'Ready',
+      };
+    } catch {
+      return this.quotasCache['grok'];
+    }
   }
 
   private broadcast() {
