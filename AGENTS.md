@@ -1,8 +1,8 @@
-# OneDesktop 项目级工程规范
+# OneAI 项目级工程规范
 
 ## 1. 项目定位与架构约定
 
-OneDesktop 是专为本地多 AI 编程 CLI（如 Codex、Kimi Code、OpenCode）打造的桌面集成工作台。
+OneAI 是专为本地多 AI 编程 CLI（如 Codex、Kimi Code、OpenCode）打造的桌面集成工作台。
 核心技术选型：
 - 运行时：Electron + Node.js
 - 底层进程：`node-pty`（调用 Windows ConPTY API）
@@ -13,7 +13,7 @@ OneDesktop 是专为本地多 AI 编程 CLI（如 Codex、Kimi Code、OpenCode�
 ## 2. 目录结构规范
 
 ```text
-d:/GitHub/OneDesktop/
+d:/GitHub/OneAI/
 ├── .gitignore
 ├── AGENTS.md                  # 项目规范
 ├── ROADMAP.md                 # 进度与状态源

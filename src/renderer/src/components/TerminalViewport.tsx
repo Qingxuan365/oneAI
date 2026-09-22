@@ -289,7 +289,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
           });
           term.loadAddon(webglAddon);
         } catch (e) {
-          console.warn('[OneDesktop] WebglAddon failed to load, fallback to DOM renderer:', e);
+          console.warn('[OneAI] WebglAddon failed to load, fallback to DOM renderer:', e);
         }
 
         fitAddon.fit();
@@ -572,8 +572,18 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
       }
     });
 
+    const unsubExit = window.electronAPI?.onSessionExit(({ id, exitCode }) => {
+      const instance = instancesRef.current.get(id);
+      if (instance) {
+        instance.term.write(
+          `\r\n\x1b[90m[OneAI] 终端进程已退出 (退出码: ${exitCode})。可点击顶栏 🔄 重新拉起。\x1b[0m\r\n`
+        );
+      }
+    });
+
     return () => {
       unsubData?.();
+      unsubExit?.();
       instancesRef.current.forEach((instance) => {
         if (instance.flushTimer) {
           clearTimeout(instance.flushTimer);

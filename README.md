@@ -1,6 +1,6 @@
-# OneDesktop - 多 CLI AI 编程工作台
+# OneAI - 多 CLI AI 编程工作台
 
-OneDesktop 是专为本地运行多个 AI 编程 CLI 工具（如 Codex、Kimi Code、OpenCode 等）打造的桌面集成工作台。
+OneAI 是专为本地运行多个 AI 编程 CLI 工具（如 Codex、Kimi Code、OpenCode 等）打造的桌面集成工作台。
 
 ---
 

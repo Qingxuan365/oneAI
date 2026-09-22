@@ -38,7 +38,7 @@ const INITIAL_GROUPS: CliGroup[] = [
         groupId: 'kimi',
         title: 'Task 1: Kimi CLI',
         status: 'running',
-        cwd: 'd:\\GitHub\\OneDesktop',
+        cwd: 'd:\\GitHub\\OneAI',
         createdAt: Date.now() - 1000 * 60 * 5,
       },
     ],
@@ -55,7 +55,7 @@ const INITIAL_GROUPS: CliGroup[] = [
         groupId: 'codex',
         title: 'Task 1: Codex CLI',
         status: 'running',
-        cwd: 'd:\\GitHub\\OneDesktop',
+        cwd: 'd:\\GitHub\\OneAI',
         createdAt: Date.now() - 1000 * 60 * 30,
       },
     ],
@@ -72,7 +72,7 @@ const INITIAL_GROUPS: CliGroup[] = [
         groupId: 'claude',
         title: 'Task 1: Claude CLI',
         status: 'running',
-        cwd: 'd:\\GitHub\\OneDesktop',
+        cwd: 'd:\\GitHub\\OneAI',
         createdAt: Date.now() - 1000 * 60 * 15,
       },
     ],
@@ -89,7 +89,7 @@ const INITIAL_GROUPS: CliGroup[] = [
         groupId: 'opencode',
         title: 'Task 1: OpenCode CLI',
         status: 'running',
-        cwd: 'd:\\GitHub\\OneDesktop',
+        cwd: 'd:\\GitHub\\OneAI',
         createdAt: Date.now() - 1000 * 60 * 1,
       },
     ],
@@ -106,7 +106,7 @@ const INITIAL_GROUPS: CliGroup[] = [
         groupId: 'grok',
         title: 'Task 1: Grok Build',
         status: 'running',
-        cwd: 'd:\\GitHub\\OneDesktop',
+        cwd: 'd:\\GitHub\\OneAI',
         createdAt: Date.now() - 1000 * 60 * 2,
       },
     ],
@@ -123,7 +123,7 @@ const INITIAL_GROUPS: CliGroup[] = [
         groupId: 'terminal',
         title: 'Task 1: PowerShell',
         status: 'running',
-        cwd: 'd:\\GitHub\\OneDesktop',
+        cwd: 'd:\\GitHub\\OneAI',
         createdAt: Date.now(),
       },
     ],
@@ -297,6 +297,19 @@ export const App: React.FC = () => {
           });
         });
       });
+
+      // 监听终端进程退出事件，将对应任务状态翻转为 'stopped'
+      const unsub = window.electronAPI.onSessionExit(({ id }) => {
+        setGroups((prev) =>
+          prev.map((g) => ({
+            ...g,
+            tasks: g.tasks.map((t) =>
+              t.id === id ? { ...t, status: 'stopped' } : t
+            ),
+          }))
+        );
+      });
+      return () => unsub();
     }
   }, []);
 
@@ -330,7 +343,7 @@ export const App: React.FC = () => {
       groupId,
       title,
       status: 'running',
-      cwd: cwd || 'd:\\GitHub\\OneDesktop',
+      cwd: cwd || 'd:\\GitHub\\OneAI',
       createdAt: Date.now(),
     };
 
@@ -385,6 +398,20 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleRestartSession = useCallback(async () => {
+    if (activeTaskId) {
+      setGroups((prev) =>
+        prev.map((g) => ({
+          ...g,
+          tasks: g.tasks.map((t) =>
+            t.id === activeTaskId ? { ...t, status: 'running' } : t
+          ),
+        }))
+      );
+      await terminalViewportRef.current?.restartActiveTerminal();
+    }
+  }, [activeTaskId]);
+
   const currentGroupForModal = groups.find((g) => g.id === selectedGroupIdForNewTask) || null;
 
   return (
@@ -412,7 +439,7 @@ export const App: React.FC = () => {
           onRefreshQuota={handleRefreshQuota}
           onOpenSearch={() => terminalViewportRef.current?.openSearch()}
           onClearScreen={() => terminalViewportRef.current?.clearActiveTerminal()}
-          onRestartSession={() => terminalViewportRef.current?.restartActiveTerminal()}
+          onRestartSession={handleRestartSession}
           onExportLogs={(mode) => terminalViewportRef.current?.exportActiveTerminalLog(mode)}
         />
 

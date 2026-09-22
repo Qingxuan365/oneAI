@@ -163,7 +163,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex items-center space-x-2 min-w-0 flex-1">
           <FolderGit2 size={13} className="text-slate-400 shrink-0" />
           <span className="truncate font-mono" title="当前工作区目录">
-            D:\GitHub\OneDesktop
+            D:\GitHub\OneAI
           </span>
         </div>
         <button

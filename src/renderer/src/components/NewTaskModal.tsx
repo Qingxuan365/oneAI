@@ -26,7 +26,7 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
       const taskIndex = group.tasks.length + 1;
       setTitle(`Task ${taskIndex}: ${group.name} Session`);
       setCommand(group.defaultCommand);
-      setCwd('d:\\GitHub\\OneDesktop');
+      setCwd('d:\\GitHub\\OneAI');
     }
   }, [group, isOpen]);
 
@@ -93,7 +93,7 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
               value={cwd}
               onChange={(e) => setCwd(e.target.value)}
               className="w-full bg-[#0d1017] border border-[#272e3d] rounded px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-emerald-500 font-mono"
-              placeholder="d:\GitHub\OneDesktop"
+              placeholder="d:\GitHub\OneAI"
             />
           </div>
 

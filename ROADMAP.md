@@ -53,19 +53,26 @@
   - **超链接与网址可点击跳转（WebLinks）**：基于 `term.registerLinkProvider` 原生注册超链接提供器，精确识别 `http://` 与 `https://` 网址，点击直接调用系统默认浏览器安全打开（`shell.openExternal`）。
   - **会话一键清屏（`Ctrl+K`）与进程重启**：顶栏新增清屏（Eraser）与会话重启（RotateCcw）操作项；清屏可同步擦除主进程历史缓存；会话重启支持在保留原有工作目录与启动模板的前提下优雅重生 PTY。
   - **全量终端交互日志一键导出与复制**：顶栏新增导出菜单，自动过滤 ANSI 控制符，一键将完整会话纯文本复制到剪贴板，或通过 Electron 原生另存为窗口导出为 `.md` / `.txt` 日志文件。
+- [x] Phase 22: 工作目录存在性校验兜底、OneAI 历史硬编码彻底对齐与 CLI 进程退出生命周期闭环：
+  - **工作目录存在性校验与优雅回退**：在 `pty-manager.ts` 中加入 `fs.existsSync(workDir)` 检测，对不存在的路径自动安全回退至系统当前有效目录（`process.cwd()` 或用户目录），根除路径不存在导致的 PTY 异常。
+  - **彻底清除所有遗留 `OneDesktop` 路径与文字**：将 `App.tsx`、`NewTaskModal.tsx`、`Sidebar.tsx`、`SettingsModal.tsx` 以及规范文档中遗留的 `OneDesktop` 路径与名称全量对齐为 `OneAI`（默认路径为 `d:\GitHub\OneAI`）。
+  - **CLI 进程退出生命周期闭环（`onSessionExit`）**：在前端全局订阅终端退出事件，CLI 进程退出时自动将任务指示灯翻转为 `stopped` 红色徽标，并在终端内打印提示；点击重启时自动恢复为 `running` 绿灯，彻底消灭界面假活缺陷。
+  - **顶栏排版窄屏保护**：顶栏面包屑任务标题增加自适应宽度限制与省略截断（`max-w-[140px] truncate`），杜绝长任务名挤压公农历时钟与大模型实时额度。
 - [x] 全量 TypeScript 类型检查（`npx tsc --noEmit`）与 Vite 构建打包（`npm run build`）测试通过。
 
 ### 待办 / 后续增强
 - [ ] 后续多窗口分屏支持（Split Terminal View）。
 
 ## 3. 阻塞与风险
-- 暂无阻塞。高频交互 4 件套（搜索、超链接、清屏/重启、日志导出）已全量实现并打包验证通过。
+- 暂无阻塞。高频交互、路径兜底、退出生命周期闭环与 Windows 原生双格式打包均已全量实现并验证通过。
 
 ## 4. 最近验证
 - **2026-09-22**：
   - `npm run build` 成功通过（Exit code 0）。
   - `npm run build:win` 打包构建全流程执行成功（Exit code 0），成功生成 Windows 安装包 `release/OneAI-Setup-1.0.0.exe` 与免安装便携版 `release/OneAI-Portable-1.0.0.exe`。
   - 验证高频交互：`Ctrl+F` 悬浮搜索栏即搜即显、超链接跳转默认浏览器、`Ctrl+K` 彻底清屏、会话原地重启与会话日志复制/另存为本地文件均测试正常。
+  - 验证路径校验：非真实路径自动安全回退到有效目录，所有初始会话与新建任务工作区已精确对齐到 `d:\GitHub\OneAI`。
+  - 验证进程退出：终端执行 `exit` 后侧边栏指示灯实时切换为 `stopped` 红色徽标，顶栏重启自动恢复 `running`。
 
 
 

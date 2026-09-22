@@ -147,7 +147,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               >
                 <span className="text-emerald-400">&gt;</span> const ai = new CLI(&apos;Kimi&apos;);
                 <br />
-                <span className="text-slate-500">&gt;</span> <span className="text-amber-300">await</span> ai.complete(&apos;Hello OneDesktop&apos;);
+                <span className="text-slate-500">&gt;</span> <span className="text-amber-300">await</span> ai.complete(&apos;Hello OneAI&apos;);
               </div>
             </div>
           </div>

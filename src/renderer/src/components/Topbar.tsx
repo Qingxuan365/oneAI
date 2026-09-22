@@ -109,14 +109,24 @@ export const Topbar: React.FC<TopbarProps> = ({
       {/* 左侧：会话面包屑导航与快捷操作栏 */}
       <div className="flex items-center space-x-3 text-xs text-slate-300">
         {currentGroup ? (
-          <div className="flex items-center space-x-1.5">
+          <div className="flex items-center space-x-1.5 min-w-0">
             <BrandIcon icon={currentGroup.icon} size={16} />
-            <span className="font-medium text-slate-200">{currentGroup.name}</span>
+            <span className="font-medium text-slate-200 shrink-0">{currentGroup.name}</span>
             {activeTask && (
               <>
-                <ChevronRight size={13} className="text-slate-500" />
-                <span className="text-slate-300 font-mono">{activeTask.title}</span>
-                <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-[#1c2230] text-emerald-400 border border-emerald-500/20">
+                <ChevronRight size={13} className="text-slate-500 shrink-0" />
+                <span className="text-slate-300 font-mono max-w-[140px] truncate" title={activeTask.title}>
+                  {activeTask.title}
+                </span>
+                <span
+                  className={`ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono border shrink-0 ${
+                    activeTask.status === 'running'
+                      ? 'bg-[#1c2230] text-emerald-400 border-emerald-500/20'
+                      : activeTask.status === 'stopped'
+                      ? 'bg-[#2a1c22] text-rose-400 border-rose-500/25'
+                      : 'bg-[#1c2230] text-amber-400 border-amber-500/20'
+                  }`}
+                >
                   {activeTask.status}
                 </span>
               </>
