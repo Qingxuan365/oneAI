@@ -75,7 +75,7 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({ tasks, activ
           lineHeight: 1.25,
           cursorBlink: false,
           cursorStyle: 'block',
-          cursorInactiveStyle: 'outline',
+          cursorInactiveStyle: 'none',
           convertEol: true,
           allowTransparency: false,
           windowsPty: {

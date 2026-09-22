@@ -6,6 +6,8 @@ interface CreateSessionOptions {
   id: string;
   command?: string;
   cwd?: string;
+  cols?: number;
+  rows?: number;
 }
 
 export class PtyManager {
@@ -76,10 +78,14 @@ export class PtyManager {
 
       const ptyProcess = pty.spawn(file, args, {
         name: 'xterm-256color',
-        cols: 100,
-        rows: 30,
+        cols: Math.max(20, options.cols || 120),
+        rows: Math.max(10, options.rows || 32),
         cwd: workDir,
-        env: process.env as Record<string, string>,
+        env: {
+          ...process.env,
+          TERM: 'xterm-256color',
+          COLORTERM: 'truecolor',
+        } as Record<string, string>,
         useConpty: isWindows,
       });
 
