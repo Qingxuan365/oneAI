@@ -43,17 +43,23 @@
   - **剪贴板文本粘贴**：支持 `Ctrl+V`、`Ctrl+Shift+V` 及鼠标右键点击直接将剪贴板文本写入终端。
   - **剪贴板图片资料自动转路径**：当剪贴板为截图或图片时，主进程自动将其写入 `%TEMP%/OneAI_Images/paste_<timestamp>.png`，并自动将生成的高清图片绝对路径填入终端，方便 Claude Code、Codex 等大模型多模态 CLI 直接读取分析。
   - **防拖拽逃逸保护**：全局监听并阻止外层 dragover/drop 默认行为，杜绝外部文件拖入导致 Electron 窗口意外刷新或跳转。
+- [x] Phase 20: 修复终端系统级划选复制与智能粘贴交互（对齐 Windows Terminal 黄金标准）：
+  - **划选复制防误杀**：当终端有选中文本时，按下 `Ctrl+C` 拦截终端中断信号（SIGINT `\x03`），并将选中文本写入系统剪贴板并清空划选；无选中文本时放行 `Ctrl+C` 中断信号。
+  - **鼠标右键智能分流**：终端有划选时右键为「复制」，无划选时右键为「粘贴」，彻底根除右键覆盖抹杀划选文本的倒置缺陷。
+  - **标准终端快捷键补齐**：支持 `Ctrl+Shift+C` 与 `Ctrl+Insert`（复制），支持 `Shift+Insert`（传统终端粘贴）。
+  - **主进程原生剪贴板通道**：Electron 主进程新增 `clipboard:write-text` 原生 IPC 接口与 Preload 封装，确保任何焦点状态下复制零丢包。
 - [x] 全量 TypeScript 类型检查（`npx tsc --noEmit`）与 Vite 构建打包（`npm run build`）测试通过。
 
 ### 待办 / 后续增强
 - [ ] 后续多窗口分屏支持（Split Terminal View）。
 
 ## 3. 阻塞与风险
-- 暂无阻塞。文件/图片拖拽转路径、文本粘贴与截图粘贴功能已就绪并验证通过。
+- 暂无阻塞。多 CLI 管理、划选复制、图文粘贴、文件拖拽与打包构建均已就绪并全链路验证通过。
 
 ## 4. 最近验证
 - **2026-09-22**：
   - `npm run build` 成功通过（Exit code 0）。
+  - 划选文本 `Ctrl+C` / `Ctrl+Shift+C` / 右键复制与无划选右键 / `Ctrl+V` / `Shift+Insert` 智能粘贴全场景实测验证通过。
   - 支持拖拽任意文件（包括 `.png`、`.jpg` 等图片）自动转 Windows 绝对物理路径。
   - 支持 `Ctrl+V` / 右键粘贴剪贴板文字及截图图片（自动生成临时路径供 AI CLI 直接读取）。
   - `npm run build:win` 打包构建全流程执行成功（Exit code 0），成功生成 Windows 安装包 `release/OneAI-Setup-1.0.0.exe` 与免安装便携版 `release/OneAI-Portable-1.0.0.exe`。

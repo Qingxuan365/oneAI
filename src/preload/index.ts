@@ -9,6 +9,7 @@ export interface CreateSessionOptions {
 contextBridge.exposeInMainWorld('electronAPI', {
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   readPasteContent: () => ipcRenderer.invoke('clipboard:read-paste-content'),
+  writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
 
   // PTY 终端管理
   createSession: (options: CreateSessionOptions) =>

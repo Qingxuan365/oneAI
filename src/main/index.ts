@@ -128,6 +128,19 @@ function setupIPC() {
     }
     return { type: 'none', content: '' };
   });
+
+  // 写入系统剪贴板纯文本
+  ipcMain.handle('clipboard:write-text', async (_event, text: string) => {
+    try {
+      if (typeof text === 'string') {
+        clipboard.writeText(text);
+        return true;
+      }
+    } catch (e) {
+      console.error('[OneAI] Error writing text to clipboard:', e);
+    }
+    return false;
+  });
 }
 
 app.whenReady().then(() => {

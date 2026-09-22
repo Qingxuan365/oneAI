@@ -44,6 +44,7 @@ export interface QuotaData {
 export interface ElectronTerminalAPI {
   getPathForFile?: (file: File) => string;
   readPasteContent?: () => Promise<{ type: 'text' | 'image-path' | 'none'; content: string }>;
+  writeClipboardText?: (text: string) => Promise<boolean>;
   createSession: (options: { id: string; command?: string; cwd?: string }) => Promise<{ success: boolean; buffer?: string; error?: string }>;
   getSessionBuffer: (id: string) => Promise<string>;
   writeSession: (id: string, data: string) => Promise<void>;

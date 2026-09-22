@@ -198,6 +198,29 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
           term.focus();
         });
 
+        // 复制划选文本到系统剪贴板
+        const handleCopy = async (): Promise<boolean> => {
+          if (term.hasSelection()) {
+            const selectedText = term.getSelection();
+            if (selectedText) {
+              try {
+                if (window.electronAPI?.writeClipboardText) {
+                  await window.electronAPI.writeClipboardText(selectedText);
+                } else {
+                  await navigator.clipboard.writeText(selectedText);
+                }
+              } catch {
+                try {
+                  await navigator.clipboard.writeText(selectedText);
+                } catch {}
+              }
+              term.clearSelection();
+              return true;
+            }
+          }
+          return false;
+        };
+
         const handlePaste = async () => {
           try {
             if (window.electronAPI?.readPasteContent) {
@@ -218,18 +241,54 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
           } catch {}
         };
 
-        // 右键粘贴：拦截右键菜单，从剪贴板读取内容写入 PTY
-        termContainer.addEventListener('contextmenu', (e) => {
+        // 右键交互（对齐 Windows Terminal 黄金标准）：
+        // 1. 若当前有划选文本：右键执行复制并清除划选
+        // 2. 若当前无划选文本：右键从剪贴板读取内容并粘贴进终端
+        termContainer.addEventListener('contextmenu', async (e) => {
           e.preventDefault();
-          handlePaste();
+          if (term.hasSelection()) {
+            await handleCopy();
+          } else {
+            await handlePaste();
+          }
         });
 
-        // Ctrl+V / Ctrl+Shift+V 粘贴支持
+        // 终端键盘事件拦截与快捷键增强
         term.attachCustomKeyEventHandler((e) => {
-          if (e.type === 'keydown' && e.ctrlKey && (e.key === 'v' || e.key === 'V')) {
-            handlePaste();
-            return false; // 阻止 xterm 默认处理
+          if (e.type !== 'keydown') {
+            return true;
           }
+
+          // 1. 复制快捷键支持：
+          // - Ctrl+C（无 Shift）：若有划选文本，执行复制并阻止向 PTY 发送 SIGINT 中断信号；若无划选，放行发送中断信号
+          // - Ctrl+Shift+C 或 Ctrl+Insert：终端标准复制
+          if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
+            if (term.hasSelection()) {
+              handleCopy();
+              return false;
+            }
+            return true;
+          }
+
+          if (
+            (e.ctrlKey && e.shiftKey && (e.key === 'c' || e.key === 'C')) ||
+            (e.ctrlKey && e.key === 'Insert')
+          ) {
+            handleCopy();
+            return false;
+          }
+
+          // 2. 粘贴快捷键支持：
+          // - Ctrl+V / Ctrl+Shift+V
+          // - Shift+Insert（传统终端粘贴）
+          if (
+            (e.ctrlKey && (e.key === 'v' || e.key === 'V')) ||
+            (e.shiftKey && e.key === 'Insert')
+          ) {
+            handlePaste();
+            return false;
+          }
+
           return true;
         });
 
