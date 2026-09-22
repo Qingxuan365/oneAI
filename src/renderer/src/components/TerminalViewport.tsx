@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { TaskSession } from '../types';
 
@@ -78,22 +77,16 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({ tasks, activ
           cursorStyle: 'block',
           cursorInactiveStyle: 'outline',
           convertEol: true,
-          allowTransparency: true,
+          allowTransparency: false,
+          windowsPty: {
+            backend: 'conpty',
+          },
         });
 
         const fitAddon = new FitAddon();
         term.loadAddon(fitAddon);
 
         term.open(termContainer);
-
-        // 尝试加载 WebGL 加速
-        try {
-          const webglAddon = new WebglAddon();
-          webglAddon.onContextLoss(() => webglAddon.dispose());
-          term.loadAddon(webglAddon);
-        } catch {
-          // WebGL 加速失败则降级为 Canvas
-        }
 
         fitAddon.fit();
 
