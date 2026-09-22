@@ -23,7 +23,7 @@ export const Topbar: React.FC<TopbarProps> = ({
       <div className="flex items-center space-x-2 text-xs text-slate-300">
         {currentGroup ? (
           <div className="flex items-center space-x-1.5">
-            <BrandIcon icon={currentGroup.icon} size={15} />
+            <BrandIcon icon={currentGroup.icon} size={16} />
             <span className="font-medium text-slate-200">{currentGroup.name}</span>
             {activeTask && (
               <>

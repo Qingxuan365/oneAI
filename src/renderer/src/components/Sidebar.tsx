@@ -76,7 +76,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </span>
 
                   {/* 大模型品牌专属 Logo 图标 */}
-                  <BrandIcon icon={group.icon} size={15} />
+                  <BrandIcon icon={group.icon} size={16} />
 
                   <span className="font-medium text-xs truncate">{group.name}</span>
                 </div>
