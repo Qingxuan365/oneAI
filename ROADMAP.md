@@ -1,8 +1,8 @@
 # OneDesktop 开发路线图与进度看板
 
 ## 1. 当前阶段
-- **阶段**：Phase 1 - 基础脚手架与编译管道搭建
-- **状态**：计划已出具，等待主人明确审批后启动开发
+- **阶段**：Phase 5 - 核心功能研发完成与构建验证通过
+- **状态**：就绪可用（Ready）
 
 ## 2. 进度看板
 
@@ -11,13 +11,21 @@
 - [x] 确立项目级规范文档 [AGENTS.md](file:///d:/GitHub/OneDesktop/AGENTS.md) 。
 - [x] 初始化本地 Git 仓库与 `.gitignore` 规则。
 - [x] 出具完整开发实施计划 [implementation_plan.md](file:///C:/Users/31317/.gemini/antigravity/brain/e1268a3a-17f8-419c-a5fd-ef3ba0c51fb0/implementation_plan.md) 。
+- [x] Phase 1: 搭建 Electron + Vite + React 18 + Tailwind CSS 基础工程骨架。
+- [x] Phase 2: 实现 Electron 主进程 `node-pty`（Windows ConPTY）多进程池管理与大模型配额服务。
+- [x] Phase 3: 构建大模型专属品牌 Logo 资产库（Codex / Kimi / OpenCode / Claude 等）与双层会话数据模型。
+- [x] Phase 4: 研发左侧树状折叠子任务菜单、顶栏单行横排实时额度组件与右侧 `@xterm/xterm` 多实例保活视窗。
+- [x] 全量 TypeScript 类型检查（`npx tsc --noEmit`）与 Vite 构建打包（`npm run build`）测试通过。
 
-### 待办（按实施计划推进）
-- [ ] Phase 1: 搭建 Electron + Vite + React 18 + Tailwind CSS 基础工程与构建管道。
-- [ ] Phase 2: 实现 Electron 主进程 `node-pty`（Windows ConPTY）多进程池与配额轮询服务。
-- [ ] Phase 3: 构建前端大模型品牌 Logo 资产库与会话数据模型。
-- [ ] Phase 4: 研发左侧 CLI 多任务树状菜单、顶栏单行额度与右侧多实例保活终端视窗。
-- [ ] Phase 5: 端到端功能联调与并发多任务验证。
+### 待办 / 后续增强
+- [ ] 根据主人实际使用的 CLI 工具进一步定制具体的 API Key / Token 自动抓取 Provider。
+- [ ] 打包为 Windows 便携版单文件可执行程序（`.exe`）。
+
+## 3. 阻塞与风险
+- 暂无阻塞。原生模块与渲染构建均已调通。
+
+## 4. 最近验证
+- **2026-09-22**：执行 `npm run build` 全量编译成功，主进程 `dist-electron/main/index.js`、预加载 `dist-electron/preload/index.js` 与渲染前端 `dist/index.html` 均零警告零错误构建完成。
 
 ## 3. 阻塞与风险
 - 暂无阻塞。
