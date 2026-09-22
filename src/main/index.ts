@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, clipboard } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -99,6 +99,34 @@ function setupIPC() {
 
   ipcMain.handle('quota:refresh', async (_event, cliId?: string) => {
     return quotaService.refreshQuota(cliId);
+  });
+
+  // 读取剪贴板内容（支持纯文本，以及图片自动存盘返回临时路径）
+  ipcMain.handle('clipboard:read-paste-content', async () => {
+    try {
+      // 1. 优先读取纯文本
+      const text = clipboard.readText();
+      if (text && text.trim().length > 0) {
+        return { type: 'text', content: text };
+      }
+
+      // 2. 检查剪贴板是否含有图片（如截图、复制的图像）
+      const img = clipboard.readImage();
+      if (!img.isEmpty()) {
+        const pngBuffer = img.toPNG();
+        const tempDir = path.join(app.getPath('temp'), 'OneAI_Images');
+        if (!fs.existsSync(tempDir)) {
+          fs.mkdirSync(tempDir, { recursive: true });
+        }
+        const filename = `paste_${Date.now()}.png`;
+        const fullPath = path.join(tempDir, filename);
+        fs.writeFileSync(fullPath, pngBuffer);
+        return { type: 'image-path', content: fullPath.includes(' ') ? `"${fullPath}"` : fullPath };
+      }
+    } catch (e) {
+      console.error('[OneAI] Error reading clipboard paste content:', e);
+    }
+    return { type: 'none', content: '' };
   });
 }
 

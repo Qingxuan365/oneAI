@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 export interface CreateSessionOptions {
   id: string;
@@ -7,6 +7,9 @@ export interface CreateSessionOptions {
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
+  readPasteContent: () => ipcRenderer.invoke('clipboard:read-paste-content'),
+
   // PTY 终端管理
   createSession: (options: CreateSessionOptions) =>
     ipcRenderer.invoke('terminal:create', options),

@@ -1,6 +1,8 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  getPathForFile: (file) => webUtils.getPathForFile(file),
+  readPasteContent: () => ipcRenderer.invoke('clipboard:read-paste-content'),
   createSession: (options) => ipcRenderer.invoke('terminal:create', options),
   getSessionBuffer: (id) => ipcRenderer.invoke('terminal:get-buffer', { id }),
   writeSession: (id, data) => ipcRenderer.invoke('terminal:write', { id, data }),

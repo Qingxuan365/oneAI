@@ -52,6 +52,17 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const instancesRef = useRef<Map<string, TerminalInstance>>(new Map());
 
+  // 全局阻止默认拖拽行为，防止外部文件拖入非目标区域导致 Electron 窗口刷新/跳转
+  useEffect(() => {
+    const prevent = (e: DragEvent) => e.preventDefault();
+    window.addEventListener('dragover', prevent, false);
+    window.addEventListener('drop', prevent, false);
+    return () => {
+      window.removeEventListener('dragover', prevent, false);
+      window.removeEventListener('drop', prevent, false);
+    };
+  }, []);
+
   // 动态更新所有已有终端的字体大小、行高与光标样式，实时触发自适应排版
   useEffect(() => {
     instancesRef.current.forEach((instance) => {
@@ -187,27 +198,77 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
           term.focus();
         });
 
-        // 右键粘贴：拦截右键菜单，从剪贴板读取文本写入 PTY
-        termContainer.addEventListener('contextmenu', (e) => {
-          e.preventDefault();
-          navigator.clipboard.readText().then((text) => {
+        const handlePaste = async () => {
+          try {
+            if (window.electronAPI?.readPasteContent) {
+              const res = await window.electronAPI.readPasteContent();
+              if (res && res.content) {
+                window.electronAPI.writeSession(task.id, res.content);
+                return;
+              }
+            }
+          } catch {}
+
+          // 回退到浏览器原生剪贴板 API
+          try {
+            const text = await navigator.clipboard.readText();
             if (text) {
               window.electronAPI?.writeSession(task.id, text);
             }
-          }).catch(() => {});
+          } catch {}
+        };
+
+        // 右键粘贴：拦截右键菜单，从剪贴板读取内容写入 PTY
+        termContainer.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          handlePaste();
         });
 
         // Ctrl+V / Ctrl+Shift+V 粘贴支持
         term.attachCustomKeyEventHandler((e) => {
           if (e.type === 'keydown' && e.ctrlKey && (e.key === 'v' || e.key === 'V')) {
-            navigator.clipboard.readText().then((text) => {
-              if (text) {
-                window.electronAPI?.writeSession(task.id, text);
-              }
-            }).catch(() => {});
+            handlePaste();
             return false; // 阻止 xterm 默认处理
           }
           return true;
+        });
+
+        // 拖拽文件/图片到终端自动转换为文件路径
+        termContainer.addEventListener('dragenter', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        });
+        termContainer.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.dataTransfer) {
+            e.dataTransfer.dropEffect = 'copy';
+          }
+        });
+        termContainer.addEventListener('drop', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const files = e.dataTransfer?.files;
+          if (files && files.length > 0) {
+            const paths: string[] = [];
+            for (let i = 0; i < files.length; i++) {
+              const file = files[i];
+              let p = '';
+              try {
+                p = window.electronAPI?.getPathForFile ? window.electronAPI.getPathForFile(file) : ((file as any).path || '');
+              } catch {
+                p = (file as any).path || '';
+              }
+              if (p) {
+                // 如果路径中包含空格，用双引号包裹
+                paths.push(p.includes(' ') ? `"${p}"` : p);
+              }
+            }
+            if (paths.length > 0) {
+              window.electronAPI?.writeSession(task.id, paths.join(' '));
+              term.focus();
+            }
+          }
         });
 
         const instance: TerminalInstance = {
