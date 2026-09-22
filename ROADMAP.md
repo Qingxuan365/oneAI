@@ -1,7 +1,7 @@
 # OneDesktop 开发路线图与进度看板
 
 ## 1. 当前阶段
-- **阶段**：Phase 11 - 深度集成 xAI Grok CLI 工作台支持完成
+- **阶段**：Phase 12 - 侧边栏各模型官方正版专属矢量 Logo 完整对齐完成
 - **状态**：就绪可用（Ready & Verified）
 
 ## 2. 进度看板
@@ -20,25 +20,27 @@
 - [x] Phase 7: 界面与终端字体大小手动设置与快捷缩放（支持 12px ~ 24px 任意微调，UI 缩放 4 档，持久化至 `localStorage`）。
 - [x] Phase 8: 彻底根治 Codex 终端星空粒子动画引发的光标横移跳动顽疾（数据流伪光标过滤 + 16ms 微帧缓冲合并）。
 - [x] Phase 9: 全面升级各大模型官方品牌专属矢量徽标。
-- [x] Phase 10: 生成专属 Terminal 风格应用图标并全站统一为终端风格。
-- [x] Phase 11: 深度集成 xAI Grok CLI：
-  - 注册 `grok` CLI 分组类型与专属标识。
-  - 为 Grok 定制 xAI 极简冷光星系白（`#F8FAFC`）Terminal 终端微光徽标。
-  - 在侧边栏内置 `Grok CLI` 独立分组、默认并发会话及多任务派生能力。
-  - 在 PTY 进程管理器中为 `grok` 增加防未安装闪退的安全降级机制。
-  - 在配额服务中增加 Grok 模型（`grok-2`）状态侦测与联动刷新。
+- [x] Phase 10: 生成专属 Terminal 风格应用图标（应用于应用 Favicon、窗口标题栏及 AppLogo）。
+- [x] Phase 11: 深度集成 xAI Grok CLI 工作台支持。
+- [x] Phase 12: 侧边栏各模型官方专属正版矢量徽标恢复与 Grok 正版官方徽标对齐：
+  - **Moonshot Kimi Code**：官方极光蓝电光胶囊（`#1783FF`）与经典几何 K 字徽标。
+  - **OpenAI Codex**：官方六瓣连环螺旋徽标（官方品牌绿 `#10A37F`）。
+  - **Anthropic Claude Code**：官方原版暖赤陶多角星芒徽标（`#D97757`）。
+  - **OpenCode**：`opencode.ai` 官方像素方块 Terminal 徽标。
+  - **xAI Grok**：LobeHub 官方源提取的最新正版 Grok 矢量几何徽标。
 - [x] 全量 TypeScript 类型检查（`npx tsc --noEmit`）与 Vite 构建打包（`npm run build`）测试通过。
 
 ### 待办 / 后续增强
 - [ ] 打包为 Windows 便携版单文件可执行程序（`.exe`）。
 
 ## 3. 阻塞与风险
-- 暂无阻塞。Grok CLI 已无缝纳入系统管理，类型检查与全量构建均通过。
+- 暂无阻塞。应用主标与各大模型专属官方矢量 Logo 职责明确，辨识度拉满，全站构建正常。
 
 ## 4. 最近验证
 - **2026-09-22**：
-  - 完成 Grok CLI 全链路集成（类型声明、专属图标、默认分组、PTY 命令保护与配额联动）。
+  - 更新 `BrandIcon.tsx`，将红框所示的所有大模型图标完整恢复并对齐为各自官方正版矢量徽标（Kimi、Codex、Claude、OpenCode、Grok）。
   - 执行 `npx tsc --noEmit` 与 `npm run build` 均 0 报错通过。
+
 
 
 
