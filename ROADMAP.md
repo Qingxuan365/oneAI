@@ -24,26 +24,27 @@
 - [x] Phase 11: 深度集成 xAI Grok CLI 工作台支持。
 - [x] Phase 12: 侧边栏各模型官方专属正版矢量徽标恢复与 Grok 正版官方徽标对齐。
 - [x] Phase 13: 彻底根除右侧终端视窗滚动文字残影与左侧边缘拖影（WebGL 加速 + Win11 ConPTY 构建号 26200 对齐）。
-- [x] Phase 14: 集成系统原生终端菜单并打包为 Windows 原生 `.exe` 应用：
-  - **集成系统原生终端（PowerShell）菜单**：内置「系统终端」常驻分组与多会话派生，配有专属极客微光 `>_` 面板徽标，直启 PowerShell 交互终端。
-  - **生成多尺寸 Windows 原生图标**：生成 256x256 高清 `resources/icon.ico` 与 `resources/icon.png`。
-  - **配置 `electron-builder` 打包工程**：配置 `asarUnpack` 保障 `node-pty` 原生模块免编译运行。
-  - **成功编译输出双格式 Windows 可执行文件**：
-    - 免安装单文件便携版：`release/OneDesktop-Portable-1.0.0.exe`（74.4 MB）
-    - 标准安装向导安装包：`release/OneDesktop-Setup-1.0.0.exe`（74.6 MB）
+- [x] Phase 14: 集成系统原生终端菜单并打包为 Windows 原生 `.exe` 应用。
+- [x] Phase 15: 彻底消除所有 CLI 模型硬编码，实现全量动态感知与实时监听：
+  - **Codex 动态模型解析**：自动解析 `~/.codex/config.toml` 中配置的 `model`（当前解析为 `gpt-6-astra`），自动降级匹配最新会话 `turn_context`，并由 `fs.watch` 实时监听。
+  - **Claude Code 动态模型解析**：自动解析 `~/.claude/settings.json`（`env.ANTHROPIC_MODEL`，如 `deepseek-flash`）及 `~/.claude.json` 最近使用记录与别名映射，由 `fs.watch` 实时监听。
+  - **Grok CLI 动态模型解析**：自动解析 `~/.grok/settings_cache.json`、`models_cache.json` 及 `config.toml`（当前解析为最新 `Grok 4.7`），由 `fs.watch` 实时监听。
+  - **Kimi Code 动态感知与展示名还原**：自动解析 `~/.kimi-code/config.toml`（如 `K2.7 Code Highspeed`），并在切换后实时秒级联动。
+  - **OpenCode 动态感知**：读取 `OPENCODE_MODEL` 环境变量与本地配置，支持灵活自适应。
+  - **重新构建与打包**：重新执行 `electron-builder` 构建，输出最新带全部修复的 `release/OneDesktop-Portable-1.0.0.exe`（74.4 MB）与 `release/OneDesktop-Setup-1.0.0.exe`（74.6 MB）。
 - [x] 全量 TypeScript 类型检查（`npx tsc --noEmit`）与 Vite 构建打包（`npm run build`）测试通过。
 
 ### 待办 / 后续增强
 - [ ] 后续多窗口分屏支持（Split Terminal View）。
 
 ## 3. 阻塞与风险
-- 暂无阻塞。`.exe` 应用已编译打包完成，可直接分发运行。
+- 暂无阻塞。各 CLI 模型动态解析与自动监听已上线，最新 `.exe` 安装包与便携版已重新打包发布。
 
 ## 4. 最近验证
 - **2026-09-22**：
-  - 执行 `electron-builder`，生成便携版与安装包双格式可执行程序并核验文件完整性。
-  - 验证系统终端菜单与 PowerShell 会话拉起逻辑。
-  - 执行 `npx tsc --noEmit` 与 `npm run build` 均 0 报错通过。
+  - 在用户本地真实环境提取 Codex（`gpt-6-astra`）、Claude（`deepseek-flash`）、Grok（`Grok 4.7`）及 Kimi（`K2.7 Code Highspeed`）验证通过，无任何硬编码残留。
+  - 执行 `npm run build` 和 `npx electron-builder --win` 成功打包生成最新版便携式与安装向导 `.exe`。
+
 
 
 

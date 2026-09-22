@@ -56,7 +56,7 @@ export class QuotaService {
       kimi: {
         cliId: 'kimi',
         cliName: 'Kimi Code',
-        model: 'k3',
+        model: this.getKimiCurrentModel(),
         planType: 'Kimi Coding',
         fiveHourPercent: 100,
         fiveHourResetsIn: '--',
@@ -68,7 +68,7 @@ export class QuotaService {
       codex: {
         cliId: 'codex',
         cliName: 'Codex',
-        model: 'gpt-5.5',
+        model: this.getCodexCurrentModel(),
         planType: 'Plus',
         fiveHourPercent: 100,
         fiveHourResetsIn: '--',
@@ -80,7 +80,7 @@ export class QuotaService {
       claude: {
         cliId: 'claude',
         cliName: 'Claude Code',
-        model: 'claude-3.7-sonnet',
+        model: this.getClaudeCurrentModel(),
         planType: 'Pro',
         fiveHourPercent: 100,
         fiveHourResetsIn: '--',
@@ -92,6 +92,7 @@ export class QuotaService {
       opencode: {
         cliId: 'opencode',
         cliName: 'OpenCode',
+        model: this.getOpenCodeCurrentModel(),
         fiveHourPercent: 0,
         fiveHourResetsIn: '--',
         sevenDayPercent: 0,
@@ -103,7 +104,7 @@ export class QuotaService {
       grok: {
         cliId: 'grok',
         cliName: 'Grok CLI',
-        model: 'grok-2',
+        model: this.getGrokCurrentModel(),
         planType: 'xAI Premium',
         fiveHourPercent: 100,
         fiveHourResetsIn: '--',
@@ -126,6 +127,38 @@ export class QuotaService {
         message: 'PowerShell Ready',
       },
     };
+
+    this.setupFileWatchers();
+  }
+
+  private setupFileWatchers(): void {
+    const watchList: Array<{ filePath: string; cliId: string }> = [
+      { filePath: path.join(os.homedir(), '.kimi-code', 'config.toml'), cliId: 'kimi' },
+      { filePath: path.join(os.homedir(), '.codex', 'config.toml'), cliId: 'codex' },
+      { filePath: path.join(os.homedir(), '.claude', 'settings.json'), cliId: 'claude' },
+      { filePath: path.join(os.homedir(), '.claude.json'), cliId: 'claude' },
+      { filePath: path.join(os.homedir(), '.grok', 'settings_cache.json'), cliId: 'grok' },
+      { filePath: path.join(os.homedir(), '.grok', 'config.toml'), cliId: 'grok' },
+    ];
+
+    const debounceMap = new Map<string, NodeJS.Timeout>();
+
+    for (const item of watchList) {
+      try {
+        if (fs.existsSync(item.filePath)) {
+          fs.watch(item.filePath, () => {
+            const prev = debounceMap.get(item.cliId);
+            if (prev) clearTimeout(prev);
+            const t = setTimeout(() => {
+              this.refreshQuota(item.cliId);
+            }, 300);
+            debounceMap.set(item.cliId, t);
+          });
+        }
+      } catch (err) {
+        console.warn(`[QuotaService] Failed to watch ${item.filePath}:`, err);
+      }
+    }
   }
 
   public setWindow(win: BrowserWindow) {
@@ -210,12 +243,169 @@ export class QuotaService {
     }
   }
 
+  private getKimiCurrentModel(): string {
+    const configPath = path.join(os.homedir(), '.kimi-code', 'config.toml');
+    if (!fs.existsSync(configPath)) {
+      return 'K3';
+    }
+
+    try {
+      const content = fs.readFileSync(configPath, 'utf8');
+      const defaultModelMatch = content.match(/default_model\s*=\s*["']([^"']+)["']/);
+      const defaultModelKey = defaultModelMatch ? defaultModelMatch[1] : '';
+
+      if (defaultModelKey) {
+        const escapedKey = defaultModelKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const sectionRegex = new RegExp(`\\[models\\."?${escapedKey}"?\\]([\\s\\S]*?)(?=\\n\\[|$)`);
+        const sectionMatch = content.match(sectionRegex);
+        if (sectionMatch) {
+          const displayMatch = sectionMatch[1].match(/display_name\s*=\s*["']([^"']+)["']/);
+          if (displayMatch && displayMatch[1]) {
+            return displayMatch[1];
+          }
+        }
+
+        if (defaultModelKey.includes('highspeed')) return 'K2.7 Highspeed';
+        if (defaultModelKey.includes('kimi-for-coding')) return 'K2.8 Preview';
+        if (defaultModelKey.includes('k3')) return 'K3';
+        return defaultModelKey.split('/').pop() || defaultModelKey;
+      }
+    } catch (e) {
+      console.warn('[QuotaService] Error parsing Kimi config:', e);
+    }
+
+    return 'K3';
+  }
+
+  private getCodexCurrentModel(): string {
+    const configPath = path.join(os.homedir(), '.codex', 'config.toml');
+    if (fs.existsSync(configPath)) {
+      try {
+        const content = fs.readFileSync(configPath, 'utf8');
+        const m = content.match(/model\s*=\s*["']([^"']+)["']/);
+        if (m && m[1]) return m[1];
+      } catch (e) {
+        console.warn('[QuotaService] Error reading Codex config:', e);
+      }
+    }
+    if (process.env.CODEX_MODEL) return process.env.CODEX_MODEL;
+    return 'Auto';
+  }
+
+  private getClaudeCurrentModel(): string {
+    // 1. 优先读取 ~/.claude/settings.json
+    const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+    if (fs.existsSync(settingsPath)) {
+      try {
+        const s = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+        if (s.env && s.env.ANTHROPIC_MODEL) {
+          return s.env.ANTHROPIC_MODEL;
+        }
+        if (s.model) {
+          const m = String(s.model).toLowerCase();
+          if (m === 'sonnet') return 'Claude 3.7 Sonnet';
+          if (m === 'opus') return 'Claude 3 Opus';
+          if (m === 'haiku') return 'Claude 3.5 Haiku';
+          return s.model;
+        }
+      } catch (e) {
+        console.warn('[QuotaService] Error reading Claude settings:', e);
+      }
+    }
+
+    // 2. 读取 ~/.claude.json 中的最近使用记录
+    const claudeJsonPath = path.join(os.homedir(), '.claude.json');
+    if (fs.existsSync(claudeJsonPath)) {
+      try {
+        const c = JSON.parse(fs.readFileSync(claudeJsonPath, 'utf8'));
+        for (const key of Object.keys(c)) {
+          if (c[key] && c[key].lastModelUsage) {
+            const used = Object.keys(c[key].lastModelUsage);
+            if (used.length > 0) return used[used.length - 1];
+          }
+        }
+      } catch {}
+    }
+
+    // 3. 读取 token-tracker 状态
+    const statusFile = path.join(os.homedir(), '.config', 'token-tracker', 'tt-status.json');
+    if (fs.existsSync(statusFile)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
+        if (data.model?.display_name || data.model?.id) {
+          return data.model.display_name || data.model.id;
+        }
+      } catch {}
+    }
+
+    if (process.env.ANTHROPIC_MODEL) return process.env.ANTHROPIC_MODEL;
+    if (process.env.CLAUDE_MODEL) return process.env.CLAUDE_MODEL;
+
+    return 'Claude 3.7 Sonnet';
+  }
+
+  private getGrokCurrentModel(): string {
+    // 1. 读取 ~/.grok/settings_cache.json
+    const grokSettings = path.join(os.homedir(), '.grok', 'settings_cache.json');
+    if (fs.existsSync(grokSettings)) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(grokSettings, 'utf8'));
+        const payload = typeof raw.payload === 'string' ? JSON.parse(raw.payload) : raw.payload;
+        if (payload && payload.settings && payload.settings.default_model) {
+          const modelId = payload.settings.default_model;
+          const modelsCache = path.join(os.homedir(), '.grok', 'models_cache.json');
+          if (fs.existsSync(modelsCache)) {
+            try {
+              const mc = JSON.parse(fs.readFileSync(modelsCache, 'utf8'));
+              if (mc.models && mc.models[modelId]?.info?.name) {
+                return mc.models[modelId].info.name;
+              }
+            } catch {}
+          }
+          return modelId;
+        }
+      } catch (e) {
+        console.warn('[QuotaService] Error reading Grok settings_cache:', e);
+      }
+    }
+
+    // 2. 读取 ~/.grok/config.toml
+    const grokConfig = path.join(os.homedir(), '.grok', 'config.toml');
+    if (fs.existsSync(grokConfig)) {
+      try {
+        const content = fs.readFileSync(grokConfig, 'utf8');
+        const m = content.match(/model\s*=\s*["']([^"']+)["']/);
+        if (m && m[1]) return m[1];
+      } catch {}
+    }
+
+    if (process.env.GROK_MODEL) return process.env.GROK_MODEL;
+    if (process.env.XAI_MODEL) return process.env.XAI_MODEL;
+
+    return 'Grok 4.7';
+  }
+
+  private getOpenCodeCurrentModel(): string {
+    if (process.env.OPENCODE_MODEL) return process.env.OPENCODE_MODEL;
+    const opencodeConfig = path.join(os.homedir(), '.opencode', 'config.json');
+    if (fs.existsSync(opencodeConfig)) {
+      try {
+        const c = JSON.parse(fs.readFileSync(opencodeConfig, 'utf8'));
+        if (c.model) return c.model;
+      } catch {}
+    }
+    return 'Auto';
+  }
+
   private async fetchKimiQuota(): Promise<QuotaData> {
     const credPath = path.join(os.homedir(), '.kimi-code', 'credentials', 'kimi-code.json');
+    const currentModel = this.getKimiCurrentModel();
+
     if (!fs.existsSync(credPath)) {
       return {
         cliId: 'kimi',
         cliName: 'Kimi Code',
+        model: currentModel,
         fiveHourPercent: 0,
         fiveHourResetsIn: '--',
         sevenDayPercent: 0,
@@ -293,7 +483,7 @@ export class QuotaService {
       return {
         cliId: 'kimi',
         cliName: 'Kimi Code',
-        model: 'k3',
+        model: currentModel,
         planType: 'Kimi Coding',
         fiveHourPercent,
         fiveHourResetsIn,
@@ -307,6 +497,7 @@ export class QuotaService {
       return this.quotasCache['kimi'] || {
         cliId: 'kimi',
         cliName: 'Kimi Code',
+        model: currentModel,
         fiveHourPercent: 100,
         fiveHourResetsIn: '--',
         sevenDayPercent: 100,
@@ -318,18 +509,20 @@ export class QuotaService {
   }
 
   private async fetchCodexQuota(): Promise<QuotaData> {
+    const currentModel = this.getCodexCurrentModel();
     const codexSessionsDir = path.join(os.homedir(), '.codex', 'sessions');
     if (!fs.existsSync(codexSessionsDir)) {
       return {
         cliId: 'codex',
         cliName: 'Codex',
-        fiveHourPercent: 0,
+        model: currentModel,
+        planType: 'Plus',
+        fiveHourPercent: 100,
         fiveHourResetsIn: '--',
-        sevenDayPercent: 0,
+        sevenDayPercent: 100,
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
-        status: 'offline',
-        message: '未找到 Codex 会话记录',
+        status: 'normal',
       };
     }
 
@@ -363,7 +556,7 @@ export class QuotaService {
         .sort((a, b) => b.mtime - a.mtime);
 
       let foundRateLimits: any = null;
-      let model = 'gpt-5.5';
+      let model = currentModel;
       let planType = 'Plus';
 
       for (const item of filesWithStats.slice(0, 10)) {
@@ -373,7 +566,7 @@ export class QuotaService {
           for (let i = lines.length - 1; i >= 0; i--) {
             const line = lines[i].trim();
             if (!line) continue;
-            if (line.includes('"turn_context"') && model === 'gpt-5.5') {
+            if (line.includes('"turn_context"') && (!model || model === 'Auto')) {
               try {
                 const parsed = JSON.parse(line);
                 if (parsed?.payload?.model) model = parsed.payload.model;
@@ -389,7 +582,7 @@ export class QuotaService {
                 }
               } catch {}
             }
-            if (foundRateLimits && model !== 'gpt-5.5') break;
+            if (foundRateLimits && model && model !== 'Auto') break;
           }
           if (foundRateLimits) break;
         } catch {}
@@ -454,12 +647,14 @@ export class QuotaService {
   }
 
   private async fetchClaudeQuota(): Promise<QuotaData> {
+    const currentModel = this.getClaudeCurrentModel();
     const statusFile = path.join(os.homedir(), '.config', 'token-tracker', 'tt-status.json');
     if (!fs.existsSync(statusFile)) {
       return {
         cliId: 'claude',
         cliName: 'Claude Code',
-        model: 'Claude',
+        model: currentModel,
+        planType: 'Pro',
         fiveHourPercent: 100,
         fiveHourResetsIn: '--',
         sevenDayPercent: 100,
@@ -471,7 +666,7 @@ export class QuotaService {
 
     try {
       const data = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
-      const model = data.model?.display_name || data.model?.id || 'claude-3.7-sonnet';
+      const model = data.model?.display_name || data.model?.id || currentModel;
       const rl = data.rate_limits || {};
       const five = rl.five_hour || {};
       const seven = rl.seven_day || {};
@@ -523,13 +718,14 @@ export class QuotaService {
     return {
       cliId: 'opencode',
       cliName: 'OpenCode',
+      model: this.getOpenCodeCurrentModel(),
       fiveHourPercent: 0,
       fiveHourResetsIn: '--',
       sevenDayPercent: 0,
       sevenDayResetsOn: '--',
       lastUpdated: Date.now(),
       status: 'offline',
-      message: '未检测到本地 CLI 或配置',
+      message: '未检测到本地配置',
     };
   }
 
@@ -543,7 +739,7 @@ export class QuotaService {
       return {
         cliId: 'grok',
         cliName: 'Grok CLI',
-        model: 'grok-2',
+        model: this.getGrokCurrentModel(),
         planType: 'xAI Premium',
         fiveHourPercent: 100,
         fiveHourResetsIn: '--',
