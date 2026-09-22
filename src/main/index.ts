@@ -85,12 +85,16 @@ function setupIPC() {
     ptyManager.killSession(id);
   });
 
-  ipcMain.handle('quota:get', async () => {
-    return quotaService.getQuota();
+  ipcMain.handle('quota:get', async (_event, cliId?: string) => {
+    return quotaService.getQuota(cliId);
   });
 
-  ipcMain.handle('quota:refresh', async () => {
-    return quotaService.refreshQuota();
+  ipcMain.handle('quota:get-all', async () => {
+    return quotaService.getAllQuotas();
+  });
+
+  ipcMain.handle('quota:refresh', async (_event, cliId?: string) => {
+    return quotaService.refreshQuota(cliId);
   });
 }
 

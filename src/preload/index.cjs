@@ -20,8 +20,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeListener('terminal:exit', subscription);
     };
   },
-  getQuota: () => ipcRenderer.invoke('quota:get'),
-  refreshQuota: () => ipcRenderer.invoke('quota:refresh'),
+  getQuota: (cliId) => ipcRenderer.invoke('quota:get', cliId),
+  getAllQuotas: () => ipcRenderer.invoke('quota:get-all'),
+  refreshQuota: (cliId) => ipcRenderer.invoke('quota:refresh', cliId),
   onQuotaUpdate: (callback) => {
     const subscription = (_event, value) => callback(value);
     ipcRenderer.on('quota:update', subscription);

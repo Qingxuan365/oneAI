@@ -40,11 +40,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // 大模型配额
-  getQuota: () => ipcRenderer.invoke('quota:get'),
+  getQuota: (cliId?: string) => ipcRenderer.invoke('quota:get', cliId),
 
-  refreshQuota: () => ipcRenderer.invoke('quota:refresh'),
+  getAllQuotas: () => ipcRenderer.invoke('quota:get-all'),
 
-  onQuotaUpdate: (callback: (quota: any) => void) => {
+  refreshQuota: (cliId?: string) => ipcRenderer.invoke('quota:refresh', cliId),
+
+  onQuotaUpdate: (callback: (quotas: any) => void) => {
     const subscription = (_event: any, value: any) => callback(value);
     ipcRenderer.on('quota:update', subscription);
     return () => {

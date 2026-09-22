@@ -19,12 +19,17 @@ export interface CliGroup {
 }
 
 export interface QuotaData {
+  cliId: string;                 // 'kimi' | 'codex' | 'claude' | 'opencode'
+  cliName: string;               // 'Kimi Code' | 'Codex' ...
+  model?: string;                // 如 'gpt-5.5' | 'k3' | 'claude-3.7-sonnet'
+  planType?: string;             // 如 'Plus' | 'Pro'
   fiveHourPercent: number;       // 5小时配额剩余百分比（0-100）
   fiveHourResetsIn: string;      // 5小时配额重置倒计时（例如 "2h 45m"）
   sevenDayPercent: number;       // 7天配额剩余百分比（0-100）
   sevenDayResetsOn: string;      // 7天配额重置日（例如 "Resets Sun"）
   lastUpdated: number;           // 最后更新时间戳
-  status: 'normal' | 'warning' | 'critical';
+  status: 'normal' | 'warning' | 'critical' | 'offline';
+  message?: string;
 }
 
 export interface ElectronTerminalAPI {
@@ -35,9 +40,10 @@ export interface ElectronTerminalAPI {
   killSession: (id: string) => Promise<void>;
   onSessionData: (callback: (event: { id: string; data: string }) => void) => () => void;
   onSessionExit: (callback: (event: { id: string; exitCode: number }) => void) => () => void;
-  getQuota: () => Promise<QuotaData>;
-  refreshQuota: () => Promise<QuotaData>;
-  onQuotaUpdate: (callback: (quota: QuotaData) => void) => () => void;
+  getQuota: (cliId?: string) => Promise<QuotaData>;
+  getAllQuotas: () => Promise<Record<string, QuotaData>>;
+  refreshQuota: (cliId?: string) => Promise<Record<string, QuotaData>>;
+  onQuotaUpdate: (callback: (quotas: Record<string, QuotaData>) => void) => () => void;
 }
 
 declare global {

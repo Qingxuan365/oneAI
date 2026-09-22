@@ -80,7 +80,7 @@ const INITIAL_GROUPS: CliGroup[] = [
 export const App: React.FC = () => {
   const [groups, setGroups] = useState<CliGroup[]>(INITIAL_GROUPS);
   const [activeTaskId, setActiveTaskId] = useState<string | null>('kimi-task-1');
-  const [quota, setQuota] = useState<QuotaData | null>(null);
+  const [quotas, setQuotas] = useState<Record<string, QuotaData>>({});
 
   // 弹窗状态
   const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
@@ -101,23 +101,72 @@ export const App: React.FC = () => {
     return groups.find((g) => g.id === activeTask.groupId) || null;
   }, [groups, activeTask]);
 
-  // 初始化拉取配额与订阅后台推送
+  // 当前选中 CLI 对应的实时配额
+  const currentQuota = useMemo(() => {
+    if (!currentGroup) return null;
+    return quotas[currentGroup.id] || null;
+  }, [quotas, currentGroup]);
+
+  // 初始化拉取各 CLI 真实配额与订阅后台推送
   useEffect(() => {
     if (window.electronAPI) {
-      window.electronAPI.getQuota().then((q) => setQuota(q));
-      const unsub = window.electronAPI.onQuotaUpdate((updated) => {
-        setQuota(updated);
+      window.electronAPI.getAllQuotas().then((all) => {
+        if (all) setQuotas(all);
+      });
+      const unsub = window.electronAPI.onQuotaUpdate((updatedQuotas) => {
+        if (updatedQuotas) setQuotas(updatedQuotas);
       });
       return () => unsub();
     } else {
       // 浏览器独立预览调试降级数据
-      setQuota({
-        fiveHourPercent: 82,
-        fiveHourResetsIn: '2h 45m',
-        sevenDayPercent: 65,
-        sevenDayResetsOn: 'Resets Sun',
-        lastUpdated: Date.now(),
-        status: 'normal',
+      setQuotas({
+        kimi: {
+          cliId: 'kimi',
+          cliName: 'Kimi Code',
+          model: 'k3',
+          planType: 'Kimi Coding',
+          fiveHourPercent: 100,
+          fiveHourResetsIn: '4h 12m',
+          sevenDayPercent: 12,
+          sevenDayResetsOn: 'Resets Wed',
+          lastUpdated: Date.now(),
+          status: 'normal',
+        },
+        codex: {
+          cliId: 'codex',
+          cliName: 'Codex',
+          model: 'gpt-5.5',
+          planType: 'Plus',
+          fiveHourPercent: 1,
+          fiveHourResetsIn: '2h 58m',
+          sevenDayPercent: 69,
+          sevenDayResetsOn: 'Resets Sun',
+          lastUpdated: Date.now(),
+          status: 'normal',
+        },
+        claude: {
+          cliId: 'claude',
+          cliName: 'Claude Code',
+          model: 'claude-3.7-sonnet',
+          planType: 'Pro',
+          fiveHourPercent: 88,
+          fiveHourResetsIn: '3h 30m',
+          sevenDayPercent: 75,
+          sevenDayResetsOn: 'Resets Fri',
+          lastUpdated: Date.now(),
+          status: 'normal',
+        },
+        opencode: {
+          cliId: 'opencode',
+          cliName: 'OpenCode',
+          fiveHourPercent: 0,
+          fiveHourResetsIn: '--',
+          sevenDayPercent: 0,
+          sevenDayResetsOn: '--',
+          lastUpdated: Date.now(),
+          status: 'offline',
+          message: '未检测到本地配置',
+        },
       });
     }
   }, []);
@@ -214,21 +263,11 @@ export const App: React.FC = () => {
     }
   }, [activeTaskId, allTasks]);
 
-  // 手动刷新配额
+  // 手动刷新当前选中 CLI 的真实配额
   const handleRefreshQuota = async () => {
     if (window.electronAPI) {
-      const latest = await window.electronAPI.refreshQuota();
-      setQuota(latest);
-    } else {
-      setQuota((prev) =>
-        prev
-          ? {
-              ...prev,
-              fiveHourPercent: Math.max(10, prev.fiveHourPercent - 1),
-              lastUpdated: Date.now(),
-            }
-          : null
-      );
+      const latest = await window.electronAPI.refreshQuota(currentGroup?.id);
+      if (latest) setQuotas(latest);
     }
   };
 
@@ -254,7 +293,7 @@ export const App: React.FC = () => {
         <Topbar
           currentGroup={currentGroup}
           activeTask={activeTask}
-          quota={quota}
+          quota={currentQuota}
           onRefreshQuota={handleRefreshQuota}
         />
 
