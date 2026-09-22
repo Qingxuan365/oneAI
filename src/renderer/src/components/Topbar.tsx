@@ -13,10 +13,15 @@ interface TopbarProps {
 
 function getFormattedTime(): string {
   const now = new Date();
+  const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  const Y = now.getFullYear();
+  const M = String(now.getMonth() + 1).padStart(2, '0');
+  const D = String(now.getDate()).padStart(2, '0');
   const h = String(now.getHours()).padStart(2, '0');
   const m = String(now.getMinutes()).padStart(2, '0');
   const s = String(now.getSeconds()).padStart(2, '0');
-  return `${h}:${m}:${s}`;
+  const w = weekdays[now.getDay()];
+  return `${Y}-${M}-${D} ${h}:${m}:${s} （${w}）`;
 }
 
 export const Topbar: React.FC<TopbarProps> = ({
