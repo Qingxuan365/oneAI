@@ -22,6 +22,8 @@ export interface AppSettings {
   terminalFontSize: number;   // 终端代码字体大小 (12 ~ 24, 默认 15)
   terminalLineHeight: number; // 终端行高 (1.2 ~ 1.6, 默认 1.3)
   uiScale: 'compact' | 'standard' | 'comfortable' | 'large'; // 界面全局字体缩放
+  terminalCursorStyle: 'bar' | 'block' | 'underline'; // 终端光标样式 (默认 'bar')
+  terminalCursorBlink: boolean; // 终端光标闪烁 (默认 true)
 }
 
 export interface QuotaData {

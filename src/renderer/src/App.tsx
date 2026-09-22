@@ -10,6 +10,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   terminalFontSize: 15,
   terminalLineHeight: 1.3,
   uiScale: 'comfortable',
+  terminalCursorStyle: 'bar',
+  terminalCursorBlink: true,
 };
 
 function loadSavedSettings(): AppSettings {
@@ -368,6 +370,8 @@ export const App: React.FC = () => {
           activeTaskId={activeTaskId}
           fontSize={settings.terminalFontSize}
           lineHeight={settings.terminalLineHeight}
+          cursorStyle={settings.terminalCursorStyle}
+          cursorBlink={settings.terminalCursorBlink}
         />
       </div>
 

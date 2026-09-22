@@ -9,12 +9,34 @@ interface TerminalViewportProps {
   activeTaskId: string | null;
   fontSize?: number;
   lineHeight?: number;
+  cursorStyle?: 'bar' | 'block' | 'underline';
+  cursorBlink?: boolean;
 }
 
 interface TerminalInstance {
   term: Terminal;
   fitAddon: FitAddon;
   container: HTMLDivElement;
+  pendingData: string;
+  flushTimer: NodeJS.Timeout | null;
+  flush: () => void;
+}
+
+/**
+ * 净化终端数据流中的伪光标泄露：
+ * Windows ConPTY 在将后台渲染缓冲区切片推送到客户端时，常因 60Hz 定时器边界，
+ * 在局部擦除或星空粒子重绘后（如 \x1b[9;1H）、输出目标输入行光标（\x1b[11;3H）之前，
+ * 误插 \x1b[?25h（即刻显示光标）。这会导致光标在输入框各处高频横移乱跳。
+ * 此处移除无字符紧随定位的光标开启指令，保持隐藏状态直至真正定位到用户输入行。
+ */
+export function sanitizeTerminalData(data: string): string {
+  // 1. 过滤：\x1b[?25l<光标定位>\x1b[?25h -> 保持隐藏 \x1b[?25l<光标定位>
+  let res = data.replace(/\x1b\[\?25l(\x1b\[\d+;\d+H)\x1b\[\?25h/g, '\x1b[?25l$1');
+
+  // 2. 过滤 DECSET 2026 同步刷新结束前夕孤立泄露的光标开启指令
+  res = res.replace(/(\x1b\[\d+;\d+H)\x1b\[\?25h(?=\s*\x1b\[0\s*q|\s*\x1b\[\?2026l)/g, '$1');
+
+  return res;
 }
 
 export const TerminalViewport: React.FC<TerminalViewportProps> = ({
@@ -22,11 +44,13 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
   activeTaskId,
   fontSize = 15,
   lineHeight = 1.3,
+  cursorStyle = 'bar',
+  cursorBlink = true,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const instancesRef = useRef<Map<string, TerminalInstance>>(new Map());
 
-  // 动态更新所有已有终端的字体大小与行高，实时触发自适应排版
+  // 动态更新所有已有终端的字体大小、行高与光标样式，实时触发自适应排版
   useEffect(() => {
     instancesRef.current.forEach((instance) => {
       let changed = false;
@@ -38,13 +62,19 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
         instance.term.options.lineHeight = lineHeight;
         changed = true;
       }
+      if (cursorStyle && instance.term.options.cursorStyle !== cursorStyle) {
+        instance.term.options.cursorStyle = cursorStyle;
+      }
+      if (cursorBlink !== undefined && instance.term.options.cursorBlink !== cursorBlink) {
+        instance.term.options.cursorBlink = cursorBlink;
+      }
       if (changed) {
         try {
           instance.fitAddon.fit();
         } catch {}
       }
     });
-  }, [fontSize, lineHeight]);
+  }, [fontSize, lineHeight, cursorStyle, cursorBlink]);
 
   // 为每个任务维护一个独立的 xterm 实例，切换时仅更改 display: none / block
   useEffect(() => {
@@ -56,6 +86,7 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
     instancesRef.current.forEach((instance, id) => {
       if (!currentTaskIds.has(id)) {
         try {
+          if (instance.flushTimer) clearTimeout(instance.flushTimer);
           instance.term.dispose();
           instance.container.remove();
         } catch {
@@ -100,8 +131,8 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
           fontFamily: 'Consolas, "Fira Code", monospace, "Segoe UI Emoji"',
           fontSize,
           lineHeight,
-          cursorBlink: false,
-          cursorStyle: 'block',
+          cursorBlink,
+          cursorStyle,
           cursorInactiveStyle: 'none',
           convertEol: true,
           allowTransparency: false,
@@ -130,7 +161,7 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
         // 立即拉取并回放主进程中的已有缓冲区
         window.electronAPI?.getSessionBuffer(task.id).then((buf) => {
           if (buf) {
-            term.write(buf);
+            term.write(sanitizeTerminalData(buf));
           }
         });
 
@@ -139,11 +170,26 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
           term.focus();
         });
 
-        instancesRef.current.set(task.id, {
+        const instance: TerminalInstance = {
           term,
           fitAddon,
           container: termContainer,
-        });
+          pendingData: '',
+          flushTimer: null,
+          flush: () => {
+            if (instance.flushTimer) {
+              clearTimeout(instance.flushTimer);
+              instance.flushTimer = null;
+            }
+            if (instance.pendingData) {
+              const sanitized = sanitizeTerminalData(instance.pendingData);
+              instance.pendingData = '';
+              instance.term.write(sanitized);
+            }
+          },
+        };
+
+        instancesRef.current.set(task.id, instance);
       }
     });
   }, [tasks]);
@@ -165,7 +211,7 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
             // 检查如果界面为空，补齐拉取一次历史 buffer
             window.electronAPI?.getSessionBuffer(id).then((buf) => {
               if (buf && instance.term.buffer.active.length <= 1) {
-                instance.term.write(buf);
+                instance.term.write(sanitizeTerminalData(buf));
               }
             });
           } catch {
@@ -176,17 +222,34 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
     });
   }, [activeTaskId]);
 
-  // 监听来自 Electron 主进程的 PTY stdout 数据流并写入对应终端
+  // 监听来自 Electron 主进程的 PTY stdout 数据流，通过微帧缓冲合并写入对应终端
   useEffect(() => {
     const unsubData = window.electronAPI?.onSessionData(({ id, data }) => {
       const instance = instancesRef.current.get(id);
       if (instance) {
-        instance.term.write(data);
+        instance.pendingData += data;
+
+        // 如果遇到未闭合的 DECSET 2026 同步刷新块，稍微延长等待闭合；否则 16ms 内原子写入
+        const inSync =
+          instance.pendingData.includes('\x1b[?2026h') && !instance.pendingData.includes('\x1b[?2026l');
+        const delay = inSync ? 25 : 16;
+
+        if (!instance.flushTimer) {
+          instance.flushTimer = setTimeout(() => {
+            instance.flush();
+          }, delay);
+        }
       }
     });
 
     return () => {
       unsubData?.();
+      instancesRef.current.forEach((instance) => {
+        if (instance.flushTimer) {
+          clearTimeout(instance.flushTimer);
+          instance.flushTimer = null;
+        }
+      });
     };
   }, []);
 
@@ -242,3 +305,4 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
     </main>
   );
 };
+

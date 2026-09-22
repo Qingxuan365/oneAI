@@ -47,6 +47,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     { id: 'large', name: '大号', desc: '适合 2K/4K', pct: '125%' },
   ];
 
+  const CURSOR_STYLES: { id: AppSettings['terminalCursorStyle']; name: string; desc: string; icon: string }[] = [
+    { id: 'bar', name: '竖线 (推荐)', desc: '现代细光标，不遮挡字符', icon: '│' },
+    { id: 'block', name: '方块', desc: '经典实心大方块', icon: '█' },
+    { id: 'underline', name: '下划线', desc: '底部横线光标', icon: ' ' },
+  ];
+
   return (
     <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 select-none animate-in fade-in duration-150">
       <div
@@ -168,7 +174,54 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
-          {/* 3. 全局 UI 界面缩放 */}
+          {/* 3. 终端光标样式与闪烁 */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-200">
+                终端光标样式
+              </label>
+              <button
+                onClick={() =>
+                  onUpdateSettings({
+                    ...settings,
+                    terminalCursorBlink: !settings.terminalCursorBlink,
+                  })
+                }
+                className={`text-[11px] px-2 py-0.5 rounded transition-colors border ${
+                  settings.terminalCursorBlink
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                    : 'bg-[#181d2a] border-[#242c3f] text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                {settings.terminalCursorBlink ? '光标呼吸闪烁: 开启' : '光标呼吸闪烁: 关闭'}
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {CURSOR_STYLES.map((item) => (
+                <div
+                  key={item.id}
+                  onClick={() =>
+                    onUpdateSettings({ ...settings, terminalCursorStyle: item.id })
+                  }
+                  className={`p-2 rounded-lg border cursor-pointer transition-all flex items-center space-x-2.5 ${
+                    settings.terminalCursorStyle === item.id
+                      ? 'bg-emerald-500/10 border-emerald-500/50 text-slate-100'
+                      : 'bg-[#181d2a] border-[#242c3f] text-slate-400 hover:text-slate-200 hover:bg-[#1e2536]'
+                  }`}
+                >
+                  <span className="text-base font-mono text-emerald-400 w-4 text-center">
+                    {item.icon}
+                  </span>
+                  <div>
+                    <div className="text-xs font-medium">{item.name}</div>
+                    <div className="text-[10px] text-slate-500">{item.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 4. 全局 UI 界面缩放 */}
           <div className="space-y-2">
             <div className="flex items-center space-x-1.5 text-xs font-semibold text-slate-200">
               <Monitor size={14} className="text-slate-400" />
@@ -206,7 +259,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             title="还原为出厂默认设置"
           >
             <RotateCcw size={12} />
-            <span>恢复默认 (15px / 舒适)</span>
+            <span>恢复默认 (15px / 竖线 / 舒适)</span>
           </button>
           <button
             onClick={onClose}
