@@ -96,7 +96,7 @@ const INITIAL_GROUPS: CliGroup[] = [
   },
   {
     id: 'grok',
-    name: 'Grok CLI',
+    name: 'Grok Build',
     icon: 'grok',
     defaultCommand: 'grok',
     isExpanded: false,
@@ -104,7 +104,7 @@ const INITIAL_GROUPS: CliGroup[] = [
       {
         id: 'grok-task-1',
         groupId: 'grok',
-        title: 'Task 1: Grok CLI',
+        title: 'Task 1: Grok Build',
         status: 'running',
         cwd: 'd:\\GitHub\\OneDesktop',
         createdAt: Date.now() - 1000 * 60 * 2,
@@ -270,7 +270,7 @@ export const App: React.FC = () => {
         },
         grok: {
           cliId: 'grok',
-          cliName: 'Grok CLI',
+          cliName: 'Grok Build',
           model: 'Grok',
           planType: 'xAI Premium',
           fiveHourPercent: 100,

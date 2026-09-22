@@ -114,7 +114,7 @@ export class QuotaService {
       },
       grok: {
         cliId: 'grok',
-        cliName: 'Grok CLI',
+        cliName: 'Grok Build',
         model: grokInfo.model,
         effort: grokInfo.effort,
         planType: 'xAI Premium',
@@ -859,7 +859,7 @@ export class QuotaService {
 
       return {
         cliId: 'grok',
-        cliName: 'Grok CLI',
+        cliName: 'Grok Build',
         model: grokInfo.model,
         effort: grokInfo.effort,
         planType: 'xAI Premium',
