@@ -3,7 +3,24 @@ import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
 import { TerminalViewport } from './components/TerminalViewport';
 import { NewTaskModal } from './components/NewTaskModal';
-import { CliGroup, TaskSession, QuotaData } from './types';
+import { SettingsModal } from './components/SettingsModal';
+import { CliGroup, TaskSession, QuotaData, AppSettings } from './types';
+
+const DEFAULT_SETTINGS: AppSettings = {
+  terminalFontSize: 15,
+  terminalLineHeight: 1.3,
+  uiScale: 'comfortable',
+};
+
+function loadSavedSettings(): AppSettings {
+  try {
+    const raw = localStorage.getItem('onedesktop_settings');
+    if (raw) {
+      return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    }
+  } catch {}
+  return DEFAULT_SETTINGS;
+}
 
 // 初始化默认 CLI 分组（绑定各 AI CLI 的真实执行命令）
 const INITIAL_GROUPS: CliGroup[] = [
@@ -82,9 +99,56 @@ export const App: React.FC = () => {
   const [activeTaskId, setActiveTaskId] = useState<string | null>('kimi-task-1');
   const [quotas, setQuotas] = useState<Record<string, QuotaData>>({});
 
+  // 字体与外观设置状态（自动持久化到 localStorage）
+  const [settings, setSettings] = useState<AppSettings>(loadSavedSettings);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
   // 弹窗状态
   const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
   const [selectedGroupIdForNewTask, setSelectedGroupIdForNewTask] = useState<string | null>(null);
+
+  // 动态应用全局 UI 界面缩放比例
+  useEffect(() => {
+    const scaleMap: Record<AppSettings['uiScale'], string> = {
+      compact: '14.5px',      // 90%
+      standard: '16px',       // 100%
+      comfortable: '17.5px',  // 110% (推荐默认)
+      large: '20px',          // 125%
+    };
+    document.documentElement.style.fontSize = scaleMap[settings.uiScale] || '17.5px';
+    try {
+      localStorage.setItem('onedesktop_settings', JSON.stringify(settings));
+    } catch {}
+  }, [settings]);
+
+  // 全局快捷键缩放终端字体（Ctrl + / Ctrl - / Ctrl 0）
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === '=' || e.key === '+') {
+          e.preventDefault();
+          setSettings((prev) => ({
+            ...prev,
+            terminalFontSize: Math.min(24, prev.terminalFontSize + 1),
+          }));
+        } else if (e.key === '-') {
+          e.preventDefault();
+          setSettings((prev) => ({
+            ...prev,
+            terminalFontSize: Math.max(12, prev.terminalFontSize - 1),
+          }));
+        } else if (e.key === '0') {
+          e.preventDefault();
+          setSettings((prev) => ({
+            ...prev,
+            terminalFontSize: 15,
+          }));
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // 所有子任务扁平数组
   const allTasks = useMemo(() => {
@@ -286,6 +350,7 @@ export const App: React.FC = () => {
         onAddGroup={() => {
           // 预留添加自定义 CLI 分组
         }}
+        onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
       {/* 右侧：顶栏（单行横排纯文字额度） + 终端主视窗 */}
@@ -298,7 +363,12 @@ export const App: React.FC = () => {
         />
 
         {/* 多实例保活终端容器（切换时不销毁，display: none 保活） */}
-        <TerminalViewport tasks={allTasks} activeTaskId={activeTaskId} />
+        <TerminalViewport
+          tasks={allTasks}
+          activeTaskId={activeTaskId}
+          fontSize={settings.terminalFontSize}
+          lineHeight={settings.terminalLineHeight}
+        />
       </div>
 
       {/* 新建子任务弹窗 */}
@@ -307,6 +377,15 @@ export const App: React.FC = () => {
         isOpen={isNewTaskOpen}
         onClose={() => setIsNewTaskOpen(false)}
         onCreate={handleCreateTask}
+      />
+
+      {/* 外观与字体大小设置弹窗 */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        settings={settings}
+        onUpdateSettings={setSettings}
+        onResetDefault={() => setSettings(DEFAULT_SETTINGS)}
       />
     </div>
   );

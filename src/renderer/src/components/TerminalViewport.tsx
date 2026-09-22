@@ -7,6 +7,8 @@ import { TaskSession } from '../types';
 interface TerminalViewportProps {
   tasks: TaskSession[];
   activeTaskId: string | null;
+  fontSize?: number;
+  lineHeight?: number;
 }
 
 interface TerminalInstance {
@@ -15,9 +17,34 @@ interface TerminalInstance {
   container: HTMLDivElement;
 }
 
-export const TerminalViewport: React.FC<TerminalViewportProps> = ({ tasks, activeTaskId }) => {
+export const TerminalViewport: React.FC<TerminalViewportProps> = ({
+  tasks,
+  activeTaskId,
+  fontSize = 15,
+  lineHeight = 1.3,
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const instancesRef = useRef<Map<string, TerminalInstance>>(new Map());
+
+  // 动态更新所有已有终端的字体大小与行高，实时触发自适应排版
+  useEffect(() => {
+    instancesRef.current.forEach((instance) => {
+      let changed = false;
+      if (fontSize && instance.term.options.fontSize !== fontSize) {
+        instance.term.options.fontSize = fontSize;
+        changed = true;
+      }
+      if (lineHeight && instance.term.options.lineHeight !== lineHeight) {
+        instance.term.options.lineHeight = lineHeight;
+        changed = true;
+      }
+      if (changed) {
+        try {
+          instance.fitAddon.fit();
+        } catch {}
+      }
+    });
+  }, [fontSize, lineHeight]);
 
   // 为每个任务维护一个独立的 xterm 实例，切换时仅更改 display: none / block
   useEffect(() => {
@@ -71,8 +98,8 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({ tasks, activ
             brightWhite: '#f0f6fc',
           },
           fontFamily: 'Consolas, "Fira Code", monospace, "Segoe UI Emoji"',
-          fontSize: 13,
-          lineHeight: 1.25,
+          fontSize,
+          lineHeight,
           cursorBlink: false,
           cursorStyle: 'block',
           cursorInactiveStyle: 'none',

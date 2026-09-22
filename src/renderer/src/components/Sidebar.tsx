@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronDown, ChevronRight, Plus, X, FolderGit2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, X, FolderGit2, Settings } from 'lucide-react';
 import { CliGroup, TaskSession } from '../types';
 import { BrandIcon } from './BrandIcon';
 
@@ -11,6 +11,7 @@ interface SidebarProps {
   onNewTask: (groupId: string) => void;
   onCloseTask: (taskId: string, e: React.MouseEvent) => void;
   onAddGroup: () => void;
+  onOpenSettings?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -21,6 +22,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onNewTask,
   onCloseTask,
   onAddGroup,
+  onOpenSettings,
 }) => {
   return (
     <aside className="w-64 bg-[#141720] border-r border-[#232936] flex flex-col h-full select-none shrink-0 text-slate-300">
@@ -73,30 +75,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                   </span>
 
-                  {/* 大模型官方专属 Logo（替换文件夹图标） */}
+                  {/* 大模型品牌专属 Logo 图标 */}
                   <BrandIcon icon={group.icon} size={15} />
 
-                  {/* CLI 名称与任务计数 */}
-                  <span className="font-medium truncate">{group.name}</span>
-                  <span className="text-[10px] text-slate-500">({group.tasks.length})</span>
+                  <span className="font-medium text-xs truncate">{group.name}</span>
                 </div>
 
-                {/* 快速拉起子任务 + 按钮 */}
+                {/* 快捷添加该 CLI 子任务 */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     onNewTask(group.id);
                   }}
-                  className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-emerald-400 hover:bg-[#232938] rounded transition-all"
-                  title={`在 ${group.name} 下启动新任务`}
+                  className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-emerald-400 hover:bg-[#202738] rounded transition-opacity"
+                  title={`新建 ${group.name} 子任务`}
                 >
-                  <Plus size={12} />
+                  <Plus size={13} />
                 </button>
               </div>
 
-              {/* 二级子任务列表（缩进展开） */}
+              {/* 二级：该 CLI 下的并发多子任务列表 */}
               {group.isExpanded && (
-                <div className="pl-6 pr-1 space-y-0.5 border-l border-slate-800/80 ml-3.5 my-0.5">
+                <div className="ml-5 pl-2 border-l border-[#242b3b] space-y-0.5 mt-0.5">
+                  {group.tasks.length === 0 && (
+                    <div className="px-2 py-1 text-[11px] text-slate-600 italic">
+                      无活跃任务
+                    </div>
+                  )}
+
                   {group.tasks.map((task) => {
                     const isActive = task.id === activeTaskId;
 
@@ -104,18 +110,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <div
                         key={task.id}
                         onClick={() => onSelectTask(task.id, group.id)}
-                        className={`group/task flex items-center justify-between px-2 py-1.5 rounded text-xs cursor-pointer transition-all ${
+                        className={`group/task flex items-center justify-between px-2 py-1.5 rounded cursor-pointer transition-colors text-xs ${
                           isActive
-                            ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 font-medium'
-                            : 'text-slate-400 hover:text-slate-200 hover:bg-[#181d27]'
+                            ? 'bg-[#202636] text-emerald-300 font-medium'
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-[#161a24]'
                         }`}
                       >
                         <div className="flex items-center space-x-2 min-w-0">
-                          {/* 状态圆点 */}
+                          {/* 任务状态指示灯小圆点 */}
                           <span
                             className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                               task.status === 'running'
-                                ? 'bg-emerald-400 shadow-sm shadow-emerald-400/50'
+                                ? 'bg-emerald-400 animate-pulse'
+                                : task.status === 'idle'
+                                ? 'bg-sky-400'
                                 : task.status === 'waiting'
                                 ? 'bg-amber-400 animate-pulse'
                                 : 'bg-slate-600'
@@ -136,7 +144,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     );
                   })}
 
-                  {/* 派生新任务空状态入口 */}
+                  {/* 派生新任务快捷入口 */}
                   <button
                     onClick={() => onNewTask(group.id)}
                     className="w-full flex items-center space-x-1.5 px-2 py-1 text-[11px] text-slate-500 hover:text-slate-300 hover:bg-[#181d27] rounded transition-colors"
@@ -151,12 +159,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
         })}
       </div>
 
-      {/* 侧边栏底部：当前项目工作目录 */}
-      <div className="p-2.5 border-t border-[#232936] text-[11px] text-slate-500 flex items-center space-x-2 bg-[#10131b]">
-        <FolderGit2 size={13} className="text-slate-400 shrink-0" />
-        <span className="truncate font-mono" title="当前工作区目录">
-          D:\GitHub\OneDesktop
-        </span>
+      {/* 侧边栏底部：当前项目工作目录与设置 */}
+      <div className="p-2.5 border-t border-[#232936] text-[11px] text-slate-400 flex items-center justify-between bg-[#10131b]">
+        <div className="flex items-center space-x-2 min-w-0 flex-1">
+          <FolderGit2 size={13} className="text-slate-400 shrink-0" />
+          <span className="truncate font-mono" title="当前工作区目录">
+            D:\GitHub\OneDesktop
+          </span>
+        </div>
+        <button
+          onClick={onOpenSettings}
+          className="p-1 text-slate-400 hover:text-slate-200 hover:bg-[#1c2230] rounded transition-colors ml-1.5 shrink-0"
+          title="外观与字体大小设置"
+        >
+          <Settings size={13} />
+        </button>
       </div>
     </aside>
   );

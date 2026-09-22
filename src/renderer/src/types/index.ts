@@ -18,6 +18,12 @@ export interface CliGroup {
   tasks: TaskSession[];    // 子任务列表
 }
 
+export interface AppSettings {
+  terminalFontSize: number;   // 终端代码字体大小 (12 ~ 24, 默认 15)
+  terminalLineHeight: number; // 终端行高 (1.2 ~ 1.6, 默认 1.3)
+  uiScale: 'compact' | 'standard' | 'comfortable' | 'large'; // 界面全局字体缩放
+}
+
 export interface QuotaData {
   cliId: string;                 // 'kimi' | 'codex' | 'claude' | 'opencode'
   cliName: string;               // 'Kimi Code' | 'Codex' ...
