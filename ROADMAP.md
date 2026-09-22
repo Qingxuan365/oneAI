@@ -56,6 +56,7 @@
   - `npm run build` 成功通过（Exit code 0）。
   - 支持拖拽任意文件（包括 `.png`、`.jpg` 等图片）自动转 Windows 绝对物理路径。
   - 支持 `Ctrl+V` / 右键粘贴剪贴板文字及截图图片（自动生成临时路径供 AI CLI 直接读取）。
+  - `npm run build:win` 打包构建全流程执行成功（Exit code 0），成功生成 Windows 安装包 `release/OneAI-Setup-1.0.0.exe` 与免安装便携版 `release/OneAI-Portable-1.0.0.exe`。
 
 
 
