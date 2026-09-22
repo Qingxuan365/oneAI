@@ -44,7 +44,7 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({ tasks, activ
       if (!instancesRef.current.has(task.id)) {
         const termContainer = document.createElement('div');
         termContainer.id = `terminal-${task.id}`;
-        termContainer.className = 'w-full h-full';
+        termContainer.className = 'w-full h-full overflow-hidden';
         termContainer.style.display = task.id === activeTaskId ? 'block' : 'none';
         containerRef.current?.appendChild(termContainer);
 
@@ -74,8 +74,9 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({ tasks, activ
           fontFamily: 'Consolas, "Fira Code", monospace, "Segoe UI Emoji"',
           fontSize: 13,
           lineHeight: 1.25,
-          cursorBlink: true,
-          cursorStyle: 'bar',
+          cursorBlink: false,
+          cursorStyle: 'block',
+          cursorInactiveStyle: 'outline',
           convertEol: true,
           allowTransparency: true,
         });
@@ -169,27 +170,41 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({ tasks, activ
     };
   }, []);
 
-  // 监听视窗容器尺寸变化，自适应重算当前活动终端
+  // 监听视窗容器尺寸变化，自适应重算当前活动终端（增加防抖与行列变化比对，杜绝死循环抖动）
   useEffect(() => {
     if (!containerRef.current) return;
 
+    let resizeTimer: NodeJS.Timeout | null = null;
+    let lastCols = 0;
+    let lastRows = 0;
+
     const resizeObserver = new ResizeObserver(() => {
-      if (activeTaskId) {
-        const instance = instancesRef.current.get(activeTaskId);
-        if (instance) {
-          try {
-            instance.fitAddon.fit();
-            const { cols, rows } = instance.term;
-            window.electronAPI?.resizeSession(activeTaskId, cols, rows);
-          } catch {
-            // ignore
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (activeTaskId) {
+          const instance = instancesRef.current.get(activeTaskId);
+          if (instance) {
+            try {
+              instance.fitAddon.fit();
+              const { cols, rows } = instance.term;
+              if (cols !== lastCols || rows !== lastRows) {
+                lastCols = cols;
+                lastRows = rows;
+                window.electronAPI?.resizeSession(activeTaskId, cols, rows);
+              }
+            } catch {
+              // ignore
+            }
           }
         }
-      }
+      }, 100);
     });
 
     resizeObserver.observe(containerRef.current);
-    return () => resizeObserver.disconnect();
+    return () => {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeObserver.disconnect();
+    };
   }, [activeTaskId]);
 
   return (
@@ -202,7 +217,7 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({ tasks, activ
           </p>
         </div>
       ) : (
-        <div ref={containerRef} className="w-full h-full p-2" />
+        <div ref={containerRef} className="w-full h-full p-1.5 overflow-hidden" />
       )}
     </main>
   );
