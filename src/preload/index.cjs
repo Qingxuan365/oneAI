@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeSession: (id, data) => ipcRenderer.invoke('terminal:write', { id, data }),
   resizeSession: (id, cols, rows) => ipcRenderer.invoke('terminal:resize', { id, cols, rows }),
   killSession: (id) => ipcRenderer.invoke('terminal:kill', { id }),
+  restartSession: (id) => ipcRenderer.invoke('terminal:restart', { id }),
+  clearSessionBuffer: (id) => ipcRenderer.invoke('terminal:clear-buffer', { id }),
+  openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
+  saveLogFile: (defaultName, content) => ipcRenderer.invoke('dialog:save-log-file', { defaultName, content }),
   onSessionData: (callback) => {
     const subscription = (_event, value) => callback(value);
     ipcRenderer.on('terminal:data', subscription);

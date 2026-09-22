@@ -1,9 +1,19 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { SearchAddon } from '@xterm/addon-search';
 import '@xterm/xterm/css/xterm.css';
 import { TaskSession } from '../types';
+import { TerminalSearchBar } from './TerminalSearchBar';
+
+export interface TerminalViewportRef {
+  openSearch: () => void;
+  closeSearch: () => void;
+  clearActiveTerminal: () => void;
+  restartActiveTerminal: () => Promise<void>;
+  exportActiveTerminalLog: (mode: 'copy' | 'save') => Promise<{ success: boolean; filePath?: string; canceled?: boolean; error?: string }>;
+}
 
 interface TerminalViewportProps {
   tasks: TaskSession[];
@@ -17,6 +27,7 @@ interface TerminalViewportProps {
 interface TerminalInstance {
   term: Terminal;
   fitAddon: FitAddon;
+  searchAddon: SearchAddon;
   webglAddon?: WebglAddon;
   container: HTMLDivElement;
   pendingData: string;
@@ -32,25 +43,127 @@ interface TerminalInstance {
  * 此处移除无字符紧随定位的光标开启指令，保持隐藏状态直至真正定位到用户输入行。
  */
 export function sanitizeTerminalData(data: string): string {
-  // 1. 过滤：\x1b[?25l<光标定位>\x1b[?25h -> 保持隐藏 \x1b[?25l<光标定位>
   let res = data.replace(/\x1b\[\?25l(\x1b\[\d+;\d+H)\x1b\[\?25h/g, '\x1b[?25l$1');
-
-  // 2. 过滤 DECSET 2026 同步刷新结束前夕孤立泄露的光标开启指令
   res = res.replace(/(\x1b\[\d+;\d+H)\x1b\[\?25h(?=\s*\x1b\[0\s*q|\s*\x1b\[\?2026l)/g, '$1');
-
   return res;
 }
 
-export const TerminalViewport: React.FC<TerminalViewportProps> = ({
+export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewportProps>(({
   tasks,
   activeTaskId,
   fontSize = 15,
   lineHeight = 1.3,
   cursorStyle = 'bar',
   cursorBlink = true,
-}) => {
+}, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const instancesRef = useRef<Map<string, TerminalInstance>>(new Map());
+
+  // 搜索栏状态
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [matchCase, setMatchCase] = useState(false);
+  const [useRegex, setUseRegex] = useState(false);
+
+  const getActiveSearchAddon = () => {
+    if (!activeTaskId) return null;
+    return instancesRef.current.get(activeTaskId)?.searchAddon || null;
+  };
+
+  const handleSearchChange = (query: string) => {
+    setSearchQuery(query);
+    const searchAddon = getActiveSearchAddon();
+    if (searchAddon) {
+      if (query.trim()) {
+        searchAddon.findNext(query, { caseSensitive: matchCase, regex: useRegex, incremental: true });
+      } else {
+        searchAddon.clearDecorations();
+      }
+    }
+  };
+
+  const handleFindNext = () => {
+    const searchAddon = getActiveSearchAddon();
+    if (searchAddon && searchQuery.trim()) {
+      searchAddon.findNext(searchQuery, { caseSensitive: matchCase, regex: useRegex });
+    }
+  };
+
+  const handleFindPrevious = () => {
+    const searchAddon = getActiveSearchAddon();
+    if (searchAddon && searchQuery.trim()) {
+      searchAddon.findPrevious(searchQuery, { caseSensitive: matchCase, regex: useRegex });
+    }
+  };
+
+  const handleCloseSearch = () => {
+    const searchAddon = getActiveSearchAddon();
+    searchAddon?.clearDecorations();
+    setIsSearchOpen(false);
+    if (activeTaskId) {
+      instancesRef.current.get(activeTaskId)?.term.focus();
+    }
+  };
+
+  // 清理当前活动终端屏幕与主进程缓冲区
+  const clearActiveTerminal = () => {
+    if (!activeTaskId) return;
+    const instance = instancesRef.current.get(activeTaskId);
+    if (instance) {
+      instance.term.clear();
+      window.electronAPI?.clearSessionBuffer?.(activeTaskId);
+      instance.term.write('\r\n\x1b[90m[OneAI] 屏幕与会话历史已清空\x1b[0m\r\n');
+      instance.term.focus();
+    }
+  };
+
+  // 重启当前活动 CLI 进程
+  const restartActiveTerminal = async () => {
+    if (!activeTaskId) return;
+    const instance = instancesRef.current.get(activeTaskId);
+    if (instance) {
+      instance.term.clear();
+      instance.term.write('\r\n\x1b[33m[OneAI] 正在重启 CLI 会话进程...\x1b[0m\r\n');
+      await window.electronAPI?.restartSession?.(activeTaskId);
+      instance.term.focus();
+    }
+  };
+
+  // 导出或复制当前会话全量文本
+  const exportActiveTerminalLog = async (mode: 'copy' | 'save') => {
+    if (!activeTaskId) return { success: false, error: '无活动会话' };
+    const raw = (await window.electronAPI?.getSessionBuffer(activeTaskId)) || '';
+    // 去除 ANSI 控制序列，保留纯净文本
+    const plainText = raw.replace(/\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '');
+
+    if (mode === 'copy') {
+      try {
+        if (window.electronAPI?.writeClipboardText) {
+          await window.electronAPI.writeClipboardText(plainText);
+        } else {
+          await navigator.clipboard.writeText(plainText);
+        }
+        return { success: true };
+      } catch (err: any) {
+        return { success: false, error: err?.message || String(err) };
+      }
+    } else {
+      const activeTask = tasks.find((t) => t.id === activeTaskId);
+      const safeTitle = (activeTask?.title || 'session').replace(/[^a-zA-Z0-9_\u4e00-\u9fa5-]/g, '_');
+      const defaultName = `${safeTitle}-log-${Date.now()}.md`;
+      const res = await window.electronAPI?.saveLogFile?.(defaultName, plainText);
+      return res || { success: false, error: '保存失败' };
+    }
+  };
+
+  // 暴露给外层 Topbar 控制
+  useImperativeHandle(ref, () => ({
+    openSearch: () => setIsSearchOpen(true),
+    closeSearch: handleCloseSearch,
+    clearActiveTerminal,
+    restartActiveTerminal,
+    exportActiveTerminalLog,
+  }));
 
   // 全局阻止默认拖拽行为，防止外部文件拖入非目标区域导致 Electron 窗口刷新/跳转
   useEffect(() => {
@@ -100,6 +213,7 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
       if (!currentTaskIds.has(id)) {
         try {
           if (instance.flushTimer) clearTimeout(instance.flushTimer);
+          instance.searchAddon?.dispose();
           instance.webglAddon?.dispose();
           instance.term.dispose();
           instance.container.remove();
@@ -148,21 +262,25 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
           cursorBlink,
           cursorStyle,
           cursorInactiveStyle: 'none',
-          convertEol: false, // 现代 Windows ConPTY 已自带规范 CRLF，禁止强制 convertEol 以免缩进文本被多余 \r 错打在第 1 列
+          convertEol: false,
           allowTransparency: false,
           scrollback: 5000,
           windowsPty: {
             backend: 'conpty',
-            buildNumber: 26200, // 声明真实 Win11 构建号，防止 xterm.js 误判旧系统而禁用 Reflow 及导致行折叠首字拖影
+            buildNumber: 26200,
           },
         });
 
         const fitAddon = new FitAddon();
         term.loadAddon(fitAddon);
 
+        // 挂载官方搜索插件
+        const searchAddon = new SearchAddon();
+        term.loadAddon(searchAddon);
+
         term.open(termContainer);
 
-        // 挂载 GPU 硬件加速的 WebglAddon，由 GPU 显存缓冲接管整屏帧刷新，彻底根除 DOM 渲染器滚动时的文字残影与拖影
+        // 挂载 GPU 硬件加速 WebglAddon
         let webglAddon: WebglAddon | undefined;
         try {
           webglAddon = new WebglAddon();
@@ -175,6 +293,45 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
         }
 
         fitAddon.fit();
+
+        // 注册超链接识别（支持 http://、https:// 等网页地址，点击拉起系统默认浏览器）
+        term.registerLinkProvider({
+          provideLinks(bufferLineNumber, callback) {
+            try {
+              const line = term.buffer.active.getLine(bufferLineNumber - 1);
+              if (!line) {
+                callback(undefined);
+                return;
+              }
+              const text = line.translateToString(true);
+              const urlRegex = /(https?:\/\/[^\s<>"'`]+)/g;
+              const links: any[] = [];
+              let match: RegExpExecArray | null;
+              while ((match = urlRegex.exec(text)) !== null) {
+                const url = match[0];
+                const startX = match.index + 1;
+                const endX = startX + url.length;
+                links.push({
+                  text: url,
+                  range: {
+                    start: { x: startX, y: bufferLineNumber },
+                    end: { x: endX, y: bufferLineNumber },
+                  },
+                  activate: (_e: MouseEvent, text: string) => {
+                    if (window.electronAPI?.openExternal) {
+                      window.electronAPI.openExternal(text);
+                    } else {
+                      window.open(text, '_blank');
+                    }
+                  },
+                });
+              }
+              callback(links.length > 0 ? links : undefined);
+            } catch {
+              callback(undefined);
+            }
+          },
+        });
 
         // 绑定键盘输入并发送到 Electron 主进程
         term.onData((data) => {
@@ -259,7 +416,19 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
             return true;
           }
 
-          // 1. 复制快捷键支持：
+          // 1. 搜索快捷键 Ctrl+F
+          if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'f' || e.key === 'F')) {
+            setIsSearchOpen(true);
+            return false;
+          }
+
+          // 2. 清屏快捷键 Ctrl+K
+          if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'k' || e.key === 'K')) {
+            clearActiveTerminal();
+            return false;
+          }
+
+          // 3. 复制快捷键支持：
           // - Ctrl+C（无 Shift）：若有划选文本，执行复制并阻止向 PTY 发送 SIGINT 中断信号；若无划选，放行发送中断信号
           // - Ctrl+Shift+C 或 Ctrl+Insert：终端标准复制
           if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
@@ -278,7 +447,7 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
             return false;
           }
 
-          // 2. 粘贴快捷键支持：
+          // 4. 粘贴快捷键支持：
           // - Ctrl+V / Ctrl+Shift+V
           // - Shift+Insert（传统终端粘贴）
           if (
@@ -319,7 +488,6 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
                 p = (file as any).path || '';
               }
               if (p) {
-                // 如果路径中包含空格，用双引号包裹
                 paths.push(p.includes(' ') ? `"${p}"` : p);
               }
             }
@@ -333,6 +501,7 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
         const instance: TerminalInstance = {
           term,
           fitAddon,
+          searchAddon,
           webglAddon,
           container: termContainer,
           pendingData: '',
@@ -391,7 +560,6 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
       if (instance) {
         instance.pendingData += data;
 
-        // 如果遇到未闭合的 DECSET 2026 同步刷新块，稍微延长等待闭合；否则 16ms 内原子写入
         const inSync =
           instance.pendingData.includes('\x1b[?2026h') && !instance.pendingData.includes('\x1b[?2026l');
         const delay = inSync ? 25 : 16;
@@ -415,7 +583,7 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
     };
   }, []);
 
-  // 监听视窗容器尺寸变化，自适应重算当前活动终端（增加防抖与行列变化比对，杜绝死循环抖动）
+  // 监听视窗容器尺寸变化，自适应重算当前活动终端
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -454,6 +622,20 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
 
   return (
     <main className="flex-1 h-full w-full bg-[#0d1117] relative overflow-hidden">
+      {/* 终端内悬浮关键字搜索栏 */}
+      <TerminalSearchBar
+        isOpen={isSearchOpen}
+        searchQuery={searchQuery}
+        onSearchChange={handleSearchChange}
+        onFindNext={handleFindNext}
+        onFindPrevious={handleFindPrevious}
+        onClose={handleCloseSearch}
+        matchCase={matchCase}
+        onToggleMatchCase={() => setMatchCase((v) => !v)}
+        useRegex={useRegex}
+        onToggleRegex={() => setUseRegex((v) => !v)}
+      />
+
       {tasks.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-full text-slate-500 select-none">
           <p className="text-sm">暂无运行中的 CLI 任务</p>
@@ -466,5 +648,6 @@ export const TerminalViewport: React.FC<TerminalViewportProps> = ({
       )}
     </main>
   );
-};
+});
 
+TerminalViewport.displayName = 'TerminalViewport';

@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
-import { TerminalViewport } from './components/TerminalViewport';
+import { TerminalViewport, TerminalViewportRef } from './components/TerminalViewport';
 import { NewTaskModal } from './components/NewTaskModal';
 import { SettingsModal } from './components/SettingsModal';
 import { CliGroup, TaskSession, QuotaData, AppSettings } from './types';
@@ -134,6 +134,7 @@ export const App: React.FC = () => {
   const [groups, setGroups] = useState<CliGroup[]>(INITIAL_GROUPS);
   const [activeTaskId, setActiveTaskId] = useState<string | null>('kimi-task-1');
   const [quotas, setQuotas] = useState<Record<string, QuotaData>>({});
+  const terminalViewportRef = useRef<TerminalViewportRef>(null);
 
   // 字体与外观设置状态（自动持久化到 localStorage）
   const [settings, setSettings] = useState<AppSettings>(loadSavedSettings);
@@ -409,10 +410,15 @@ export const App: React.FC = () => {
           activeTask={activeTask}
           quota={currentQuota}
           onRefreshQuota={handleRefreshQuota}
+          onOpenSearch={() => terminalViewportRef.current?.openSearch()}
+          onClearScreen={() => terminalViewportRef.current?.clearActiveTerminal()}
+          onRestartSession={() => terminalViewportRef.current?.restartActiveTerminal()}
+          onExportLogs={(mode) => terminalViewportRef.current?.exportActiveTerminalLog(mode)}
         />
 
         {/* 多实例保活终端容器（切换时不销毁，display: none 保活） */}
         <TerminalViewport
+          ref={terminalViewportRef}
           tasks={allTasks}
           activeTaskId={activeTaskId}
           fontSize={settings.terminalFontSize}

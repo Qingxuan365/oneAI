@@ -50,6 +50,10 @@ export interface ElectronTerminalAPI {
   writeSession: (id: string, data: string) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => Promise<void>;
   killSession: (id: string) => Promise<void>;
+  restartSession?: (id: string) => Promise<{ success: boolean; buffer?: string; error?: string }>;
+  clearSessionBuffer?: (id: string) => Promise<boolean>;
+  openExternal?: (url: string) => Promise<boolean>;
+  saveLogFile?: (defaultName: string, content: string) => Promise<{ success: boolean; canceled?: boolean; filePath?: string; error?: string }>;
   onSessionData: (callback: (event: { id: string; data: string }) => void) => () => void;
   onSessionExit: (callback: (event: { id: string; exitCode: number }) => void) => () => void;
   getQuota: (cliId?: string) => Promise<QuotaData>;

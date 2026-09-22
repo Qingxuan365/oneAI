@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, clipboard } from 'electron';
+import { app, BrowserWindow, ipcMain, clipboard, shell, dialog } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -89,6 +89,15 @@ function setupIPC() {
     ptyManager.killSession(id);
   });
 
+  ipcMain.handle('terminal:restart', async (_event, { id }) => {
+    return ptyManager.restartSession(id);
+  });
+
+  ipcMain.handle('terminal:clear-buffer', async (_event, { id }) => {
+    ptyManager.clearSessionBuffer(id);
+    return true;
+  });
+
   ipcMain.handle('quota:get', async (_event, cliId?: string) => {
     return quotaService.getQuota(cliId);
   });
@@ -140,6 +149,43 @@ function setupIPC() {
       console.error('[OneAI] Error writing text to clipboard:', e);
     }
     return false;
+  });
+
+  // 在系统默认浏览器中打开外部超链接
+  ipcMain.handle('shell:open-external', async (_event, url: string) => {
+    try {
+      if (url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('mailto:'))) {
+        await shell.openExternal(url);
+        return true;
+      }
+    } catch (e) {
+      console.error('[OneAI] Error opening external URL:', e);
+    }
+    return false;
+  });
+
+  // 弹出保存文件对话框，将终端完整日志存盘
+  ipcMain.handle('dialog:save-log-file', async (_event, { defaultName, content }: { defaultName: string; content: string }) => {
+    try {
+      if (!mainWindow) return { success: false, error: 'No main window' };
+      const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+        title: '导出终端会话完整日志',
+        defaultPath: defaultName || `terminal-log-${Date.now()}.txt`,
+        filters: [
+          { name: 'Markdown 文档 (*.md)', extensions: ['md'] },
+          { name: '文本文件 (*.txt)', extensions: ['txt'] },
+          { name: '所有文件 (*.*)', extensions: ['*'] },
+        ],
+      });
+      if (canceled || !filePath) {
+        return { success: false, canceled: true };
+      }
+      fs.writeFileSync(filePath, content, 'utf-8');
+      return { success: true, filePath };
+    } catch (e: any) {
+      console.error('[OneAI] Error saving log file:', e);
+      return { success: false, error: e?.message || String(e) };
+    }
   });
 }
 

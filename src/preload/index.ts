@@ -27,6 +27,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   killSession: (id: string) =>
     ipcRenderer.invoke('terminal:kill', { id }),
 
+  restartSession: (id: string) =>
+    ipcRenderer.invoke('terminal:restart', { id }),
+
+  clearSessionBuffer: (id: string) =>
+    ipcRenderer.invoke('terminal:clear-buffer', { id }),
+
+  openExternal: (url: string) =>
+    ipcRenderer.invoke('shell:open-external', url),
+
+  saveLogFile: (defaultName: string, content: string) =>
+    ipcRenderer.invoke('dialog:save-log-file', { defaultName, content }),
+
   onSessionData: (callback: (event: { id: string; data: string }) => void) => {
     const subscription = (_event: any, value: { id: string; data: string }) => callback(value);
     ipcRenderer.on('terminal:data', subscription);

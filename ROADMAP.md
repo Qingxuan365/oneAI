@@ -48,21 +48,24 @@
   - **鼠标右键智能分流**：终端有划选时右键为「复制」，无划选时右键为「粘贴」，彻底根除右键覆盖抹杀划选文本的倒置缺陷。
   - **标准终端快捷键补齐**：支持 `Ctrl+Shift+C` 与 `Ctrl+Insert`（复制），支持 `Shift+Insert`（传统终端粘贴）。
   - **主进程原生剪贴板通道**：Electron 主进程新增 `clipboard:write-text` 原生 IPC 接口与 Preload 封装，确保任何焦点状态下复制零丢包。
+- [x] Phase 21: 终端高频实用交互功能全量落地（对标 Warp / Cursor 专业交互）：
+  - **终端内容关键字搜索（`Ctrl+F`）**：集成官方 `@xterm/addon-search` 模块，打造右上角深色毛玻璃悬浮搜索框，支持实时高亮、双向匹配定位（`Enter` 下一个，`Shift+Enter` 上一个）、大小写匹配与正则表达式切换，`Esc` 退出并恢复终端焦点。
+  - **超链接与网址可点击跳转（WebLinks）**：基于 `term.registerLinkProvider` 原生注册超链接提供器，精确识别 `http://` 与 `https://` 网址，点击直接调用系统默认浏览器安全打开（`shell.openExternal`）。
+  - **会话一键清屏（`Ctrl+K`）与进程重启**：顶栏新增清屏（Eraser）与会话重启（RotateCcw）操作项；清屏可同步擦除主进程历史缓存；会话重启支持在保留原有工作目录与启动模板的前提下优雅重生 PTY。
+  - **全量终端交互日志一键导出与复制**：顶栏新增导出菜单，自动过滤 ANSI 控制符，一键将完整会话纯文本复制到剪贴板，或通过 Electron 原生另存为窗口导出为 `.md` / `.txt` 日志文件。
 - [x] 全量 TypeScript 类型检查（`npx tsc --noEmit`）与 Vite 构建打包（`npm run build`）测试通过。
 
 ### 待办 / 后续增强
 - [ ] 后续多窗口分屏支持（Split Terminal View）。
 
 ## 3. 阻塞与风险
-- 暂无阻塞。多 CLI 管理、划选复制、图文粘贴、文件拖拽与打包构建均已就绪并全链路验证通过。
+- 暂无阻塞。高频交互 4 件套（搜索、超链接、清屏/重启、日志导出）已全量实现并打包验证通过。
 
 ## 4. 最近验证
 - **2026-09-22**：
   - `npm run build` 成功通过（Exit code 0）。
-  - 划选文本 `Ctrl+C` / `Ctrl+Shift+C` / 右键复制与无划选右键 / `Ctrl+V` / `Shift+Insert` 智能粘贴全场景实测验证通过。
-  - 支持拖拽任意文件（包括 `.png`、`.jpg` 等图片）自动转 Windows 绝对物理路径。
-  - 支持 `Ctrl+V` / 右键粘贴剪贴板文字及截图图片（自动生成临时路径供 AI CLI 直接读取）。
   - `npm run build:win` 打包构建全流程执行成功（Exit code 0），成功生成 Windows 安装包 `release/OneAI-Setup-1.0.0.exe` 与免安装便携版 `release/OneAI-Portable-1.0.0.exe`。
+  - 验证高频交互：`Ctrl+F` 悬浮搜索栏即搜即显、超链接跳转默认浏览器、`Ctrl+K` 彻底清屏、会话原地重启与会话日志复制/另存为本地文件均测试正常。
 
 
 

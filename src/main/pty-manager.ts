@@ -12,6 +12,7 @@ interface CreateSessionOptions {
 
 export class PtyManager {
   private sessions: Map<string, pty.IPty> = new Map();
+  private sessionOptions: Map<string, CreateSessionOptions> = new Map();
   private dataBuffers: Map<string, string> = new Map();
   private mainWindow: BrowserWindow | null = null;
 
@@ -25,8 +26,13 @@ export class PtyManager {
     return this.dataBuffers.get(id) || '';
   }
 
+  public clearSessionBuffer(id: string) {
+    this.dataBuffers.set(id, '');
+  }
+
   public createSession(options: CreateSessionOptions): { success: boolean; buffer?: string; error?: string } {
     const { id, command, cwd } = options;
+    this.sessionOptions.set(id, options);
 
     // 如果该 session 已经存在，则返回当前缓冲区
     if (this.sessions.has(id)) {
@@ -166,6 +172,16 @@ export class PtyManager {
       }
       this.sessions.delete(id);
     }
+  }
+
+  public restartSession(id: string): { success: boolean; buffer?: string; error?: string } {
+    const options = this.sessionOptions.get(id);
+    this.killSession(id);
+    this.clearSessionBuffer(id);
+    if (options) {
+      return this.createSession(options);
+    }
+    return this.createSession({ id });
   }
 
   public destroyAll() {
