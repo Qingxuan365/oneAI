@@ -26,26 +26,32 @@
 - [x] Phase 13: 彻底根除右侧终端视窗滚动文字残影与左侧边缘拖影（WebGL 加速 + Win11 ConPTY 构建号 26200 对齐）。
 - [x] Phase 14: 集成系统原生终端菜单并打包为 Windows 原生 `.exe` 应用。
 - [x] Phase 15: 彻底消除所有 CLI 模型硬编码，实现全量动态感知与实时监听。
-- [x] Phase 16: 修复 Claude Code 切换模型动态生效与全量支持模型推理思考等级（Effort Level）徽标展示：
-  - **修复 Claude Code 切换模型优先级 Bug**：将 `~/.claude.json` 最近活跃项目使用记录（`lastModelUsage`）与 `settings.json` 的 `model`（及 `ANTHROPIC_DEFAULT_${model}_MODEL` 别名映射）提升为最高优先级，彻底解决此前被固定环境变量 `ANTHROPIC_MODEL: deepseek-flash` 劫持覆盖的问题；当用户切换为 opus 时，自动解析呈现为当前真实使用的 `deepseek-v4-pro`。
-  - **全量支持模型推理思考等级（Effort Level）感知与展示**：
-    - 动态解析 Claude Code 的 `effortLevel`（如 `medium`、`high` 等）。
-    - 动态解析 Codex 的 `model_reasoning_effort`（如 `medium`、`high` 等）。
-    - 动态解析 Grok CLI 的 `reasoning_effort`（如 `high`、`xhigh` 等）。
-  - **顶栏单行微标高亮设计**：在顶栏模型徽章内增加紧凑精致的等级徽标，按等级提供专属微光色彩（`low`: 蓝光，`medium`: 翡翠绿，`high`: 琥珀金，`xhigh`/`max`: 紫光），实时感知终端变动。
-  - **重新构建与打包**：成功编译输出最新带完整 Effort 徽标支持的 Windows 可执行文件：`release/OneDesktop-Portable-1.0.0.exe`（74.4 MB）与 `release/OneDesktop-Setup-1.0.0.exe`（74.6 MB）。
+- [x] Phase 16: 修复 Claude Code 切换模型动态生效与全量支持模型推理思考等级（Effort Level）徽标展示。
+- [x] Phase 17: 全量拓展所有 CLI 的模型推理思考等级（Effort Level）感知体系与热监听：
+  - **Kimi Code 思考等级动态提取**：自动从 `~/.kimi-code/config.toml` 中解析 `[thinking]` 块的全局 `effort`（当前主人的设置为 `high`）与各个 model 的 `default_effort`，在顶栏高亮显示为翡翠绿/琥珀金等级徽标。
+  - **Grok CLI 推理等级动态提取**：优先从 `~/.grok/config.toml` 中解析用户真实配置的 `default_reasoning_effort`（当前主人的设置为 `xhigh`），在顶栏高亮显示为专属紫光徽标；降级从 `models_cache.json` 读取。
+  - **Codex 思考等级动态提取**：自动从 `~/.codex/config.toml` 中解析 `model_reasoning_effort`（当前为 `high`），在顶栏高亮显示。
+  - **Claude Code 思考等级动态提取**：自动从 `~/.claude/settings.json` 中解析 `effortLevel`（当前为 `medium`），在顶栏高亮显示。
+  - **OpenCode 思考等级动态提取**：支持环境变量 `OPENCODE_EFFORT` 与 `~/.opencode/config.json` 动态解析。
+  - **全链路文件热监听**：为所有 CLI 的配置文件（含 `~/.kimi-code/config.toml`、`~/.grok/config.toml`、`~/.codex/config.toml`、`~/.claude/settings.json` 等）注入实时变更监听，任何 CLI 在终端切模型或改等级秒级自动更新。
+  - **重新构建与打包**：成功编译输出最新 Windows 可执行文件：`release/OneDesktop-Portable-1.0.0.exe`（74.4 MB）与 `release/OneDesktop-Setup-1.0.0.exe`（74.6 MB）。
 - [x] 全量 TypeScript 类型检查（`npx tsc --noEmit`）与 Vite 构建打包（`npm run build`）测试通过。
 
 ### 待办 / 后续增强
 - [ ] 后续多窗口分屏支持（Split Terminal View）。
 
 ## 3. 阻塞与风险
-- 暂无阻塞。已完整修复模型切换联动与推理思考等级展示，已编译生成最新 Windows 可执行文件。
+- 暂无阻塞。所有 CLI 均已支持模型等级与动态感知，最新 `.exe` 应用已就绪。
 
 ## 4. 最近验证
 - **2026-09-22**：
-  - 针对主人当前真实运行的 Claude Code 执行解析，精准提取出 `{ model: 'deepseek-v4-pro', effort: 'medium' }`，与终端提示完全一致。
-  - 执行 `npm run build` 和 `npx electron-builder --win` 成功打包生成最新版便携式与安装向导 `.exe`（生成时间：11:33）。
+  - 在用户本地真实环境提取全部 CLI 的模型与等级并全部通过验证：
+    - Kimi: `{ model: 'K3-256k', effort: 'high' }`
+    - Codex: `{ model: 'gpt-6-astra', effort: 'high' }`
+    - Claude: `{ model: 'deepseek-v4-pro', effort: 'medium' }`
+    - Grok: `{ model: 'Grok 4.7', effort: 'xhigh' }`
+  - 执行 `npm run build` 和 `npx electron-builder --win` 成功打包生成最新版便携式与安装向导 `.exe`（生成时间：11:39）。
+
 
 
 

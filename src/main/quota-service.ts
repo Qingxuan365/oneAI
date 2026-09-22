@@ -53,15 +53,18 @@ export class QuotaService {
   private readonly CACHE_TTL_MS = 25000;
 
   constructor() {
+    const kimiInfo = this.getKimiInfo();
     const codexInfo = this.getCodexInfo();
     const claudeInfo = this.getClaudeInfo();
     const grokInfo = this.getGrokInfo();
+    const opencodeInfo = this.getOpenCodeInfo();
 
     this.quotasCache = {
       kimi: {
         cliId: 'kimi',
         cliName: 'Kimi Code',
-        model: this.getKimiCurrentModel(),
+        model: kimiInfo.model,
+        effort: kimiInfo.effort,
         planType: 'Kimi Coding',
         fiveHourPercent: 100,
         fiveHourResetsIn: '--',
@@ -99,7 +102,8 @@ export class QuotaService {
       opencode: {
         cliId: 'opencode',
         cliName: 'OpenCode',
-        model: this.getOpenCodeCurrentModel(),
+        model: opencodeInfo.model,
+        effort: opencodeInfo.effort,
         fiveHourPercent: 0,
         fiveHourResetsIn: '--',
         sevenDayPercent: 0,
@@ -146,7 +150,9 @@ export class QuotaService {
       { filePath: path.join(os.homedir(), '.claude', 'settings.json'), cliId: 'claude' },
       { filePath: path.join(os.homedir(), '.claude.json'), cliId: 'claude' },
       { filePath: path.join(os.homedir(), '.grok', 'settings_cache.json'), cliId: 'grok' },
+      { filePath: path.join(os.homedir(), '.grok', 'models_cache.json'), cliId: 'grok' },
       { filePath: path.join(os.homedir(), '.grok', 'config.toml'), cliId: 'grok' },
+      { filePath: path.join(os.homedir(), '.opencode', 'config.json'), cliId: 'opencode' },
     ];
 
     const debounceMap = new Map<string, NodeJS.Timeout>();
@@ -251,11 +257,14 @@ export class QuotaService {
     }
   }
 
-  private getKimiCurrentModel(): string {
+  public getKimiInfo(): { model: string; effort?: string } {
     const configPath = path.join(os.homedir(), '.kimi-code', 'config.toml');
     if (!fs.existsSync(configPath)) {
-      return 'K3';
+      return { model: 'K3', effort: undefined };
     }
+
+    let model = 'K3';
+    let effort: string | undefined = undefined;
 
     try {
       const content = fs.readFileSync(configPath, 'utf8');
@@ -269,20 +278,37 @@ export class QuotaService {
         if (sectionMatch) {
           const displayMatch = sectionMatch[1].match(/display_name\s*=\s*["']([^"']+)["']/);
           if (displayMatch && displayMatch[1]) {
-            return displayMatch[1];
+            model = displayMatch[1];
+          }
+          const modelEffortMatch = sectionMatch[1].match(/default_effort\s*=\s*["']([^"']+)["']/);
+          if (modelEffortMatch && modelEffortMatch[1]) {
+            effort = modelEffortMatch[1];
           }
         }
 
-        if (defaultModelKey.includes('highspeed')) return 'K2.7 Highspeed';
-        if (defaultModelKey.includes('kimi-for-coding')) return 'K2.8 Preview';
-        if (defaultModelKey.includes('k3')) return 'K3';
-        return defaultModelKey.split('/').pop() || defaultModelKey;
+        if (model === 'K3') {
+          if (defaultModelKey.includes('highspeed')) model = 'K2.7 Highspeed';
+          else if (defaultModelKey.includes('kimi-for-coding')) model = 'K2.8 Preview';
+          else if (defaultModelKey.includes('k3')) model = 'K3';
+          else model = defaultModelKey.split('/').pop() || defaultModelKey;
+        }
+      }
+
+      // 优先从 [thinking] 块中提取全局设置的 effort（如 effort = "high"）
+      const thinkingBlock = content.match(/\[thinking\]([\s\S]*?)(?=\n\[|$)/);
+      if (thinkingBlock) {
+        const ef = thinkingBlock[1].match(/effort\s*=\s*["']([^"']+)["']/);
+        if (ef && ef[1]) {
+          effort = ef[1];
+        }
       }
     } catch (e) {
       console.warn('[QuotaService] Error parsing Kimi config:', e);
     }
 
-    return 'K3';
+    if (process.env.KIMI_EFFORT) effort = process.env.KIMI_EFFORT;
+
+    return { model, effort };
   }
 
   public getCodexInfo(): { model: string; effort?: string } {
@@ -302,6 +328,9 @@ export class QuotaService {
     }
     if (model === 'Auto' && process.env.CODEX_MODEL) {
       model = process.env.CODEX_MODEL;
+    }
+    if (!effort && process.env.CODEX_REASONING_EFFORT) {
+      effort = process.env.CODEX_REASONING_EFFORT;
     }
     return { model, effort };
   }
@@ -386,14 +415,27 @@ export class QuotaService {
     let model = 'Grok 4.7';
     let effort: string | undefined = undefined;
 
-    // 1. 读取 ~/.grok/settings_cache.json
+    // 1. 优先读取 ~/.grok/config.toml 中用户的自定义配置与推理等级
+    const grokConfig = path.join(os.homedir(), '.grok', 'config.toml');
+    let configDefaultModel: string | undefined = undefined;
+    if (fs.existsSync(grokConfig)) {
+      try {
+        const content = fs.readFileSync(grokConfig, 'utf8');
+        const mm = content.match(/default\s*=\s*["']([^"']+)["']/);
+        if (mm && mm[1]) configDefaultModel = mm[1];
+        const me = content.match(/(?:default_)?reasoning_effort\s*=\s*["']([^"']+)["']/);
+        if (me && me[1]) effort = me[1];
+      } catch {}
+    }
+
+    // 2. 读取 ~/.grok/settings_cache.json
     const grokSettings = path.join(os.homedir(), '.grok', 'settings_cache.json');
-    let defaultModelId = 'grok-4.7';
+    let defaultModelId = configDefaultModel || 'grok-4.7';
     if (fs.existsSync(grokSettings)) {
       try {
         const raw = JSON.parse(fs.readFileSync(grokSettings, 'utf8'));
         const payload = typeof raw.payload === 'string' ? JSON.parse(raw.payload) : raw.payload;
-        if (payload?.settings?.default_model) {
+        if (!configDefaultModel && payload?.settings?.default_model) {
           defaultModelId = payload.settings.default_model;
         }
       } catch (e) {
@@ -401,7 +443,7 @@ export class QuotaService {
       }
     }
 
-    // 2. 查看 models_cache.json 获取友好名称和 reasoning_effort
+    // 3. 查看 models_cache.json 获取友好名称与兜底 reasoning_effort
     const modelsCache = path.join(os.homedir(), '.grok', 'models_cache.json');
     if (fs.existsSync(modelsCache)) {
       try {
@@ -409,27 +451,38 @@ export class QuotaService {
         const targetModel = mc.models?.[defaultModelId] || Object.values(mc.models || {})[0];
         if (targetModel?.info) {
           if (targetModel.info.name) model = targetModel.info.name;
-          if (targetModel.info.reasoning_effort) effort = targetModel.info.reasoning_effort;
+          if (!effort && targetModel.info.reasoning_effort) effort = targetModel.info.reasoning_effort;
         }
       } catch {}
     } else {
       model = defaultModelId;
     }
 
-    // 3. ~/.grok/config.toml
-    const grokConfig = path.join(os.homedir(), '.grok', 'config.toml');
-    if (fs.existsSync(grokConfig)) {
-      try {
-        const content = fs.readFileSync(grokConfig, 'utf8');
-        const m = content.match(/model\s*=\s*["']([^"']+)["']/);
-        if (m && m[1]) model = m[1];
-      } catch {}
-    }
-
     if (process.env.GROK_MODEL) model = process.env.GROK_MODEL;
     if (process.env.XAI_MODEL) model = process.env.XAI_MODEL;
+    if (process.env.GROK_REASONING_EFFORT) effort = process.env.GROK_REASONING_EFFORT;
 
     return { model, effort };
+  }
+
+  public getOpenCodeInfo(): { model: string; effort?: string } {
+    let model = 'Auto';
+    let effort: string | undefined = undefined;
+    if (process.env.OPENCODE_MODEL) model = process.env.OPENCODE_MODEL;
+    if (process.env.OPENCODE_EFFORT) effort = process.env.OPENCODE_EFFORT;
+    const opencodeConfig = path.join(os.homedir(), '.opencode', 'config.json');
+    if (fs.existsSync(opencodeConfig)) {
+      try {
+        const c = JSON.parse(fs.readFileSync(opencodeConfig, 'utf8'));
+        if (c.model) model = c.model;
+        if (c.effort || c.reasoning_effort) effort = c.effort || c.reasoning_effort;
+      } catch {}
+    }
+    return { model, effort };
+  }
+
+  private getKimiCurrentModel(): string {
+    return this.getKimiInfo().model;
   }
 
   private getCodexCurrentModel(): string {
@@ -445,26 +498,21 @@ export class QuotaService {
   }
 
   private getOpenCodeCurrentModel(): string {
-    if (process.env.OPENCODE_MODEL) return process.env.OPENCODE_MODEL;
-    const opencodeConfig = path.join(os.homedir(), '.opencode', 'config.json');
-    if (fs.existsSync(opencodeConfig)) {
-      try {
-        const c = JSON.parse(fs.readFileSync(opencodeConfig, 'utf8'));
-        if (c.model) return c.model;
-      } catch {}
-    }
-    return 'Auto';
+    return this.getOpenCodeInfo().model;
   }
 
   private async fetchKimiQuota(): Promise<QuotaData> {
     const credPath = path.join(os.homedir(), '.kimi-code', 'credentials', 'kimi-code.json');
-    const currentModel = this.getKimiCurrentModel();
+    const kimiInfo = this.getKimiInfo();
+    const currentModel = kimiInfo.model;
+    const currentEffort = kimiInfo.effort;
 
     if (!fs.existsSync(credPath)) {
       return {
         cliId: 'kimi',
         cliName: 'Kimi Code',
         model: currentModel,
+        effort: currentEffort,
         fiveHourPercent: 0,
         fiveHourResetsIn: '--',
         sevenDayPercent: 0,
@@ -543,6 +591,7 @@ export class QuotaService {
         cliId: 'kimi',
         cliName: 'Kimi Code',
         model: currentModel,
+        effort: currentEffort,
         planType: 'Kimi Coding',
         fiveHourPercent,
         fiveHourResetsIn,
@@ -557,6 +606,7 @@ export class QuotaService {
         cliId: 'kimi',
         cliName: 'Kimi Code',
         model: currentModel,
+        effort: currentEffort,
         fiveHourPercent: 100,
         fiveHourResetsIn: '--',
         sevenDayPercent: 100,
@@ -783,10 +833,12 @@ export class QuotaService {
   }
 
   private async fetchOpenCodeQuota(): Promise<QuotaData> {
+    const opencodeInfo = this.getOpenCodeInfo();
     return {
       cliId: 'opencode',
       cliName: 'OpenCode',
-      model: this.getOpenCodeCurrentModel(),
+      model: opencodeInfo.model,
+      effort: opencodeInfo.effort,
       fiveHourPercent: 0,
       fiveHourResetsIn: '--',
       sevenDayPercent: 0,
