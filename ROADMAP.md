@@ -34,23 +34,28 @@
   - **Claude Code 思考等级动态提取**：自动从 `~/.claude/settings.json` 中解析 `effortLevel`（当前为 `medium`），在顶栏高亮显示。
   - **OpenCode 思考等级动态提取**：支持环境变量 `OPENCODE_EFFORT` 与 `~/.opencode/config.json` 动态解析。
   - **全链路文件热监听**：为所有 CLI 的配置文件（含 `~/.kimi-code/config.toml`、`~/.grok/config.toml`、`~/.codex/config.toml`、`~/.claude/settings.json` 等）注入实时变更监听，任何 CLI 在终端切模型或改等级秒级自动更新。
-  - **重新构建与打包**：成功编译输出最新 Windows 可执行文件：`release/OneDesktop-Portable-1.0.0.exe`（74.4 MB）与 `release/OneDesktop-Setup-1.0.0.exe`（74.6 MB）。
+- [x] Phase 18: 全局重命名为 OneAI、顶栏实时农历/公历/星期动态时钟与 Grok Build 命名对齐：
+  - 应用所有呈现位置及打包配置（`package.json`、`electron-builder.json`、`index.html`、窗口标题、侧边栏品牌字）全面改名为 **OneAI**。
+  - 顶栏中间区域加入 `YYYY-MM-DD（农历）HH:mm:ss （星期）` 格式精准动态时钟，基于 Chromium 原生 `Intl` 中华日历，秒数持续跳动。
+  - `Grok CLI` 正式更名为 `Grok Build`。
+- [x] Phase 19: 终端增强：文件/图片拖拽自动转绝对路径与剪贴板图文粘贴支持：
+  - **拖拽自动转绝对路径**：利用 Electron 31 原生 `webUtils.getPathForFile` 解析外部拖入的文件或图片绝对物理路径，对含空格路径自动增加双引号包裹，写入底层 PTY 会话。
+  - **剪贴板文本粘贴**：支持 `Ctrl+V`、`Ctrl+Shift+V` 及鼠标右键点击直接将剪贴板文本写入终端。
+  - **剪贴板图片资料自动转路径**：当剪贴板为截图或图片时，主进程自动将其写入 `%TEMP%/OneAI_Images/paste_<timestamp>.png`，并自动将生成的高清图片绝对路径填入终端，方便 Claude Code、Codex 等大模型多模态 CLI 直接读取分析。
+  - **防拖拽逃逸保护**：全局监听并阻止外层 dragover/drop 默认行为，杜绝外部文件拖入导致 Electron 窗口意外刷新或跳转。
 - [x] 全量 TypeScript 类型检查（`npx tsc --noEmit`）与 Vite 构建打包（`npm run build`）测试通过。
 
 ### 待办 / 后续增强
 - [ ] 后续多窗口分屏支持（Split Terminal View）。
 
 ## 3. 阻塞与风险
-- 暂无阻塞。所有 CLI 均已支持模型等级与动态感知，最新 `.exe` 应用已就绪。
+- 暂无阻塞。文件/图片拖拽转路径、文本粘贴与截图粘贴功能已就绪并验证通过。
 
 ## 4. 最近验证
 - **2026-09-22**：
-  - 在用户本地真实环境提取全部 CLI 的模型与等级并全部通过验证：
-    - Kimi: `{ model: 'K3-256k', effort: 'high' }`
-    - Codex: `{ model: 'gpt-6-astra', effort: 'high' }`
-    - Claude: `{ model: 'deepseek-v4-pro', effort: 'medium' }`
-    - Grok: `{ model: 'Grok 4.7', effort: 'xhigh' }`
-  - 执行 `npm run build` 和 `npx electron-builder --win` 成功打包生成最新版便携式与安装向导 `.exe`（生成时间：11:39）。
+  - `npm run build` 成功通过（Exit code 0）。
+  - 支持拖拽任意文件（包括 `.png`、`.jpg` 等图片）自动转 Windows 绝对物理路径。
+  - 支持 `Ctrl+V` / 右键粘贴剪贴板文字及截图图片（自动生成临时路径供 AI CLI 直接读取）。
 
 
 
