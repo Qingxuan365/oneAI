@@ -25,7 +25,9 @@
 - 暂无阻塞。原生模块与渲染构建均已调通。
 
 ## 4. 最近验证
-- **2026-09-22**：执行 `npm run build` 全量编译成功，主进程 `dist-electron/main/index.js`、预加载 `dist-electron/preload/index.js` 与渲染前端 `dist/index.html` 均零警告零错误构建完成。
+- **2026-09-22**：
+  - 修复终端获取焦点后光标剧烈抖动问题：在 `TerminalViewport.tsx` 引入 100ms 防抖、字符矩阵行列变化比对，并将光标设置为原生稳定块状模式（`cursorStyle: 'block'`，禁用 CSS 动画与 ANSI 擦除冲突）。
+  - 执行 `npm run build` 全量重新编译打包通过。
 
 ## 3. 阻塞与风险
 - 暂无阻塞。
