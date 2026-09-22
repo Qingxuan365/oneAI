@@ -27,6 +27,7 @@
 ## 4. 最近验证
 - **2026-09-22**：
   - 修复终端获取焦点后光标剧烈抖动问题：在 `TerminalViewport.tsx` 引入 100ms 防抖、字符矩阵行列变化比对，并将光标设置为原生稳定块状模式（`cursorStyle: 'block'`，禁用 CSS 动画与 ANSI 擦除冲突）。
+  - 修复 Codex 输入框光标横向移动与残影拖尾问题：移除了 WebGL 显存 alpha 混合残留（`allowTransparency: false`），开启 `windowsPty: { backend: 'conpty' }` 官方 Windows ConPTY 字符协议适配，回归稳定的 DOM/Canvas 原生渲染通道。
   - 执行 `npm run build` 全量重新编译打包通过。
 
 ## 3. 阻塞与风险
