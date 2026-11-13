@@ -1,6 +1,8 @@
-import React from 'react';
-import { X, Type, Monitor, RotateCcw, Minus, Plus } from 'lucide-react';
+import React, { useState } from 'react';
+import { Clock, Keyboard, LucideIcon, Minus, Monitor, Moon, Palette, Plus, RotateCcw, Settings, SlidersHorizontal, Sun, TerminalSquare } from 'lucide-react';
 import { AppSettings } from '../types';
+import { THEME_OPTIONS } from '../themes';
+import { Modal } from './Modal';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -10,6 +12,95 @@ interface SettingsModalProps {
   onResetDefault: () => void;
 }
 
+type TabId = 'appearance' | 'terminal' | 'general' | 'time' | 'shortcuts';
+
+const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
+  { id: 'appearance', label: '外观', icon: Palette },
+  { id: 'terminal', label: '终端', icon: TerminalSquare },
+  { id: 'general', label: '提醒与音乐', icon: SlidersHorizontal },
+  { id: 'time', label: '时间', icon: Clock },
+  { id: 'shortcuts', label: '快捷键', icon: Keyboard },
+];
+
+const FONT_PRESETS = [13, 14, 15, 16, 18, 20];
+const LINE_HEIGHTS = [
+  { label: '紧凑', val: 1.2 },
+  { label: '标准', val: 1.3 },
+  { label: '宽松', val: 1.45 },
+  { label: '大行高', val: 1.6 },
+];
+
+const UI_SCALES: { id: AppSettings['uiScale']; name: string; desc: string; pct: string }[] = [
+  { id: 'compact', name: '紧凑', desc: '信息密集', pct: '90%' },
+  { id: 'standard', name: '标准', desc: '经典尺寸', pct: '100%' },
+  { id: 'comfortable', name: '舒适（推荐）', desc: '清晰护眼', pct: '110%' },
+  { id: 'large', name: '大号', desc: '适合 2K/4K', pct: '125%' },
+];
+
+const CURSOR_STYLES: { id: AppSettings['terminalCursorStyle']; name: string; desc: string; icon: string }[] = [
+  { id: 'bar', name: '竖线（推荐）', desc: '不遮挡字符', icon: '│' },
+  { id: 'block', name: '方块', desc: '经典实心方块', icon: '█' },
+  { id: 'underline', name: '下划线', desc: '底部横线', icon: '▁' },
+];
+
+const SHORTCUTS: { title: string; items: [string, string][] }[] = [
+  {
+    title: '任务与界面',
+    items: [
+      ['Ctrl + Tab / Ctrl + Shift + Tab', '切换到下一个 / 上一个任务'],
+      ['Ctrl + 1 … 9', '切换到第 N 个任务'],
+      ['Ctrl + Shift + T', '在当前 CLI 分组一键新建任务'],
+      ['Ctrl + Shift + N', '新建任务并自定义名称、命令与目录'],
+      ['Ctrl + Shift + W', '关闭当前任务'],
+      ['Alt + ↑ / ↓', '焦点在侧栏任务或分组上时调整顺序'],
+      ['鼠标中键', '关闭侧栏中的任务'],
+      ['Ctrl + Shift + B', '折叠或展开左侧导航栏'],
+      ['Ctrl + Shift + H', '打开历史会话'],
+      ['Ctrl + ,', '打开设置'],
+      ['F2 / 双击任务', '重命名任务'],
+      ['Alt + ↑ / ↓', '移动聚焦的 CLI 分组'],
+    ],
+  },
+  {
+    title: '终端',
+    items: [
+      ['Ctrl + Shift + F', '搜索终端内容'],
+      ['Ctrl + Shift + K', '清空屏幕与历史缓存'],
+      ['Shift + Enter', '在 AI CLI 输入框内换行'],
+      ['Ctrl + 单击', '打开终端里的网址或文件路径'],
+      ['Ctrl + + / - / 0', '放大 / 缩小 / 还原终端字号'],
+      ['Ctrl + C', '有选中文本时复制，否则中断命令'],
+      ['Ctrl + V / 右键', '粘贴文本或图片路径'],
+    ],
+  },
+];
+
+const Section: React.FC<{ title: string; hint?: string; aside?: React.ReactNode; children: React.ReactNode }> = ({ title, hint, aside, children }) => (
+  <section className="space-y-2.5">
+    <div className="flex items-center justify-between gap-3">
+      <h3 className="text-ui font-semibold text-fg">
+        {title}
+        {hint && <span className="ml-2 text-xs font-normal text-fg-faint">{hint}</span>}
+      </h3>
+      {aside}
+    </div>
+    {children}
+  </section>
+);
+
+const Switch: React.FC<{ checked: boolean; onChange: (checked: boolean) => void; label: string }> = ({ checked, onChange, label }) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={checked}
+    aria-label={label}
+    onClick={() => onChange(!checked)}
+    className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${checked ? 'bg-primary' : 'bg-control-hover'}`}
+  >
+    <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : ''}`} />
+  </button>
+);
+
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
@@ -17,258 +108,318 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onUpdateSettings,
   onResetDefault,
 }) => {
-  if (!isOpen) return null;
-
-  const handleFontSizeChange = (size: number) => {
-    const clamped = Math.max(12, Math.min(24, size));
-    onUpdateSettings({ ...settings, terminalFontSize: clamped });
-  };
-
-  const handleLineHeightChange = (lh: number) => {
-    onUpdateSettings({ ...settings, terminalLineHeight: lh });
-  };
-
-  const handleUiScaleChange = (scale: AppSettings['uiScale']) => {
-    onUpdateSettings({ ...settings, uiScale: scale });
-  };
-
-  const FONT_PRESETS = [13, 14, 15, 16, 18, 20];
-  const LINE_HEIGHTS = [
-    { label: '紧凑 (1.2)', val: 1.2 },
-    { label: '标准 (1.3)', val: 1.3 },
-    { label: '宽松 (1.45)', val: 1.45 },
-    { label: '大行高 (1.6)', val: 1.6 },
-  ];
-
-  const UI_SCALES: { id: AppSettings['uiScale']; name: string; desc: string; pct: string }[] = [
-    { id: 'compact', name: '紧凑', desc: '信息密集', pct: '90%' },
-    { id: 'standard', name: '标准', desc: '经典尺寸', pct: '100%' },
-    { id: 'comfortable', name: '舒适 (推荐)', desc: '清晰护眼', pct: '110%' },
-    { id: 'large', name: '大号', desc: '适合 2K/4K', pct: '125%' },
-  ];
-
-  const CURSOR_STYLES: { id: AppSettings['terminalCursorStyle']; name: string; desc: string; icon: string }[] = [
-    { id: 'bar', name: '竖线 (推荐)', desc: '现代细光标，不遮挡字符', icon: '│' },
-    { id: 'block', name: '方块', desc: '经典实心大方块', icon: '█' },
-    { id: 'underline', name: '下划线', desc: '底部横线光标', icon: ' ' },
-  ];
+  const [tab, setTab] = useState<TabId>('appearance');
+  const update = (patch: Partial<AppSettings>) => onUpdateSettings({ ...settings, ...patch });
+  const setFontSize = (size: number) => update({ terminalFontSize: Math.max(12, Math.min(24, size)) });
+  const clockOffset = Number.isFinite(settings.clockOffsetHours) ? settings.clockOffsetHours : 0;
+  const reminderHours = Number.isFinite(settings.workReminderHours) ? settings.workReminderHours : 1;
+  const setReminderHours = (hours: number) => update({ workReminderHours: Number.isFinite(hours) ? Math.max(1, Math.min(12, Math.trunc(hours))) : 1 });
+  const setClockOffset =(hours: number) => update({ clockOffsetHours: Number.isFinite(hours) ? Math.max(-24, Math.min(24, Math.trunc(hours))) : 0 });
+  const optionClass = (active: boolean) => (active ? 'option-active' : 'option');
+  const row = 'flex items-center justify-between gap-3 rounded-md border border-line bg-muted px-3 py-2.5 text-ui text-fg-muted';
 
   return (
-    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 select-none animate-in fade-in duration-150">
-      <div
-        className="bg-[#141824] border border-[#262f42] rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* 顶部标题栏 */}
-        <div className="h-12 px-5 border-b border-[#232b3d] flex items-center justify-between bg-[#11141e]">
-          <div className="flex items-center space-x-2 text-slate-200 font-semibold text-sm">
-            <Type size={16} className="text-emerald-400" />
-            <span>外观与字体大小设置</span>
-          </div>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      titleId="settings-modal-title"
+      title="设置"
+      icon={<Settings size={16} className="text-accent" />}
+      widthClass="max-w-2xl"
+      bare
+      footer={(
+        <>
           <button
-            onClick={onClose}
-            className="p-1 text-slate-400 hover:text-slate-100 hover:bg-[#202738] rounded-md transition-colors"
-            title="关闭设置"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        {/* 核心设置内容 */}
-        <div className="p-5 space-y-6 overflow-y-auto max-h-[75vh]">
-          {/* 1. 终端代码字体大小 */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-slate-200 flex items-center space-x-1.5">
-                <span>终端视窗字体大小</span>
-                <span className="text-[11px] font-normal text-slate-500">（Ctrl + / - 亦可快捷缩放）</span>
-              </label>
-              <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-                {settings.terminalFontSize}px
-              </span>
-            </div>
-
-            {/* 滑块与加减步进 */}
-            <div className="flex items-center space-x-3">
-              <button
-                onClick={() => handleFontSizeChange(settings.terminalFontSize - 1)}
-                className="p-1.5 rounded bg-[#1c2232] hover:bg-[#283248] text-slate-300 border border-[#2b364e] transition-colors"
-                title="缩小字体"
-              >
-                <Minus size={13} />
-              </button>
-              <input
-                type="range"
-                min="12"
-                max="24"
-                step="1"
-                value={settings.terminalFontSize}
-                onChange={(e) => handleFontSizeChange(parseInt(e.target.value, 10))}
-                className="flex-1 accent-emerald-500 cursor-pointer h-1.5 bg-[#202738] rounded-lg"
-              />
-              <button
-                onClick={() => handleFontSizeChange(settings.terminalFontSize + 1)}
-                className="p-1.5 rounded bg-[#1c2232] hover:bg-[#283248] text-slate-300 border border-[#2b364e] transition-colors"
-                title="放大字体"
-              >
-                <Plus size={13} />
-              </button>
-            </div>
-
-            {/* 常用预设快捷按钮 */}
-            <div className="flex items-center space-x-1.5 pt-1">
-              {FONT_PRESETS.map((size) => (
-                <button
-                  key={size}
-                  onClick={() => handleFontSizeChange(size)}
-                  className={`flex-1 py-1 rounded text-xs font-mono transition-colors border ${
-                    settings.terminalFontSize === size
-                      ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-semibold'
-                      : 'bg-[#181d2a] border-[#242c3f] text-slate-400 hover:text-slate-200 hover:bg-[#202738]'
-                  }`}
-                >
-                  {size}px
-                </button>
-              ))}
-            </div>
-
-            {/* 实时字体预览框 */}
-            <div className="p-3 bg-[#0c0e14] rounded-lg border border-[#1e2536] overflow-hidden">
-              <div className="text-[10px] uppercase text-slate-500 font-semibold mb-1">
-                代码实时效果预览
-              </div>
-              <div
-                style={{
-                  fontSize: `${settings.terminalFontSize}px`,
-                  lineHeight: settings.terminalLineHeight,
-                  fontFamily: 'Consolas, "Fira Code", monospace',
-                }}
-                className="text-slate-300 font-mono select-text"
-              >
-                <span className="text-emerald-400">&gt;</span> const ai = new CLI(&apos;Kimi&apos;);
-                <br />
-                <span className="text-slate-500">&gt;</span> <span className="text-amber-300">await</span> ai.complete(&apos;Hello OneAI&apos;);
-              </div>
-            </div>
-          </div>
-
-          {/* 2. 终端行高 */}
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-200">
-              终端排版行高
-            </label>
-            <div className="grid grid-cols-4 gap-2">
-              {LINE_HEIGHTS.map((item) => (
-                <button
-                  key={item.val}
-                  onClick={() => handleLineHeightChange(item.val)}
-                  className={`py-1.5 px-2 rounded text-xs transition-colors border text-center ${
-                    Math.abs(settings.terminalLineHeight - item.val) < 0.05
-                      ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-medium'
-                      : 'bg-[#181d2a] border-[#242c3f] text-slate-400 hover:text-slate-200 hover:bg-[#202738]'
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 3. 终端光标样式与闪烁 */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-slate-200">
-                终端光标样式
-              </label>
-              <button
-                onClick={() =>
-                  onUpdateSettings({
-                    ...settings,
-                    terminalCursorBlink: !settings.terminalCursorBlink,
-                  })
-                }
-                className={`text-[11px] px-2 py-0.5 rounded transition-colors border ${
-                  settings.terminalCursorBlink
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                    : 'bg-[#181d2a] border-[#242c3f] text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                {settings.terminalCursorBlink ? '光标呼吸闪烁: 开启' : '光标呼吸闪烁: 关闭'}
-              </button>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              {CURSOR_STYLES.map((item) => (
-                <div
-                  key={item.id}
-                  onClick={() =>
-                    onUpdateSettings({ ...settings, terminalCursorStyle: item.id })
-                  }
-                  className={`p-2 rounded-lg border cursor-pointer transition-all flex items-center space-x-2.5 ${
-                    settings.terminalCursorStyle === item.id
-                      ? 'bg-emerald-500/10 border-emerald-500/50 text-slate-100'
-                      : 'bg-[#181d2a] border-[#242c3f] text-slate-400 hover:text-slate-200 hover:bg-[#1e2536]'
-                  }`}
-                >
-                  <span className="text-base font-mono text-emerald-400 w-4 text-center">
-                    {item.icon}
-                  </span>
-                  <div>
-                    <div className="text-xs font-medium">{item.name}</div>
-                    <div className="text-[10px] text-slate-500">{item.desc}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* 4. 全局 UI 界面缩放 */}
-          <div className="space-y-2">
-            <div className="flex items-center space-x-1.5 text-xs font-semibold text-slate-200">
-              <Monitor size={14} className="text-slate-400" />
-              <span>界面全局字体与元素缩放</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {UI_SCALES.map((scale) => (
-                <div
-                  key={scale.id}
-                  onClick={() => handleUiScaleChange(scale.id)}
-                  className={`p-2.5 rounded-lg border cursor-pointer transition-all flex items-center justify-between ${
-                    settings.uiScale === scale.id
-                      ? 'bg-emerald-500/10 border-emerald-500/50 text-slate-100'
-                      : 'bg-[#181d2a] border-[#242c3f] text-slate-400 hover:text-slate-200 hover:bg-[#1e2536]'
-                  }`}
-                >
-                  <div>
-                    <div className="text-xs font-medium">{scale.name}</div>
-                    <div className="text-[10px] text-slate-500">{scale.desc}</div>
-                  </div>
-                  <span className={`text-xs font-mono font-bold ${settings.uiScale === scale.id ? 'text-emerald-400' : 'text-slate-500'}`}>
-                    {scale.pct}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* 底部操作栏 */}
-        <div className="h-14 px-5 border-t border-[#232b3d] flex items-center justify-between bg-[#11141e]">
-          <button
+            type="button"
             onClick={onResetDefault}
-            className="flex items-center space-x-1 text-xs text-slate-500 hover:text-slate-300 transition-colors"
-            title="还原为出厂默认设置"
+            className="mr-auto flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-fg-subtle transition-colors hover:bg-hover hover:text-fg"
+            title="还原为：主题随系统、终端 15px、竖线光标、舒适缩放"
           >
             <RotateCcw size={12} />
-            <span>恢复默认 (15px / 竖线 / 舒适)</span>
+            <span>恢复默认设置</span>
           </button>
-          <button
-            onClick={onClose}
-            className="px-5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-medium text-xs shadow-lg shadow-emerald-500/20 transition-all"
-          >
-            完成
-          </button>
+          <button type="button" onClick={onClose} className="btn-primary px-5">完成</button>
+        </>
+      )}
+    >
+      <div className="flex h-[60vh] min-h-0 select-none">
+        <div role="tablist" aria-label="设置分类" aria-orientation="vertical" className="w-36 shrink-0 space-y-0.5 border-r border-line bg-surface p-2">
+          {TABS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={tab === id}
+              onClick={() => setTab(id)}
+              className={`flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-ui transition-colors ${tab === id ? 'bg-selected font-medium text-fg' : 'text-fg-subtle hover:bg-hover hover:text-fg'}`}
+            >
+              <Icon size={14} />
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div role="tabpanel" className="min-w-0 flex-1 space-y-6 overflow-y-auto p-5">
+          {tab === 'appearance' && (
+            <>
+              <Section title="主题">
+                <div className="grid grid-cols-3 gap-2" role="group" aria-label="主题色">
+                  {([
+                    { id: 'system', label: '随系统', icon: Monitor },
+                    { id: 'light', label: '浅色', icon: Sun },
+                    { id: 'dark', label: '深色', icon: Moon },
+                  ] as const).map(({ id, label, icon: Icon }) => (
+                    <button key={id} type="button" aria-pressed={settings.theme === id}
+                      onClick={() => update({ theme: id })}
+                      className={`flex items-center justify-center gap-1.5 py-2 ${optionClass(settings.theme === id)}`}>
+                      <Icon size={14} />{label}
+                    </button>
+                  ))}
+                </div>
+                <div className="pt-1 text-xs text-fg-faint">护眼配色</div>
+                <div className="grid grid-cols-4 gap-2" role="group" aria-label="护眼主题色">
+                  {THEME_OPTIONS.filter(({ id }) => id !== 'light' && id !== 'dark').map(({ id, label, swatch }) => (
+                    <button key={id} type="button" aria-pressed={settings.theme === id}
+                      onClick={() => update({ theme: id })}
+                      className={`flex items-center justify-center gap-1.5 py-2 ${optionClass(settings.theme === id)}`}>
+                      <span className="inline-block h-3.5 w-3.5 rounded-full border border-line-strong"
+                        style={{ background: `linear-gradient(135deg, ${swatch[0]} 50%, ${swatch[1]} 50%)` }} />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </Section>
+
+              <Section title="界面缩放" hint="侧栏、顶栏与弹窗的文字和元素大小">
+                <div className="grid grid-cols-2 gap-2" role="group" aria-label="界面全局字体与元素缩放">
+                  {UI_SCALES.map((scale) => (
+                    <button
+                      key={scale.id}
+                      type="button"
+                      aria-pressed={settings.uiScale === scale.id}
+                      onClick={() => update({ uiScale: scale.id })}
+                      className={`flex items-center justify-between p-2.5 text-left ${optionClass(settings.uiScale === scale.id)}`}
+                    >
+                      <span>
+                        <span className="block text-ui font-medium text-fg">{scale.name}</span>
+                        <span className="block text-2xs font-normal text-fg-faint">{scale.desc}</span>
+                      </span>
+                      <span className="font-mono text-xs font-bold">{scale.pct}</span>
+                    </button>
+                  ))}
+                </div>
+              </Section>
+            </>
+          )}
+
+          {tab === 'terminal' && (
+            <>
+              <Section
+                title="字体大小"
+                hint="Ctrl + / - 亦可缩放"
+                aside={<span className="rounded-md border border-accent/30 bg-accent/10 px-2 py-0.5 font-mono text-xs font-bold text-accent">{settings.terminalFontSize}px</span>}
+              >
+                <div className="flex items-center gap-3">
+                  <button type="button" onClick={() => setFontSize(settings.terminalFontSize - 1)} className="icon-btn border border-line-strong bg-muted" title="缩小字体" aria-label="缩小字体">
+                    <Minus size={13} />
+                  </button>
+                  <input
+                    type="range"
+                    min="12"
+                    max="24"
+                    step="1"
+                    aria-label="终端字体大小"
+                    value={settings.terminalFontSize}
+                    onChange={(e) => setFontSize(parseInt(e.target.value, 10))}
+                    className="slim flex-1"
+                  />
+                  <button type="button" onClick={() => setFontSize(settings.terminalFontSize + 1)} className="icon-btn border border-line-strong bg-muted" title="放大字体" aria-label="放大字体">
+                    <Plus size={13} />
+                  </button>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {FONT_PRESETS.map((size) => (
+                    <button key={size} type="button" onClick={() => setFontSize(size)}
+                      className={`flex-1 py-1 font-mono ${optionClass(settings.terminalFontSize === size)}`}>
+                      {size}px
+                    </button>
+                  ))}
+                </div>
+                <div className="overflow-hidden rounded-md border border-line bg-canvas p-3">
+                  <div className="mb-1 text-2xs text-fg-faint">效果预览</div>
+                  <div
+                    style={{
+                      fontSize: `${settings.terminalFontSize}px`,
+                      lineHeight: settings.terminalLineHeight,
+                      fontFamily: 'Consolas, "Fira Code", monospace',
+                    }}
+                    className="select-text text-fg-muted"
+                  >
+                    <span className="text-accent">&gt;</span> const ai = new CLI(&apos;Kimi&apos;);
+                    <br />
+                    <span className="text-fg-faint">&gt;</span> <span className="text-warning">await</span> ai.complete(&apos;Hello OneAI&apos;);
+                  </div>
+                </div>
+              </Section>
+
+              <Section title="行高">
+                <div className="grid grid-cols-4 gap-2" role="group" aria-label="终端行高">
+                  {LINE_HEIGHTS.map((item) => {
+                    const active = Math.abs(settings.terminalLineHeight - item.val) < 0.05;
+                    return (
+                      <button key={item.val} type="button" aria-pressed={active} onClick={() => update({ terminalLineHeight: item.val })}
+                        className={`px-2 py-1.5 text-center ${optionClass(active)}`}>
+                        {item.label} <span className="font-mono opacity-70">{item.val}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </Section>
+
+              <Section title="光标">
+                <div className="grid grid-cols-3 gap-2" role="group" aria-label="终端光标样式">
+                  {CURSOR_STYLES.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      aria-pressed={settings.terminalCursorStyle === item.id}
+                      onClick={() => update({ terminalCursorStyle: item.id })}
+                      className={`flex items-center gap-2.5 p-2 text-left ${optionClass(settings.terminalCursorStyle === item.id)}`}
+                    >
+                      <span className="w-4 text-center font-mono text-base text-accent" aria-hidden="true">{item.icon}</span>
+                      <span>
+                        <span className="block text-xs font-medium text-fg">{item.name}</span>
+                        <span className="block text-2xs font-normal text-fg-faint">{item.desc}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <div className={row}>
+                  <span>光标闪烁</span>
+                  <Switch label="光标闪烁" checked={settings.terminalCursorBlink} onChange={(checked) => update({ terminalCursorBlink: checked })} />
+                </div>
+              </Section>
+            </>
+          )}
+
+          {tab === 'general' && (
+            <>
+              <Section title="工作时长提醒">
+                <div className={row}>
+                  <span>
+                    <span className="block">提醒时长</span>
+                    <span className="block text-xs text-fg-faint">从打开应用起算，默认 1 小时；可填 1 到 12 的整数</span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    <button type="button" onClick={() => setReminderHours(reminderHours - 1)} disabled={reminderHours <= 1} className="icon-btn border border-line-strong bg-canvas" title="减少 1 小时" aria-label="提醒时长减少 1 小时">
+                      <Minus size={13} />
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      max={12}
+                      step={1}
+                      aria-label="工作时长提醒的小时数"
+                      value={reminderHours}
+                      onChange={(e) => setReminderHours(e.target.value === '' ? 1 : Number(e.target.value))}
+                      className="input w-16 select-text text-center font-mono"
+                    />
+                    <button type="button" onClick={() => setReminderHours(reminderHours + 1)} disabled={reminderHours >= 12} className="icon-btn border border-line-strong bg-canvas" title="增加 1 小时" aria-label="提醒时长增加 1 小时">
+                      <Plus size={13} />
+                    </button>
+                    <span className="text-xs text-fg-faint">小时</span>
+                  </span>
+                </div>
+                <div className={row}>
+                  <span>
+                    <span className="block">到时语音播报</span>
+                    <span className="block text-xs text-fg-faint">关闭后仍会显示提醒弹框</span>
+                  </span>
+                  <Switch label="到时语音播报" checked={settings.voiceReminderEnabled} onChange={(checked) => update({ voiceReminderEnabled: checked })} />
+                </div>
+              </Section>
+
+              <Section title="音乐播放器">
+                <div className={row}>
+                  <span>
+                    <span className="block">显示音乐播放器</span>
+                    <span className="block text-xs text-fg-faint">关闭后侧栏底部不再显示播放器，正在播放的音乐会停止</span>
+                  </span>
+                  <Switch label="显示音乐播放器" checked={settings.musicPlayerVisible} onChange={(checked) => update({ musicPlayerVisible: checked })} />
+                </div>
+                <div className={row}>
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs" title={settings.musicDirectory || '系统「音乐」目录'}>
+                    {settings.musicDirectory || '系统「音乐」目录（默认）'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const dir = await window.electronAPI?.selectMusicDirectory?.(settings.musicDirectory);
+                      if (dir) update({ musicDirectory: dir });
+                    }}
+                    className="btn-secondary px-2.5 py-1 text-xs"
+                  >
+                    选择目录
+                  </button>
+                  {settings.musicDirectory && (
+                    <button type="button" onClick={() => update({ musicDirectory: '' })} className="btn-secondary px-2.5 py-1 text-xs">
+                      恢复默认
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-fg-faint">扫描所选目录下的 mp3 / wav / ogg / m4a / flac / aac / opus 文件，不含子目录；找到音乐后播放器显示在侧栏底部。</p>
+              </Section>
+            </>
+          )}
+
+          {tab === 'time' && (
+            <Section title="顶栏时钟" hint="在系统时间上增加的小时数">
+              <div className={row}>
+                <span>
+                  <span className="block">增加小时数</span>
+                  <span className="block text-xs text-fg-faint">默认 0，显示系统时间；可填 -24 到 24 的整数</span>
+                </span>
+                <span className="flex shrink-0 items-center gap-1.5">
+                  <button type="button" onClick={() => setClockOffset(clockOffset - 1)} disabled={clockOffset <= -24} className="icon-btn border border-line-strong bg-canvas" title="减少 1 小时" aria-label="减少 1 小时">
+                    <Minus size={13} />
+                  </button>
+                  <input
+                    type="number"
+                    min={-24}
+                    max={24}
+                    step={1}
+                    aria-label="顶栏时钟增加的小时数"
+                    value={clockOffset}
+                    onChange={(e) => setClockOffset(e.target.value === '' ? 0 : Number(e.target.value))}
+                    className="input w-16 select-text text-center font-mono"
+                  />
+                  <button type="button" onClick={() => setClockOffset(clockOffset + 1)} disabled={clockOffset >= 24} className="icon-btn border border-line-strong bg-canvas" title="增加 1 小时" aria-label="增加 1 小时">
+                    <Plus size={13} />
+                  </button>
+                  <span className="text-xs text-fg-faint">小时</span>
+                </span>
+              </div>
+              <p className="text-xs text-fg-faint">
+                当前顶栏显示：{new Date(Date.now() + clockOffset * 3600_000).toLocaleString('zh-CN', { hour12: false })}
+                {clockOffset !== 0 && `（系统时间 ${clockOffset > 0 ? '+' : ''}${clockOffset} 小时）`}
+              </p>
+            </Section>
+          )}
+
+          {tab === 'shortcuts' && SHORTCUTS.map((group) => (
+            <Section key={group.title} title={group.title}>
+              <dl className="divide-y divide-line overflow-hidden rounded-md border border-line">
+                {group.items.map(([keys, desc]) => (
+                  <div key={keys} className="flex items-center justify-between gap-4 bg-muted px-3 py-2">
+                    <dt className="text-ui text-fg-muted">{desc}</dt>
+                    <dd className="shrink-0 rounded border border-line-strong bg-canvas px-1.5 py-0.5 font-mono text-xs text-fg-subtle">{keys}</dd>
+                  </div>
+                ))}
+              </dl>
+            </Section>
+          ))}
         </div>
       </div>
-    </div>
+    </Modal>
   );
 };

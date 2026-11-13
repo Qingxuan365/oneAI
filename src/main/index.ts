@@ -1,9 +1,14 @@
-import { app, BrowserWindow, ipcMain, clipboard, shell, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, clipboard, shell, dialog, Menu } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ptyManager } from './pty-manager';
 import { quotaService } from './quota-service';
+import { listSessionHistory, deleteSessionHistory } from './session-history';
+import { detectInstalledClis } from './cli-detect';
+import { setupWorkspaceStore } from './workspace-store';
+import { setupMusicLibrary } from './music-library';
+import { setupFilePreview } from './file-preview';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,7 +24,7 @@ function createWindow() {
     ? preloadCandidate
     : path.resolve(__dirname, '../../src/preload/index.cjs');
 
-  const iconCandidate = path.resolve(__dirname, '../../resources/app-icon.jpg');
+  const iconCandidate = path.resolve(__dirname, '../../resources/icon.png');
   const appIcon = fs.existsSync(iconCandidate) ? iconCandidate : undefined;
 
   mainWindow = new BrowserWindow({
@@ -28,7 +33,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     backgroundColor: '#0e1117',
-    title: 'OneAI - 多 CLI AI 编程工作台',
+    title: 'OneAI 全栈工作台',
     icon: appIcon,
     webPreferences: {
       preload: preloadPath,
@@ -40,6 +45,9 @@ function createWindow() {
     titleBarStyle: 'default',
     autoHideMenuBar: true,
   });
+
+  mainWindow.on('maximize', () => mainWindow?.webContents.send('window:maximized-change', true));
+  mainWindow.on('unmaximize', () => mainWindow?.webContents.send('window:maximized-change', false));
 
   ptyManager.setWindow(mainWindow);
   quotaService.setWindow(mainWindow);
@@ -60,6 +68,29 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
   }
 
+  // 还有终端进程在运行时，关闭窗口先交给界面确认，避免误关丢掉所有 CLI 会话
+  let closeConfirmed = false;
+  ipcMain.removeAllListeners('window:confirm-close');
+  ipcMain.on('window:confirm-close', () => {
+    closeConfirmed = true;
+    mainWindow?.close();
+  });
+  let closeRequestedAt = 0;
+  // 系统关机或注销时不拦截
+  mainWindow.on('session-end', () => { closeConfirmed = true; });
+  mainWindow.on('close', (event) => {
+    const win = mainWindow;
+    if (closeConfirmed || !win || ptyManager.aliveCount() === 0 || win.webContents.isCrashed()) return;
+    // 界面没有响应确认请求时，隔 1.5 秒以上再点一次关闭就直接关，避免窗口关不掉
+    const now = Date.now();
+    if (closeRequestedAt && now - closeRequestedAt > 1500) return;
+    closeRequestedAt = now;
+    event.preventDefault();
+    win.webContents.send('window:close-request', ptyManager.aliveCount());
+  });
+  ipcMain.removeAllListeners('window:cancel-close');
+  ipcMain.on('window:cancel-close', () => { closeRequestedAt = 0; });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
     quotaService.stopPolling();
@@ -69,6 +100,23 @@ function createWindow() {
 
 // 注册 IPC 消息通道
 function setupIPC() {
+  setupWorkspaceStore();
+  setupMusicLibrary(() => mainWindow);
+  setupFilePreview();
+  ipcMain.handle('history:list', () => listSessionHistory());
+  ipcMain.handle('history:delete', (_event, items) => deleteSessionHistory(Array.isArray(items) ? items : []));
+  ipcMain.handle('cli:detect', () => detectInstalledClis());
+  ipcMain.handle('window:is-maximized', () => mainWindow?.isMaximized() ?? false);
+  ipcMain.handle('workspace:select-directory', async (_event, currentPath?: string) => {
+    if (!mainWindow) return null;
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: '选择工作目录',
+      defaultPath: currentPath && fs.existsSync(currentPath) ? currentPath : app.getPath('home'),
+      properties: ['openDirectory'],
+    });
+    return canceled ? null : filePaths[0] || null;
+  });
+
   ipcMain.handle('terminal:create', async (_event, options) => {
     return ptyManager.createSession(options);
   });
@@ -119,7 +167,17 @@ function setupIPC() {
         return { type: 'text', content: text };
       }
 
-      // 2. 检查剪贴板是否含有图片（如截图、复制的图像）
+      // 2. 复制的是文件（资源管理器、微信等常以文件形式放图片）：readText / readImage 都为空，
+      //    改读 FileNameW 拿到路径，与拖拽文件的行为一致；Electron 只能读到第一个文件
+      const fileNameW = clipboard.readBuffer('FileNameW');
+      if (fileNameW.length > 0) {
+        const filePath = fileNameW.toString('utf16le').replace(/\0+$/, '');
+        if (filePath && fs.existsSync(filePath)) {
+          return { type: 'file-path', content: filePath.includes(' ') ? `"${filePath}"` : filePath };
+        }
+      }
+
+      // 3. 检查剪贴板是否含有位图（如截图、复制的图像）
       const img = clipboard.readImage();
       if (!img.isEmpty()) {
         const pngBuffer = img.toPNG();
@@ -164,6 +222,18 @@ function setupIPC() {
     return false;
   });
 
+  // 在资源管理器中打开任务的工作目录；只接受已存在的文件夹
+  ipcMain.handle('shell:open-directory', async (_event, dir: string) => {
+    try {
+      if (typeof dir === 'string' && fs.statSync(dir).isDirectory()) {
+        return (await shell.openPath(dir)) === '';
+      }
+    } catch {
+      // 目录不存在或无法访问
+    }
+    return false;
+  });
+
   // 弹出保存文件对话框，将终端完整日志存盘
   ipcMain.handle('dialog:save-log-file', async (_event, { defaultName, content }: { defaultName: string; content: string }) => {
     try {
@@ -190,6 +260,9 @@ function setupIPC() {
 }
 
 app.whenReady().then(() => {
+  // 去掉 Electron 默认菜单：它的 Ctrl+W 关窗、Ctrl+R 刷新与 CLI 常用键冲突，按 Alt 还会弹出菜单栏抢走焦点。
+  // 开发模式保留，方便用 Ctrl+Shift+I 打开开发者工具。
+  if (!process.env.VITE_DEV_SERVER_URL) Menu.setApplicationMenu(null);
   setupIPC();
   createWindow();
 

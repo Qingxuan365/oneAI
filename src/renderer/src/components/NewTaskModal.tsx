@@ -1,17 +1,26 @@
 import React, { useState } from 'react';
-import { X, Play } from 'lucide-react';
+import { FolderOpen, Play } from 'lucide-react';
 import { CliGroup } from '../types';
 import { BrandIcon } from './BrandIcon';
+import { Modal } from './Modal';
 
 interface NewTaskModalProps {
   group: CliGroup | null;
+  workspacePath: string;
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (groupId: string, title: string, command: string, cwd: string) => void;
+  onCreate: (groupId: string, title: string, command: string, cwd: string) => Promise<{ success: boolean; error?: string }>;
+}
+
+/** 新任务的默认名称：取已有「Task N」的最大编号加一，避免关闭中间任务后出现重复编号 */
+export function nextTaskTitle(group: CliGroup): string {
+  const taskIndex = group.tasks.reduce((max, task) => Math.max(max, Number(/^Task (\d+)/.exec(task.title)?.[1] ?? 0)), group.tasks.length) + 1;
+  return `Task ${taskIndex}`;
 }
 
 export const NewTaskModal: React.FC<NewTaskModalProps> = ({
   group,
+  workspacePath,
   isOpen,
   onClose,
   onCreate,
@@ -19,103 +28,125 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
   const [title, setTitle] = useState('');
   const [command, setCommand] = useState('');
   const [cwd, setCwd] = useState('');
+  const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // 打开时初始化预设值
   React.useEffect(() => {
     if (group) {
-      const taskIndex = group.tasks.length + 1;
-      setTitle(`Task ${taskIndex}: ${group.name} Session`);
+      setTitle(nextTaskTitle(group));
       setCommand(group.defaultCommand);
-      setCwd('d:\\GitHub\\OneAI');
+      setCwd(workspacePath);
+      setError('');
     }
-  }, [group, isOpen]);
+  }, [group?.id, isOpen, workspacePath]);
 
   if (!isOpen || !group) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim()) return;
-    onCreate(group.id, title.trim(), command.trim(), cwd.trim());
-    onClose();
+  const handleChooseDirectory = async () => {
+    try {
+      const selected = await window.electronAPI?.selectWorkspaceDirectory?.(cwd || workspacePath);
+      if (selected) {
+        setCwd(selected);
+        setError('');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '无法选择工作目录');
+    }
   };
 
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim() || isSubmitting) return;
+    setIsSubmitting(true);
+    setError('');
+    try {
+      const result = await onCreate(group.id, title.trim(), command.trim(), cwd.trim());
+      if (result.success) onClose();
+      else setError(result.error || '终端启动失败，请检查工作目录和启动命令。');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '终端启动失败');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const label = 'mb-1.5 block text-xs font-medium text-fg-muted';
+  const hint = 'mt-1.5 text-xs text-fg-faint';
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-[#161a24] border border-[#2a3040] rounded-lg shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150 text-slate-200">
-        {/* 标题栏 */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[#232936] bg-[#12151d]">
-          <div className="flex items-center space-x-2">
-            <BrandIcon icon={group.icon} size={18} />
-            <h3 className="text-sm font-semibold text-slate-100">
-              新建 {group.name} 并发子任务
-            </h3>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1 text-slate-400 hover:text-slate-200 hover:bg-[#1f2433] rounded"
-          >
-            <X size={15} />
+    <Modal
+      isOpen
+      onClose={onClose}
+      closeDisabled={isSubmitting}
+      titleId="new-task-modal-title"
+      title={`新建 ${group.name} 任务`}
+      icon={<BrandIcon icon={group.icon} size={18} />}
+      footer={(
+        <>
+          <button type="button" onClick={onClose} disabled={isSubmitting} className="btn-secondary">取消</button>
+          <button type="submit" form="new-task-form" disabled={isSubmitting || !title.trim()} className="btn-primary">
+            <Play size={12} fill="currentColor" />
+            <span>{isSubmitting ? '正在启动…' : '启动任务'}</span>
           </button>
+        </>
+      )}
+    >
+      <form id="new-task-form" onSubmit={handleSubmit} className="space-y-4">
+        {error && <div role="alert" className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{error}</div>}
+        <div>
+          <label htmlFor="new-task-title" className={label}>任务名称</label>
+          <input
+            id="new-task-title"
+            type="text"
+            autoFocus
+            value={title}
+            onFocus={(e) => e.currentTarget.select()}
+            onChange={(e) => setTitle(e.target.value)}
+            className="input"
+            placeholder="例如：Auth Refactor"
+            required
+          />
         </div>
 
-        {/* 表单内容 */}
-        <form onSubmit={handleSubmit} className="p-4 space-y-3.5 text-xs">
-          <div>
-            <label className="block text-slate-400 mb-1 font-medium">任务名称 / Title</label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="w-full bg-[#0d1017] border border-[#272e3d] rounded px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-emerald-500 font-mono"
-              placeholder="例如: Task 1: Auth Refactor"
-              required
-            />
-          </div>
+        <div>
+          <label htmlFor="new-task-command" className={label}>启动命令</label>
+          <input
+            id="new-task-command"
+            type="text"
+            value={command}
+            onChange={(e) => setCommand(e.target.value)}
+            className="input font-mono"
+            placeholder="例如：powershell.exe"
+          />
+          <p className={hint}>留空则启动系统的交互式 PowerShell。</p>
+        </div>
 
-          <div>
-            <label className="block text-slate-400 mb-1 font-medium">启动命令 / Command</label>
+        <div>
+          <label htmlFor="new-task-cwd" className={label}>工作目录</label>
+          <div className="flex gap-2">
             <input
-              type="text"
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-              className="w-full bg-[#0d1017] border border-[#272e3d] rounded px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-emerald-500 font-mono"
-              placeholder="例如: powershell.exe"
-            />
-            <p className="text-[11px] text-slate-500 mt-1">
-              留空默认启动系统的交互式 PowerShell
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-slate-400 mb-1 font-medium">工作目录 / Working Directory</label>
-            <input
+              id="new-task-cwd"
               type="text"
               value={cwd}
               onChange={(e) => setCwd(e.target.value)}
-              className="w-full bg-[#0d1017] border border-[#272e3d] rounded px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-emerald-500 font-mono"
-              placeholder="d:\GitHub\OneAI"
+              className="input min-w-0 flex-1 font-mono"
+              placeholder={workspacePath}
             />
-          </div>
-
-          {/* 底部动作 */}
-          <div className="flex items-center justify-end space-x-2 pt-2 border-t border-[#232936]">
             <button
               type="button"
-              onClick={onClose}
-              className="px-3 py-1.5 rounded bg-[#1f2433] hover:bg-[#282f42] text-slate-300 font-medium transition-colors"
+              onClick={handleChooseDirectory}
+              disabled={isSubmitting}
+              className="btn-secondary"
+              title="为此任务选择工作目录"
             >
-              取消
-            </button>
-            <button
-              type="submit"
-              className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-medium shadow-sm transition-colors"
-            >
-              <Play size={12} fill="currentColor" />
-              <span>启动任务终端</span>
+              <FolderOpen size={14} />
+              <span>选择文件夹</span>
             </button>
           </div>
-        </form>
-      </div>
-    </div>
+          <p className={hint}>只用于当前任务，不改变左下角的工作文件夹。</p>
+        </div>
+      </form>
+    </Modal>
   );
 };

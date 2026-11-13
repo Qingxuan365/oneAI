@@ -4,24 +4,171 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { SearchAddon } from '@xterm/addon-search';
 import '@xterm/xterm/css/xterm.css';
-import { TaskSession } from '../types';
+import { TaskSession, ThemeId } from '../types';
 import { TerminalSearchBar } from './TerminalSearchBar';
 
 export interface TerminalViewportRef {
   openSearch: () => void;
   closeSearch: () => void;
   clearActiveTerminal: () => void;
-  restartActiveTerminal: () => Promise<void>;
+  restartActiveTerminal: (taskId?: string | null) => Promise<{ success: boolean; error?: string } | undefined>;
   exportActiveTerminalLog: (mode: 'copy' | 'save') => Promise<{ success: boolean; filePath?: string; canceled?: boolean; error?: string }>;
 }
 
+/** 把终端里实际渲染出来的文字（含回滚区）导出为纯文本，折行的物理行合并为一行。 */
+function readTerminalText(term: Terminal): string {
+  const buf = term.buffer.active;
+  const lines: string[] = [];
+  for (let y = 0; y < buf.length; y++) {
+    const line = buf.getLine(y);
+    if (!line) continue;
+    const text = line.translateToString(true);
+    if (line.isWrapped && lines.length > 0) lines[lines.length - 1] += text;
+    else lines.push(text);
+  }
+  while (lines.length > 0 && !lines[lines.length - 1].trim()) lines.pop();
+  return lines.join('\n');
+}
+
 interface TerminalViewportProps {
+  theme: ThemeId;
   tasks: TaskSession[];
   activeTaskId: string | null;
   fontSize?: number;
   lineHeight?: number;
   cursorStyle?: 'bar' | 'block' | 'underline';
   cursorBlink?: boolean;
+  /** 没有任何任务时显示的引导内容 */
+  emptyState?: React.ReactNode;
+  /** 点击终端中的工作目录内文件路径时触发，参数为任务 cwd 与文件绝对路径 */
+  onPreviewFile?: (cwd: string, filePath: string, line?: number) => void;
+}
+
+interface LogicalLine {
+  text: string;
+  /** text 中每个 UTF-16 单元对应的终端单元格：1 起始的列、行号和占用列数（中文为 2） */
+  cells: Array<{ x: number; y: number; w: number }>;
+}
+
+/** 合并因终端宽度折行的物理行，并记录字符与单元格的对应关系，供链接识别按真实列号定位。 */
+export function getLogicalLine(term: Terminal, bufferLineNumber: number): LogicalLine | null {
+  const buf = term.buffer.active;
+  let start = bufferLineNumber - 1;
+  while (start > 0 && buf.getLine(start)?.isWrapped) start--;
+  let text = '';
+  const cells: LogicalLine['cells'] = [];
+  for (let y = start; ; y++) {
+    const line = buf.getLine(y);
+    if (!line || (y > start && !line.isWrapped)) break;
+    for (let x = 0; x < line.length; x++) {
+      const cell = line.getCell(x);
+      if (!cell || cell.getWidth() === 0) continue;
+      const chars = cell.getChars() || ' ';
+      for (let i = 0; i < chars.length; i++) {
+        text += chars[i];
+        cells.push({ x: x + 1, y: y + 1, w: cell.getWidth() });
+      }
+    }
+  }
+  return text ? { text, cells } : null;
+}
+
+/** 把 text 中 [start, start+length) 的匹配换算为 xterm 链接范围（end 为闭区间）；匹配不在 bufferLineNumber 行上时返回 null。 */
+export function matchToLinkRange(logical: LogicalLine, start: number, length: number, bufferLineNumber: number) {
+  const first = logical.cells[start];
+  const last = logical.cells[start + length - 1];
+  if (!first || !last || bufferLineNumber < first.y || bufferLineNumber > last.y) return null;
+  return {
+    start: { x: first.x, y: first.y },
+    end: { x: last.x + last.w - 1, y: last.y },
+  };
+}
+
+const SEARCH_DECORATIONS = {
+  matchBackground: '#b58900',
+  matchOverviewRuler: '#b58900',
+  activeMatchBackground: '#e8590c',
+  activeMatchColorOverviewRuler: '#e8590c',
+};
+
+/**
+ * Kimi Code 隐藏真实光标，并把它停在输入行最右端或底部状态栏，输入法组合文字和候选框会跟到那里。
+ * 仅对 Kimi 任务生效：按输入框底边框找到其上一行的文字末尾，作为输入法的定位点。
+ * 找不到输入框时不干预，保持 xterm 默认行为。
+ */
+function findKimiInputAnchor(term: Terminal): { row: number; col: number } | null {
+  const buf = term.buffer.active;
+  for (let y = term.rows - 1; y >= 1; y--) {
+    const border = buf.getLine(buf.viewportY + y);
+    const text = border?.translateToString(true).trim() ?? '';
+    if (text.length < 8 || !/^[╰└╚]?[─━═╌┄-]{6,}[╯┘╝]?$/.test(text)) continue;
+    const line = buf.getLine(buf.viewportY + y - 1);
+    if (!line) return null;
+    let col = 0;
+    for (let x = 0; x < line.length; x++) {
+      const cell = line.getCell(x);
+      const ch = cell?.getChars() ?? '';
+      if (cell && ch && ch !== ' ' && ch !== '│' && ch !== '┃') col = x + Math.max(cell.getWidth(), 1);
+    }
+    return { row: y - 1, col };
+  }
+  return null;
+}
+
+/**
+ * Pi 隐藏真实光标，在输入框里画一个反色空格作为光标，真实光标则停在行尾之外。
+ * 输入框夹在两条整行横线之间：自下而上找到相邻两条横线，取其间的反色单元格作为定位点。
+ */
+function findPiInputAnchor(term: Terminal): { row: number; col: number } | null {
+  const buf = term.buffer.active;
+  const isBorder = (y: number) => /^[─━═]{20,}$/.test(buf.getLine(buf.viewportY + y)?.translateToString(true).trim() ?? '');
+  let lower = -1;
+  for (let y = term.rows - 1; y >= 0; y--) {
+    if (!isBorder(y)) continue;
+    if (lower >= 0) {
+      for (let r = y + 1; r < lower; r++) {
+        const line = buf.getLine(buf.viewportY + r);
+        for (let x = 0; line && x < line.length; x++) {
+          if (line.getCell(x)?.isInverse()) return { row: r, col: x };
+        }
+      }
+    }
+    lower = y;
+  }
+  return null;
+}
+
+type InputAnchorFinder = (term: Terminal) => { row: number; col: number } | null;
+
+/** 各 CLI 的输入法定位点查找方式，未列出的 CLI 保持 xterm 默认行为。 */
+export const IME_ANCHOR_FINDERS: Record<string, InputAnchorFinder> = {
+  kimi: findKimiInputAnchor,
+  pi: findPiInputAnchor,
+};
+
+export function attachImeAnchor(term: Terminal, host: HTMLElement, find: InputAnchorFinder): void {
+  const textarea = term.textarea;
+  const root = term.element;
+  if (!textarea || !root) return;
+  // xterm 在重绘、光标移动和组合输入的延时回调里都会把 textarea 的内联 left/top 写回真实光标，
+  // 输入法恰好在这些回写之后读取位置。这里不再和它抢写内联样式，
+  // 改由 index.css 的 .ime-anchored 规则用 !important 读取下面两个变量，xterm 的回写因此不生效。
+  const place = () => {
+    const screen = host.querySelector<HTMLElement>('.xterm-screen');
+    const anchor = find(term);
+    if (!screen || !anchor || !screen.clientWidth) {
+      root.classList.remove('ime-anchored');
+      return;
+    }
+    root.style.setProperty('--ime-left', `${(anchor.col * screen.clientWidth) / term.cols}px`);
+    root.style.setProperty('--ime-top', `${(anchor.row * screen.clientHeight) / term.rows}px`);
+    root.classList.add('ime-anchored');
+  };
+  term.onRender(place);
+  term.onCursorMove(place);
+  textarea.addEventListener('focus', place);
+  textarea.addEventListener('compositionstart', place);
+  textarea.addEventListener('compositionupdate', place);
 }
 
 interface TerminalInstance {
@@ -34,6 +181,63 @@ interface TerminalInstance {
   flushTimer: NodeJS.Timeout | null;
   flush: () => void;
 }
+
+const DARK_TERMINAL_THEME = {
+  background: '#0d1117', foreground: '#c9d1d9', cursor: '#58a6ff', selectionBackground: '#1f6feb40',
+  black: '#484f58', red: '#ff7b72', green: '#3fb950', yellow: '#d29922', blue: '#58a6ff',
+  magenta: '#bc8cff', cyan: '#39c5cf', white: '#b1bac4', brightBlack: '#6e7681',
+  brightRed: '#ffa198', brightGreen: '#56d364', brightYellow: '#e3b341', brightBlue: '#79c0ff',
+  brightMagenta: '#d2a8ff', brightCyan: '#56d4dd', brightWhite: '#f0f6fc',
+};
+
+const LIGHT_TERMINAL_THEME = {
+  background: '#ffffff', foreground: '#24292f', cursor: '#0969da', selectionBackground: '#0969da40',
+  black: '#24292f', red: '#cf222e', green: '#116329', yellow: '#7d4e00', blue: '#0969da',
+  magenta: '#8250df', cyan: '#0550ae', white: '#6e7781', brightBlack: '#57606a',
+  brightRed: '#a40e26', brightGreen: '#1a7f37', brightYellow: '#9a6700', brightBlue: '#218bff',
+  brightMagenta: '#a475f9', brightCyan: '#0969da', brightWhite: '#24292f',
+};
+
+const BEAN_TERMINAL_THEME = {
+  background: '#cce8cf', foreground: '#223226', cursor: '#0e5e8a', selectionBackground: '#0e5e8a38',
+  black: '#223226', red: '#b91c28', green: '#146e32', yellow: '#7a5200', blue: '#0e5e8a',
+  magenta: '#6e40be', cyan: '#0b6b70', white: '#4c6250', brightBlack: '#3f5a45',
+  brightRed: '#9a1520', brightGreen: '#0f5a28', brightYellow: '#6a4600', brightBlue: '#0a4c70',
+  brightMagenta: '#5a30a0', brightCyan: '#085a5e', brightWhite: '#223226',
+};
+
+const PARCHMENT_TERMINAL_THEME = {
+  background: '#f4ecd8', foreground: '#3b3126', cursor: '#1e64a0', selectionBackground: '#1e64a038',
+  black: '#3b3126', red: '#be2828', green: '#28733c', yellow: '#8a5a00', blue: '#1e64a0',
+  magenta: '#7846b4', cyan: '#16707a', white: '#6b5a46', brightBlack: '#5a4c3a',
+  brightRed: '#9a1c1c', brightGreen: '#1e5a2e', brightYellow: '#734a00', brightBlue: '#14508a',
+  brightMagenta: '#60388f', brightCyan: '#105a63', brightWhite: '#3b3126',
+};
+
+const DUSK_TERMINAL_THEME = {
+  background: '#1e1b18', foreground: '#e2d8c6', cursor: '#e0a85a', selectionBackground: '#e0a85a38',
+  black: '#4a433a', red: '#e8786e', green: '#8cc36e', yellow: '#e8b850', blue: '#7fa8d0',
+  magenta: '#be96dc', cyan: '#78c0b4', white: '#cdc2af', brightBlack: '#7a705f',
+  brightRed: '#f0948a', brightGreen: '#a4d488', brightYellow: '#f0cc78', brightBlue: '#9cc0e2',
+  brightMagenta: '#d0b0e8', brightCyan: '#94d2c8', brightWhite: '#f2eadb',
+};
+
+const NORD_TERMINAL_THEME = {
+  background: '#2e3440', foreground: '#d8dee9', cursor: '#88c0d0', selectionBackground: '#88c0d040',
+  black: '#3b4252', red: '#d77882', green: '#a3be8c', yellow: '#ebcb8b', blue: '#81a1c1',
+  magenta: '#b48ead', cyan: '#88c0d0', white: '#e5e9f0', brightBlack: '#6a7690',
+  brightRed: '#e0919a', brightGreen: '#b5cf9f', brightYellow: '#f2d9a3', brightBlue: '#9bb6d0',
+  brightMagenta: '#c4a3bd', brightCyan: '#8fbcbb', brightWhite: '#eceff4',
+};
+
+const TERMINAL_THEMES: Record<ThemeId, typeof DARK_TERMINAL_THEME> = {
+  light: LIGHT_TERMINAL_THEME,
+  dark: DARK_TERMINAL_THEME,
+  bean: BEAN_TERMINAL_THEME,
+  parchment: PARCHMENT_TERMINAL_THEME,
+  dusk: DUSK_TERMINAL_THEME,
+  nord: NORD_TERMINAL_THEME,
+};
 
 /**
  * 净化终端数据流中的伪光标泄露：
@@ -49,97 +253,193 @@ export function sanitizeTerminalData(data: string): string {
 }
 
 export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewportProps>(({
+  theme,
   tasks,
   activeTaskId,
   fontSize = 15,
   lineHeight = 1.3,
   cursorStyle = 'bar',
   cursorBlink = true,
+  emptyState,
+  onPreviewFile,
 }, ref) => {
+  const onPreviewFileRef = useRef(onPreviewFile);
+  onPreviewFileRef.current = onPreviewFile;
   const containerRef = useRef<HTMLDivElement>(null);
+  const lastSizeSyncRef = useRef('');
   const instancesRef = useRef<Map<string, TerminalInstance>>(new Map());
+
+  useEffect(() => {
+    instancesRef.current.forEach(({ term }) => {
+      term.options.theme = TERMINAL_THEMES[theme];
+    });
+  }, [theme]);
 
   // 搜索栏状态
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [matchCase, setMatchCase] = useState(false);
   const [useRegex, setUseRegex] = useState(false);
+  const [searchResult, setSearchResult] = useState<{ index: number; count: number } | null>(null);
+  const [searchInvalid, setSearchInvalid] = useState(false);
+  const activeTaskIdRef = useRef(activeTaskId);
+  activeTaskIdRef.current = activeTaskId;
+
+  // 点过顶栏、侧栏按钮后焦点留在按钮上，直接打字进不了终端：此时按下可输入字符就把焦点交还当前终端。
+  // 空格和回车留给按钮本身；有弹窗或菜单打开、焦点在输入框时不干预。
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.altKey || e.metaKey || e.defaultPrevented) return;
+      if (!(e.key === 'Process' || (e.key.length === 1 && e.key !== ' '))) return;
+      const active = document.activeElement;
+      if (active && active !== document.body && active.tagName !== 'BUTTON') return;
+      if (document.querySelector('[role="dialog"], [role="menu"]')) return;
+      const taskId = activeTaskIdRef.current;
+      if (taskId) instancesRef.current.get(taskId)?.term.focus();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, []);
+
+  // 搜索栏跨任务共用：切换任务时清掉旧终端的高亮，并在新终端重新搜索当前关键字
+  const prevSearchTaskRef = useRef<string | null>(activeTaskId);
+  useEffect(() => {
+    const prev = prevSearchTaskRef.current;
+    prevSearchTaskRef.current = activeTaskId;
+    if (prev === activeTaskId) return;
+    if (prev) instancesRef.current.get(prev)?.searchAddon.clearDecorations();
+    setSearchResult(null);
+    setSearchInvalid(false);
+    if (isSearchOpen && searchQuery.trim() && activeTaskId) {
+      runSearch('next', searchQuery, matchCase, useRegex, false, activeTaskId);
+    }
+  }, [activeTaskId]);
 
   const getActiveSearchAddon = () => {
     if (!activeTaskId) return null;
     return instancesRef.current.get(activeTaskId)?.searchAddon || null;
   };
 
+  // 统一执行搜索：带高亮与匹配计数；正则输入到一半不合法时不抛错，只提示。
+  const runSearch = (
+    direction: 'next' | 'previous',
+    query: string,
+    caseSensitive: boolean,
+    regex: boolean,
+    incremental: boolean,
+    taskId: string | null = activeTaskId,
+  ) => {
+    const searchAddon = taskId ? instancesRef.current.get(taskId)?.searchAddon : null;
+    if (!searchAddon) return;
+    if (!query.trim()) {
+      searchAddon.clearDecorations();
+      setSearchResult(null);
+      setSearchInvalid(false);
+      return;
+    }
+    try {
+      const options = { caseSensitive, regex, incremental, decorations: SEARCH_DECORATIONS };
+      const found = direction === 'next' ? searchAddon.findNext(query, options) : searchAddon.findPrevious(query, options);
+      setSearchInvalid(false);
+      if (!found) setSearchResult({ index: -1, count: 0 });
+    } catch {
+      searchAddon.clearDecorations();
+      setSearchInvalid(true);
+      setSearchResult(null);
+    }
+  };
+
+  const searchResultText = searchInvalid
+    ? '正则无效'
+    : searchResult
+      ? searchResult.count === 0 ? '无结果' : searchResult.index >= 0 ? `${searchResult.index + 1}/${searchResult.count}` : `${searchResult.count}+`
+      : '';
+
   const handleSearchChange = (query: string) => {
     setSearchQuery(query);
-    const searchAddon = getActiveSearchAddon();
-    if (searchAddon) {
-      if (query.trim()) {
-        searchAddon.findNext(query, { caseSensitive: matchCase, regex: useRegex, incremental: true });
-      } else {
-        searchAddon.clearDecorations();
-      }
-    }
+    runSearch('next', query, matchCase, useRegex, true);
   };
 
-  const handleFindNext = () => {
-    const searchAddon = getActiveSearchAddon();
-    if (searchAddon && searchQuery.trim()) {
-      searchAddon.findNext(searchQuery, { caseSensitive: matchCase, regex: useRegex });
-    }
+  const handleToggleMatchCase = () => {
+    const next = !matchCase;
+    setMatchCase(next);
+    runSearch('next', searchQuery, next, useRegex, true);
   };
 
-  const handleFindPrevious = () => {
-    const searchAddon = getActiveSearchAddon();
-    if (searchAddon && searchQuery.trim()) {
-      searchAddon.findPrevious(searchQuery, { caseSensitive: matchCase, regex: useRegex });
-    }
+  const handleToggleRegex = () => {
+    const next = !useRegex;
+    setUseRegex(next);
+    runSearch('next', searchQuery, matchCase, next, true);
   };
+
+  const handleFindNext = () => runSearch('next', searchQuery, matchCase, useRegex, false);
+
+  const handleFindPrevious = () => runSearch('previous', searchQuery, matchCase, useRegex, false);
 
   const handleCloseSearch = () => {
     const searchAddon = getActiveSearchAddon();
     searchAddon?.clearDecorations();
     setIsSearchOpen(false);
+    setSearchResult(null);
+    setSearchInvalid(false);
     if (activeTaskId) {
-      instancesRef.current.get(activeTaskId)?.term.focus();
+      const term = instancesRef.current.get(activeTaskId)?.term;
+      // 搜索用选区标记当前匹配；不清掉的话，之后第一次 Ctrl+C 会被当成复制而吞掉中断信号
+      term?.clearSelection();
+      term?.focus();
     }
   };
 
-  // 清理当前活动终端屏幕与主进程缓冲区
-  const clearActiveTerminal = () => {
-    if (!activeTaskId) return;
-    const instance = instancesRef.current.get(activeTaskId);
+  // 清理指定终端屏幕与主进程缓冲区，避免快捷键使用过期的活动任务 ID。
+  const clearTerminal = (taskId: string) => {
+    const instance = instancesRef.current.get(taskId);
     if (instance) {
+      // 不在终端里追加提示文字：Claude / Codex 等 CLI 自己重绘界面，多出的行会让光标位置错位。
       instance.term.clear();
-      window.electronAPI?.clearSessionBuffer?.(activeTaskId);
-      instance.term.write('\r\n\x1b[90m[OneAI] 屏幕与会话历史已清空\x1b[0m\r\n');
+      window.electronAPI?.clearSessionBuffer?.(taskId);
       instance.term.focus();
     }
   };
 
-  // 重启当前活动 CLI 进程
-  const restartActiveTerminal = async () => {
-    if (!activeTaskId) return;
-    const instance = instancesRef.current.get(activeTaskId);
+  const clearActiveTerminal = () => {
+    if (activeTaskId) clearTerminal(activeTaskId);
+  };
+
+  // 重启指定任务的 CLI 进程，未指定时为当前活动任务
+  const restartActiveTerminal = async (taskId: string | null = activeTaskId) => {
+    if (!taskId) return undefined;
+    const instance = instancesRef.current.get(taskId);
     if (instance) {
       instance.term.clear();
       instance.term.write('\r\n\x1b[33m[OneAI] 正在重启 CLI 会话进程...\x1b[0m\r\n');
-      await window.electronAPI?.restartSession?.(activeTaskId);
-      instance.term.focus();
+      const result = await window.electronAPI?.restartSession?.(taskId);
+      if (taskId === activeTaskIdRef.current) instance.term.focus();
+      return result || { success: false, error: '重启接口不可用' };
     }
+    return { success: false, error: '终端实例不存在' };
   };
 
-  // 导出或复制当前会话全量文本
+  // 导出或复制当前会话最近约 2 MiB 的文本
   const exportActiveTerminalLog = async (mode: 'copy' | 'save') => {
     if (!activeTaskId) return { success: false, error: '无活动会话' };
-    const raw = (await window.electronAPI?.getSessionBuffer(activeTaskId)) || '';
-    // 去除 ANSI 控制序列，保留纯净文本
-    const plainText = raw.replace(/\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '');
+    // 导出终端里实际渲染的文字。原始输出流里有 CLI 反复重绘的每一帧，直接去控制码会得到重复、错乱的文本；
+    // 只有终端实例不存在时才回退到原始流。
+    const instance = instancesRef.current.get(activeTaskId);
+    let plainText: string;
+    if (instance) {
+      instance.flush();
+      await new Promise<void>((resolve) => instance.term.write('', resolve));
+      plainText = readTerminalText(instance.term);
+    } else {
+      const raw = (await window.electronAPI?.getSessionBuffer(activeTaskId)) || '';
+      plainText = raw.replace(/\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '');
+    }
 
     if (mode === 'copy') {
       try {
         if (window.electronAPI?.writeClipboardText) {
-          await window.electronAPI.writeClipboardText(plainText);
+          const copied = await window.electronAPI.writeClipboardText(plainText);
+          if (!copied) return { success: false, error: '系统剪贴板拒绝写入' };
         } else {
           await navigator.clipboard.writeText(plainText);
         }
@@ -225,37 +525,17 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
     });
 
     // 2. 为新任务创建并挂载 xterm 容器
+    const terminalHost = containerRef.current;
     tasks.forEach((task) => {
       if (!instancesRef.current.has(task.id)) {
         const termContainer = document.createElement('div');
         termContainer.id = `terminal-${task.id}`;
         termContainer.className = 'w-full h-full overflow-hidden';
         termContainer.style.display = task.id === activeTaskId ? 'block' : 'none';
-        containerRef.current?.appendChild(termContainer);
+        terminalHost.appendChild(termContainer);
 
         const term = new Terminal({
-          theme: {
-            background: '#0d1117',
-            foreground: '#c9d1d9',
-            cursor: '#58a6ff',
-            selectionBackground: '#1f6feb40',
-            black: '#484f58',
-            red: '#ff7b72',
-            green: '#3fb950',
-            yellow: '#d29922',
-            blue: '#58a6ff',
-            magenta: '#bc8cff',
-            cyan: '#39c5cf',
-            white: '#b1bac4',
-            brightBlack: '#6e7681',
-            brightRed: '#ffa198',
-            brightGreen: '#56d364',
-            brightYellow: '#e3b341',
-            brightBlue: '#79c0ff',
-            brightMagenta: '#d2a8ff',
-            brightCyan: '#56d4dd',
-            brightWhite: '#f0f6fc',
-          },
+          theme: TERMINAL_THEMES[theme],
           fontFamily: 'Consolas, "Cascadia Code", "Fira Code", monospace',
           fontSize,
           lineHeight,
@@ -265,6 +545,10 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
           convertEol: false,
           allowTransparency: false,
           scrollback: 5000,
+          // Alt+单击默认会向 CLI 发一串方向键来「移动光标」，在自绘界面的 CLI 里会造成乱跳
+          altClickMovesCursor: false,
+          // 搜索高亮用到 registerDecoration，属于 xterm 的 proposed API，不开启会直接抛错
+          allowProposedApi: true,
           windowsPty: {
             backend: 'conpty',
             buildNumber: 26200,
@@ -277,6 +561,9 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
         // 挂载官方搜索插件
         const searchAddon = new SearchAddon();
         term.loadAddon(searchAddon);
+        searchAddon.onDidChangeResults(({ resultIndex, resultCount }) => {
+          if (activeTaskIdRef.current === task.id) setSearchResult({ index: resultIndex, count: resultCount });
+        });
 
         term.open(termContainer);
 
@@ -294,30 +581,37 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
 
         fitAddon.fit();
 
-        // 注册超链接识别（支持 http://、https:// 等网页地址，点击拉起系统默认浏览器）
+        const findAnchor = IME_ANCHOR_FINDERS[task.groupId];
+        if (findAnchor) attachImeAnchor(term, termContainer, findAnchor);
+
+        // 链接需按住 Ctrl 单击才打开，避免点终端聚焦或划选时误触；悬停时给出提示
+        const linkHover = {
+          hover: () => { termContainer.title = '按住 Ctrl 单击打开'; },
+          leave: () => { termContainer.title = ''; },
+        };
+
+        // 注册超链接识别（支持 http://、https:// 等网页地址，Ctrl+单击拉起系统默认浏览器）
         term.registerLinkProvider({
           provideLinks(bufferLineNumber, callback) {
             try {
-              const line = term.buffer.active.getLine(bufferLineNumber - 1);
-              if (!line) {
+              const logical = getLogicalLine(term, bufferLineNumber);
+              if (!logical) {
                 callback(undefined);
                 return;
               }
-              const text = line.translateToString(true);
               const urlRegex = /(https?:\/\/[^\s<>"'`]+)/g;
               const links: any[] = [];
               let match: RegExpExecArray | null;
-              while ((match = urlRegex.exec(text)) !== null) {
+              while ((match = urlRegex.exec(logical.text)) !== null) {
                 const url = match[0];
-                const startX = match.index + 1;
-                const endX = startX + url.length;
+                const range = matchToLinkRange(logical, match.index, url.length, bufferLineNumber);
+                if (!range) continue;
                 links.push({
                   text: url,
-                  range: {
-                    start: { x: startX, y: bufferLineNumber },
-                    end: { x: endX, y: bufferLineNumber },
-                  },
-                  activate: (_e: MouseEvent, text: string) => {
+                  range,
+                  ...linkHover,
+                  activate: (e: MouseEvent, text: string) => {
+                    if (!e.ctrlKey) return;
                     if (window.electronAPI?.openExternal) {
                       window.electronAPI.openExternal(text);
                     } else {
@@ -330,6 +624,48 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
             } catch {
               callback(undefined);
             }
+          },
+        });
+
+        // 识别任务工作目录内真实存在的文件路径（绝对或相对，可带 :行号），点击在右侧预览面板打开
+        term.registerLinkProvider({
+          provideLinks(bufferLineNumber, callback) {
+            const logical = getLogicalLine(term, bufferLineNumber);
+            const resolve = window.electronAPI?.resolvePreviewPaths;
+            if (!logical || !resolve || !task.cwd) {
+              callback(undefined);
+              return;
+            }
+            const text = logical.text;
+            const pathRegex = /(?:[A-Za-z]:[\\/]|\.{1,2}[\\/]|\b)[\w.\-\u4e00-\u9fa5\\/]*?[\w\-\u4e00-\u9fa5]\.[A-Za-z][A-Za-z0-9]{0,7}(?::\d+)?(?![\w/\\]|\.\w)/g;
+            const found: Array<{ raw: string; file: string; line?: number; range: NonNullable<ReturnType<typeof matchToLinkRange>> }> = [];
+            let match: RegExpExecArray | null;
+            while ((match = pathRegex.exec(text)) !== null && found.length < 20) {
+              const raw = match[0];
+              const range = matchToLinkRange(logical, match.index, raw.length, bufferLineNumber);
+              if (!range) continue;
+              const lineMatch = raw.match(/:(\d+)$/);
+              found.push({ raw, range, file: raw.replace(/:\d+$/, ''), line: lineMatch ? Number(lineMatch[1]) : undefined });
+            }
+            if (found.length === 0) {
+              callback(undefined);
+              return;
+            }
+            resolve(task.cwd, found.map((item) => item.file))
+              .then((resolved) => {
+                const links = found.flatMap((item, index) => {
+                  const target = resolved[index];
+                  if (!target) return [];
+                  return [{
+                    text: item.raw,
+                    range: item.range,
+                    ...linkHover,
+                    activate: (e: MouseEvent) => { if (e.ctrlKey) onPreviewFileRef.current?.(task.cwd, target, item.line); },
+                  }];
+                });
+                callback(links.length > 0 ? links : undefined);
+              })
+              .catch(() => callback(undefined));
           },
         });
 
@@ -383,7 +719,8 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
             if (window.electronAPI?.readPasteContent) {
               const res = await window.electronAPI.readPasteContent();
               if (res && res.content) {
-                window.electronAPI.writeSession(task.id, res.content);
+                // term.paste 会按 CLI 是否启用 bracketed paste 包裹，并把换行归一，避免多行内容被逐行提交
+                term.paste(res.content);
                 return;
               }
             }
@@ -392,9 +729,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
           // 回退到浏览器原生剪贴板 API
           try {
             const text = await navigator.clipboard.readText();
-            if (text) {
-              window.electronAPI?.writeSession(task.id, text);
-            }
+            if (text) term.paste(text);
           } catch {}
         };
 
@@ -416,15 +751,26 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
             return true;
           }
 
-          // 1. 搜索快捷键 Ctrl+F
-          if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'f' || e.key === 'F')) {
+          // 0. Shift+Enter 换行：xterm 对 Enter 只区分 Alt，Shift+Enter 会和 Enter 一样直接提交。
+          // 改发 ESC+CR（等同 Alt+Enter），多数 CLI 把它当作输入框内换行。
+          // 纯系统终端（PowerShell / cmd）不认这个序列，保持原样。
+          if (task.groupId !== 'terminal' && e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            e.preventDefault();
+            window.electronAPI?.writeSession(task.id, '\x1b\r');
+            return false;
+          }
+
+          // 1. 搜索快捷键 Ctrl+Shift+F（Ctrl+F 留给 CLI）
+          if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === 'f' || e.key === 'F')) {
+            e.preventDefault();
             setIsSearchOpen(true);
             return false;
           }
 
-          // 2. 清屏快捷键 Ctrl+K
-          if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'k' || e.key === 'K')) {
-            clearActiveTerminal();
+          // 2. 清屏快捷键 Ctrl+Shift+K（Ctrl+K 是 readline「删到行尾」）
+          if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === 'k' || e.key === 'K')) {
+            e.preventDefault();
+            clearTerminal(task.id);
             return false;
           }
 
@@ -454,6 +800,9 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
             (e.ctrlKey && (e.key === 'v' || e.key === 'V')) ||
             (e.shiftKey && e.key === 'Insert')
           ) {
+            // xterm 返回 false 时不会阻止默认行为，浏览器仍会触发原生 paste 事件，
+            // xterm 的粘贴监听再写入一次 PTY，导致文本重复，因此这里必须 preventDefault。
+            e.preventDefault();
             handlePaste();
             return false;
           }
@@ -522,6 +871,44 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
         instancesRef.current.set(task.id, instance);
       }
     });
+
+    // PTY 可能晚于 xterm 实例创建。任务状态变化（尤其 starting -> running）后
+    // 再同步一次真实行列，避免 Kimi 重绘输入框时按默认 120 列发生横向回卷。
+    if (activeTaskId) {
+      const activeInstance = instancesRef.current.get(activeTaskId);
+      if (activeInstance) {
+        const status = tasks.find((task) => task.id === activeTaskId)?.status;
+        requestAnimationFrame(() => {
+          try {
+            activeInstance.fitAddon.fit();
+            const { cols, rows } = activeInstance.term;
+            // 其他任务的状态变化也会触发这里；尺寸和本任务状态都没变时不重复通知 PTY
+            const key = `${activeTaskId}:${cols}x${rows}:${status}`;
+            if (lastSizeSyncRef.current === key) return;
+            lastSizeSyncRef.current = key;
+            window.electronAPI?.resizeSession(activeTaskId, cols, rows);
+          } catch {
+            // ignore
+          }
+        });
+      }
+    }
+  }, [tasks]);
+
+  // 启动失败时把原因写进终端区，避免只剩空白；同一条错误只打印一次
+  const printedErrorsRef = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    tasks.forEach((task) => {
+      const instance = instancesRef.current.get(task.id);
+      if (!instance) return;
+      if (task.status === 'error' && task.errorMessage) {
+        if (printedErrorsRef.current.get(task.id) === task.errorMessage) return;
+        printedErrorsRef.current.set(task.id, task.errorMessage);
+        instance.term.write(`\r\n\x1b[31m[OneAI] 启动失败：${task.errorMessage}\x1b[0m\r\n`);
+      } else if (task.status !== 'error') {
+        printedErrorsRef.current.delete(task.id);
+      }
+    });
   }, [tasks]);
 
   // 当活动激活任务变化时，显示对应终端，隐藏其他终端，并自动 fit 和 focus
@@ -538,13 +925,6 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
             instance.term.refresh(0, instance.term.rows - 1);
             const { cols, rows } = instance.term;
             window.electronAPI?.resizeSession(id, cols, rows);
-
-            // 检查如果界面为空，补齐拉取一次历史 buffer
-            window.electronAPI?.getSessionBuffer(id).then((buf) => {
-              if (buf && instance.term.buffer.active.length <= 1) {
-                instance.term.write(sanitizeTerminalData(buf));
-              }
-            });
           } catch {
             // ignore
           }
@@ -576,7 +956,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
       const instance = instancesRef.current.get(id);
       if (instance) {
         instance.term.write(
-          `\r\n\x1b[90m[OneAI] 终端进程已退出 (退出码: ${exitCode})。可点击顶栏 🔄 重新拉起。\x1b[0m\r\n`
+          `\r\n\x1b[90m[OneAI] 终端进程已退出 (退出码: ${exitCode})。可点击顶栏的重启按钮重新启动。\x1b[0m\r\n`
         );
       }
     });
@@ -631,7 +1011,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
   }, [activeTaskId]);
 
   return (
-    <main className="flex-1 h-full w-full bg-[#0d1117] relative overflow-hidden">
+    <main className="flex-1 h-full w-full bg-canvas relative overflow-hidden">
       {/* 终端内悬浮关键字搜索栏 */}
       <TerminalSearchBar
         isOpen={isSearchOpen}
@@ -641,20 +1021,19 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
         onFindPrevious={handleFindPrevious}
         onClose={handleCloseSearch}
         matchCase={matchCase}
-        onToggleMatchCase={() => setMatchCase((v) => !v)}
+        onToggleMatchCase={handleToggleMatchCase}
         useRegex={useRegex}
-        onToggleRegex={() => setUseRegex((v) => !v)}
+        onToggleRegex={handleToggleRegex}
+        resultText={searchResultText}
       />
 
-      {tasks.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-full text-slate-500 select-none">
-          <p className="text-sm">暂无运行中的 CLI 任务</p>
-          <p className="text-xs text-slate-600 mt-1">
-            在左侧选择对应 CLI 并点击「新建任务」即可拉起终端会话
-          </p>
+      {/* 留白加在外层容器上，不能加在 .xterm 上 */}
+      <div ref={containerRef} className="w-full h-full overflow-hidden px-6 pt-2" style={{ display: tasks.length === 0 ? 'none' : 'block' }} />
+      {/* 没有可显示的活动任务时（含任务都在隐藏分组、或未选中任何任务）显示启动引导，避免中间空白 */}
+      {!tasks.some((task) => task.id === activeTaskId) && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto p-6 select-none">
+          {emptyState || <p className="text-sm text-fg-faint">暂无运行中的 CLI 任务</p>}
         </div>
-      ) : (
-        <div ref={containerRef} className="w-full h-full overflow-hidden" />
       )}
     </main>
   );

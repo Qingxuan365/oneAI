@@ -4,9 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>OneAI - 多 CLI AI 编程工作台</title>
+    <title>OneAI 全栈工作台</title>
+    <script>
+      // 首帧前按已保存主题写入 data-theme，避免浅色主题启动时先闪一帧深色。
+      try {
+        var theme = (JSON.parse(localStorage.getItem('onedesktop_settings') || '{}') || {}).theme;
+        if (['light', 'dark', 'bean', 'parchment', 'dusk', 'nord'].indexOf(theme) < 0) theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        document.documentElement.dataset.theme = theme;
+      } catch (e) {}
+    </script>
   </head>
-  <body class="bg-[#0e1117] text-[#e2e8f0] overflow-hidden select-none">
+  <body class="bg-canvas text-fg overflow-hidden select-none">
     <div id="root"></div>
     <script type="module" src="/src/renderer/src/main.tsx"></script>
   </body>

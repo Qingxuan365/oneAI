@@ -2,40 +2,341 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * 语义颜色 token（RGB 通道，供 tailwind.config.js 以 rgb(var() / alpha) 引用）。
+ * 默认深色；data-theme 由 index.html 内联脚本在首帧前写入，并由 App.tsx 随设置更新。
+ * 组件只使用语义类名（bg-panel、text-fg-subtle 等），不要再写十六进制颜色。
+ */
+:root {
+  color-scheme: dark;
+  --color-canvas: 13 17 23;
+  --color-surface: 17 24 33;
+  --color-panel: 20 29 39;
+  --color-elevated: 21 30 40;
+  --color-muted: 27 37 50;
+  --color-control: 38 52 67;
+  --color-control-hover: 52 70 87;
+  --color-hover: 33 46 60;
+  --color-selected: 29 52 71;
+  --color-line: 38 51 65;
+  --color-line-strong: 52 68 83;
+  --color-fg: 226 232 240;
+  --color-fg-muted: 203 213 225;
+  --color-fg-subtle: 148 163 184;
+  --color-fg-faint: 122 137 158;
+  --color-accent: 56 189 248;
+  --color-primary: 2 132 199;
+  --color-primary-hover: 14 165 233;
+  --color-success: 52 211 153;
+  --color-warning: 251 191 36;
+  --color-danger: 251 113 133;
+  --color-violet: 192 132 252;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --color-canvas: 255 255 255;
+  --color-surface: 246 248 250;
+  --color-panel: 240 243 246;
+  --color-elevated: 255 255 255;
+  --color-muted: 246 248 250;
+  --color-control: 234 238 242;
+  --color-control-hover: 216 222 228;
+  --color-hover: 234 238 242;
+  --color-selected: 221 240 255;
+  --color-line: 208 215 222;
+  --color-line-strong: 175 184 193;
+  --color-fg: 31 35 40;
+  --color-fg-muted: 66 74 83;
+  --color-fg-subtle: 89 99 110;
+  --color-fg-faint: 110 119 129;
+  --color-accent: 9 105 218;
+  --color-primary: 9 105 218;
+  --color-primary-hover: 8 88 186;
+  --color-success: 26 127 55;
+  --color-warning: 154 103 0;
+  --color-danger: 207 34 46;
+  --color-violet: 130 80 223;
+}
+
+/* 护眼主题：豆沙绿、羊皮纸（浅色，降低亮度与蓝光）；暖夜、北极灰蓝（深色，低对比柔和） */
+:root[data-theme='bean'] {
+  color-scheme: light;
+  --color-canvas: 204 232 207;
+  --color-surface: 192 222 196;
+  --color-panel: 184 214 188;
+  --color-elevated: 216 238 219;
+  --color-muted: 192 222 196;
+  --color-control: 176 206 180;
+  --color-control-hover: 160 192 165;
+  --color-hover: 184 214 188;
+  --color-selected: 150 200 160;
+  --color-line: 160 190 165;
+  --color-line-strong: 120 150 126;
+  --color-fg: 34 50 38;
+  --color-fg-muted: 52 72 56;
+  --color-fg-subtle: 66 88 70;
+  --color-fg-faint: 76 98 80;
+  --color-accent: 14 94 138;
+  --color-primary: 14 94 138;
+  --color-primary-hover: 10 76 112;
+  --color-success: 20 110 50;
+  --color-warning: 140 90 0;
+  --color-danger: 185 28 40;
+  --color-violet: 110 64 190;
+}
+
+:root[data-theme='parchment'] {
+  color-scheme: light;
+  --color-canvas: 244 236 216;
+  --color-surface: 237 228 206;
+  --color-panel: 230 220 196;
+  --color-elevated: 250 245 232;
+  --color-muted: 237 228 206;
+  --color-control: 224 213 188;
+  --color-control-hover: 210 198 170;
+  --color-hover: 230 220 196;
+  --color-selected: 205 224 235;
+  --color-line: 215 203 176;
+  --color-line-strong: 176 162 130;
+  --color-fg: 59 49 38;
+  --color-fg-muted: 90 76 60;
+  --color-fg-subtle: 105 90 70;
+  --color-fg-faint: 115 99 78;
+  --color-accent: 30 100 160;
+  --color-primary: 30 100 160;
+  --color-primary-hover: 20 80 135;
+  --color-success: 40 115 60;
+  --color-warning: 150 95 0;
+  --color-danger: 190 40 40;
+  --color-violet: 120 70 180;
+}
+
+:root[data-theme='dusk'] {
+  color-scheme: dark;
+  --color-canvas: 30 27 24;
+  --color-surface: 36 32 28;
+  --color-panel: 41 37 32;
+  --color-elevated: 46 41 36;
+  --color-muted: 50 45 39;
+  --color-control: 62 56 48;
+  --color-control-hover: 78 70 60;
+  --color-hover: 52 47 41;
+  --color-selected: 74 62 44;
+  --color-line: 58 52 45;
+  --color-line-strong: 80 72 62;
+  --color-fg: 226 216 198;
+  --color-fg-muted: 205 194 175;
+  --color-fg-subtle: 160 149 130;
+  --color-fg-faint: 135 125 108;
+  --color-accent: 224 168 90;
+  --color-primary: 176 120 40;
+  --color-primary-hover: 200 140 56;
+  --color-success: 140 195 110;
+  --color-warning: 232 184 80;
+  --color-danger: 232 120 110;
+  --color-violet: 190 150 220;
+}
+
+:root[data-theme='nord'] {
+  color-scheme: dark;
+  --color-canvas: 46 52 64;
+  --color-surface: 50 57 70;
+  --color-panel: 55 62 77;
+  --color-elevated: 59 66 82;
+  --color-muted: 59 66 82;
+  --color-control: 67 76 94;
+  --color-control-hover: 76 86 106;
+  --color-hover: 63 71 88;
+  --color-selected: 66 84 110;
+  --color-line: 67 76 94;
+  --color-line-strong: 86 97 118;
+  --color-fg: 229 233 240;
+  --color-fg-muted: 216 222 233;
+  --color-fg-subtle: 167 176 192;
+  --color-fg-faint: 140 150 168;
+  --color-accent: 136 192 208;
+  --color-primary: 94 129 172;
+  --color-primary-hover: 129 161 193;
+  --color-success: 163 190 140;
+  --color-warning: 235 203 139;
+  --color-danger: 215 120 130;
+  --color-violet: 180 142 173;
+}
+
 html, body, #root {
   height: 100%;
   width: 100%;
   margin: 0;
   padding: 0;
-  background-color: #0e1117;
-  color: #e2e8f0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: rgb(var(--color-canvas));
+  color: rgb(var(--color-fg));
+  accent-color: rgb(var(--color-accent));
+  font-family: "Segoe UI", "Microsoft YaHei UI", -apple-system, BlinkMacSystemFont, sans-serif;
   user-select: none;
   overflow: hidden;
 }
 
-/* 自定义极细深色滚动条 */
+.workbench-ui :is(button, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid rgb(var(--color-accent));
+  outline-offset: 1px;
+}
+
+::selection {
+  background: rgb(var(--color-accent) / 0.3);
+}
+
+/* 通用控件：图标按钮、按钮、输入框和选项块，各组件共用以保持尺寸与交互一致 */
+@layer components {
+  .icon-btn {
+    @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-fg-subtle transition-colors enabled:hover:bg-hover enabled:hover:text-fg disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn {
+    @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md px-3.5 py-1.5 text-ui font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-primary text-white enabled:hover:bg-primary-hover;
+  }
+  .btn-secondary {
+    @apply btn border border-line-strong bg-control text-fg-muted enabled:hover:bg-control-hover enabled:hover:text-fg;
+  }
+  .btn-danger {
+    @apply btn border border-danger/50 bg-danger/10 text-danger enabled:hover:bg-danger/20;
+  }
+  .input {
+    @apply w-full rounded-md border border-line-strong bg-canvas px-3 py-2 text-ui text-fg transition-colors placeholder:text-fg-faint focus:border-accent focus:outline-none;
+  }
+  .option {
+    @apply rounded-md border border-line bg-muted text-xs text-fg-subtle transition-colors hover:bg-hover hover:text-fg;
+  }
+  .option-active {
+    @apply rounded-md border border-accent/60 bg-accent/15 text-xs font-medium text-accent transition-colors;
+  }
+}
+
+/* 弹窗进入动效，遵循系统「减少动态效果」设置 */
+@keyframes overlay-in {
+  from { opacity: 0; }
+}
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+}
+@keyframes drawer-in {
+  from { transform: translateX(24px); opacity: 0; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .drawer-panel { animation: drawer-in 180ms ease-out; }
+  .modal-overlay { animation: overlay-in 120ms ease-out; }
+  .modal-panel { animation: dialog-in 160ms ease-out; }
+}
+
+/*
+ * 顶栏按自身宽度逐级收起次要信息（时钟、额度重置时间、模型名），
+ * 断点使用 rem，随界面缩放档位一起变化，比较对象是顶栏去掉内边距后的内容宽度；
+ * 面包屑由 flex 自动截断。
+ */
+.topbar {
+  container: topbar / inline-size;
+}
+@container topbar (max-width: 66rem) {
+  .topbar-clock { display: none; }
+}
+@container topbar (max-width: 58rem) {
+  .quota-detail { display: none; }
+}
+@container topbar (max-width: 46rem) {
+  .quota-model { display: none; }
+  .topbar-group-name { display: none; }
+}
+@container topbar (max-width: 38rem) {
+  .topbar-status-label { display: none; }
+}
+@container topbar (max-width: 26rem) {
+  .quota-model-info, .quota-model-divider { display: none; }
+  #oneai-terminal-tools { gap: 0; }
+  #oneai-topbar-quota > div { gap: 0.25rem; }
+}
+
+/* 细轨道滑块：音乐进度、音量与字号 */
+input[type='range'].slim {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: rgb(var(--color-line-strong));
+  cursor: pointer;
+}
+input[type='range'].slim::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: rgb(var(--color-accent));
+  border: 2px solid rgb(var(--color-surface));
+}
+input[type='range'].slim:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+/* 极细滚动条，颜色随主题 */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #232938;
+  background: rgb(var(--color-line-strong) / 0.6);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #333d52;
+  background: rgb(var(--color-line-strong));
 }
 
 /* xterm.js 容器样式适配：严禁在 .xterm 上加 padding，避免与字符矩阵发生错位与滚动拖影 */
 .xterm {
   height: 100%;
   width: 100%;
+  /* 横向裁剪放在外层，helpers 不再裁剪，避免 IME 定位矩形被零高度容器截断 */
+  overflow: hidden;
 }
 
 .xterm .xterm-viewport {
   overflow-y: auto !important;
 }
+
+/*
+ * xterm 在 helpers 内放置组合输入视图和真正接收 IME 事件的 textarea。
+ * helpers 保持终端宽度并裁剪越界内容，避免输入法组合文字带动窗口横向滚动。
+ * textarea 单独允许文本输入，不能靠放开整个 helpers 的溢出来支持中文。
+ */
+.xterm .xterm-helpers {
+  left: 0;
+  right: 0;
+  width: 100%;
+}
+
+.xterm .xterm-helper-textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.xterm .composition-view {
+  right: auto;
+  direction: ltr;
+}
+
+/*
+ * Kimi 任务的输入法定位点，变量由 TerminalViewport.tsx 的 attachKimiImeAnchor 写入。
+ * 必须用 !important：xterm 会不断把内联 left/top 写回真实光标，样式表的 !important 优先于内联样式。
+ */
+.xterm.ime-anchored .xterm-helper-textarea,
+.xterm.ime-anchored .composition-view {
+  left: var(--ime-left) !important;
+  top: var(--ime-top) !important;
+}
+
+/* 终端视口底色与 xterm 主题背景一致，避免主题切换瞬间露出旧底色。 */
+.xterm .xterm-viewport { background-color: rgb(var(--color-canvas)); }

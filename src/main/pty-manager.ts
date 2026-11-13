@@ -11,10 +11,18 @@ interface CreateSessionOptions {
   rows?: number;
 }
 
+interface SessionBuffer {
+  chunks: string[];
+  length: number;
+}
+
+const MAX_SESSION_BUFFER_LENGTH = 2 * 1024 * 1024;
+const TARGET_BUFFER_CHUNK_LENGTH = 8 * 1024;
+
 export class PtyManager {
   private sessions: Map<string, pty.IPty> = new Map();
   private sessionOptions: Map<string, CreateSessionOptions> = new Map();
-  private dataBuffers: Map<string, string> = new Map();
+  private dataBuffers: Map<string, SessionBuffer> = new Map();
   private mainWindow: BrowserWindow | null = null;
 
   constructor() {}
@@ -23,21 +31,63 @@ export class PtyManager {
     this.mainWindow = win;
   }
 
+  /** 仍在运行的终端进程数量 */
+  public aliveCount(): number {
+    return this.sessions.size;
+  }
+
   public getSessionBuffer(id: string): string {
-    return this.dataBuffers.get(id) || '';
+    return this.dataBuffers.get(id)?.chunks.join('') || '';
   }
 
   public clearSessionBuffer(id: string) {
-    this.dataBuffers.set(id, '');
+    this.dataBuffers.set(id, { chunks: [], length: 0 });
+  }
+
+  private appendSessionBuffer(id: string, data: string) {
+    if (!data) return;
+
+    const buffer = this.dataBuffers.get(id) || { chunks: [], length: 0 };
+    const chunk = data.length > MAX_SESSION_BUFFER_LENGTH
+      ? data.slice(-MAX_SESSION_BUFFER_LENGTH)
+      : data;
+    const lastIndex = buffer.chunks.length - 1;
+    if (lastIndex >= 0 && buffer.chunks[lastIndex].length < TARGET_BUFFER_CHUNK_LENGTH) {
+      buffer.chunks[lastIndex] += chunk;
+    } else {
+      buffer.chunks.push(chunk);
+    }
+    buffer.length += chunk.length;
+
+    while (buffer.length > MAX_SESSION_BUFFER_LENGTH && buffer.chunks.length > 0) {
+      const overflow = buffer.length - MAX_SESSION_BUFFER_LENGTH;
+      const first = buffer.chunks[0];
+      if (first.length <= overflow) {
+        buffer.chunks.shift();
+        buffer.length -= first.length;
+      } else {
+        buffer.chunks[0] = first.slice(overflow);
+        buffer.length -= overflow;
+      }
+    }
+
+    this.dataBuffers.set(id, buffer);
   }
 
   public createSession(options: CreateSessionOptions): { success: boolean; buffer?: string; error?: string } {
-    const { id, command, cwd } = options;
-    this.sessionOptions.set(id, options);
+    const remembered = this.sessionOptions.get(options.id);
+    const resolvedOptions: CreateSessionOptions = {
+      ...remembered,
+      ...options,
+      cols: options.cols ?? remembered?.cols,
+      rows: options.rows ?? remembered?.rows,
+    };
+    const { id, command, cwd } = resolvedOptions;
+    this.sessionOptions.set(id, resolvedOptions);
 
     // 如果该 session 已经存在，则返回当前缓冲区
     if (this.sessions.has(id)) {
-      return { success: true, buffer: this.dataBuffers.get(id) || '' };
+      return { success: true, buffer: this.getSessionBuffer(id) };
     }
 
     try {
@@ -45,9 +95,8 @@ export class PtyManager {
       const defaultShell = isWindows ? 'powershell.exe' : (process.env.SHELL || '/bin/bash');
       const rawCommand = (command || defaultShell).trim();
       let workDir = cwd || process.env.USERPROFILE || process.cwd();
-      if (!fs.existsSync(workDir)) {
-        console.warn(`[PTY] Specified cwd does not exist: ${workDir}, fallback to process.cwd()`);
-        workDir = fs.existsSync(process.cwd()) ? process.cwd() : (process.env.USERPROFILE || 'C:\\');
+      if (!fs.existsSync(workDir) || !fs.statSync(workDir).isDirectory()) {
+        return { success: false, error: `工作目录不存在或不是文件夹：${workDir}` };
       }
 
       // 正确拆分可执行文件与命令行参数
@@ -88,8 +137,13 @@ export class PtyManager {
         } else if (rawCommand.toLowerCase() === 'cmd' || rawCommand.toLowerCase() === 'cmd.exe') {
           file = 'cmd.exe';
           args = [];
+        } else if (/^(kimi|codex|claude)\s/i.test(rawCommand)) {
+          // 恢复历史会话：带参数的 CLI 命令交给 PowerShell 解析，兼容 .cmd/.ps1 启动器
+          file = 'powershell.exe';
+          args = ['-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', rawCommand];
         } else if (rawCommand.includes(' ')) {
-          const parts = rawCommand.split(/\s+/);
+          // 按空格拆分，但保留引号内的空格（如 "C:\Program Files\x\tool.exe" --flag）
+          const parts = (rawCommand.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((part) => part.replace(/^(["'])(.*)\1$/, '$2'));
           file = parts[0];
           args = parts.slice(1);
         } else {
@@ -104,8 +158,8 @@ export class PtyManager {
 
       const ptyProcess = pty.spawn(file, args, {
         name: 'xterm-256color',
-        cols: Math.max(20, options.cols || 120),
-        rows: Math.max(10, options.rows || 32),
+        cols: Math.max(20, resolvedOptions.cols || 120),
+        rows: Math.max(10, resolvedOptions.rows || 32),
         cwd: workDir,
         env: {
           ...process.env,
@@ -113,19 +167,18 @@ export class PtyManager {
           COLORTERM: 'truecolor',
         } as Record<string, string>,
         useConpty: isWindows,
+        // Pi 在开启原始输入前就写入鼠标追踪序列，系统自带 ConPTY 会吞掉这类序列，导致滚轮无法滚动 Pi 的全屏视窗；
+        // node-pty 自带的 conpty.dll（OpenConsole）会原样透传，因此仅 Pi 会话使用它。
+        useConptyDll: isWindows && /^pi(\s|$)/i.test(rawCommand),
       });
 
-      this.dataBuffers.set(id, '');
+      this.clearSessionBuffer(id);
+      this.sessions.set(id, ptyProcess);
 
       // 监听 PTY 输出数据并缓存与实时发送
       ptyProcess.onData((data: string) => {
-        const currentBuf = this.dataBuffers.get(id) || '';
-        // 保留最近 50KB 缓冲
-        if (currentBuf.length > 50000) {
-          this.dataBuffers.set(id, currentBuf.slice(-40000) + data);
-        } else {
-          this.dataBuffers.set(id, currentBuf + data);
-        }
+        if (this.sessions.get(id) !== ptyProcess) return;
+        this.appendSessionBuffer(id, data);
 
         if (this.mainWindow && !this.mainWindow.isDestroyed()) {
           this.mainWindow.webContents.send('terminal:data', { id, data });
@@ -134,14 +187,14 @@ export class PtyManager {
 
       // 监听进程退出
       ptyProcess.onExit(({ exitCode }) => {
+        if (this.sessions.get(id) !== ptyProcess) return;
         console.log(`[PTY] Session ${id} exited with code ${exitCode}`);
+        this.sessions.delete(id);
         if (this.mainWindow && !this.mainWindow.isDestroyed()) {
           this.mainWindow.webContents.send('terminal:exit', { id, exitCode });
         }
-        this.sessions.delete(id);
       });
 
-      this.sessions.set(id, ptyProcess);
       return { success: true, buffer: '' };
     } catch (err: any) {
       console.error(`[PTY] Failed to spawn session ${id}:`, err);
@@ -157,10 +210,15 @@ export class PtyManager {
   }
 
   public resizeSession(id: string, cols: number, rows: number) {
+    const safeCols = Math.max(1, cols);
+    const safeRows = Math.max(1, rows);
+    const previous = this.sessionOptions.get(id) || { id };
+    this.sessionOptions.set(id, { ...previous, cols: safeCols, rows: safeRows });
+
     const session = this.sessions.get(id);
     if (session) {
       try {
-        session.resize(Math.max(1, cols), Math.max(1, rows));
+        session.resize(safeCols, safeRows);
       } catch (err) {
         console.warn(`[PTY] Resize failed for ${id}:`, err);
       }
@@ -169,20 +227,30 @@ export class PtyManager {
 
   public killSession(id: string) {
     const session = this.sessions.get(id);
+    this.sessions.delete(id);
     if (session) {
       try {
         session.kill();
       } catch {
         // ignore
       }
-      this.sessions.delete(id);
     }
+    this.sessionOptions.delete(id);
+    this.dataBuffers.delete(id);
   }
 
   public restartSession(id: string): { success: boolean; buffer?: string; error?: string } {
     const options = this.sessionOptions.get(id);
-    this.killSession(id);
-    this.clearSessionBuffer(id);
+    const session = this.sessions.get(id);
+    this.sessions.delete(id);
+    if (session) {
+      try {
+        session.kill();
+      } catch {
+        // ignore
+      }
+    }
+    this.dataBuffers.delete(id);
     if (options) {
       return this.createSession(options);
     }
@@ -198,6 +266,8 @@ export class PtyManager {
       }
     }
     this.sessions.clear();
+    this.sessionOptions.clear();
+    this.dataBuffers.clear();
   }
 }
 

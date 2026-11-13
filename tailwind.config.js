@@ -1,4 +1,7 @@
 /** @type {import('tailwindcss').Config} */
+// 语义颜色取自 src/renderer/src/index.css 中的 CSS 变量（RGB 通道），深浅主题只改变量值。
+const token = (name) => `rgb(var(--color-${name}) / <alpha-value>)`;
+
 export default {
   content: [
     "./index.html",
@@ -7,16 +10,32 @@ export default {
   theme: {
     extend: {
       colors: {
-        workbench: {
-          bg: '#0e1117',
-          sidebar: '#161922',
-          card: '#1e222d',
-          hover: '#262b38',
-          border: '#2a303f',
-          text: '#e2e8f0',
-          muted: '#94a3b8'
-        }
-      }
+        canvas: token('canvas'),       // 终端区与输入框底色
+        surface: token('surface'),     // 侧栏主体、弹窗页眉页脚
+        panel: token('panel'),         // 顶栏与侧栏头尾条
+        elevated: token('elevated'),   // 弹窗、浮层、菜单
+        muted: token('muted'),         // 卡片、徽标、次级控件底色
+        control: { DEFAULT: token('control'), hover: token('control-hover') }, // 次级按钮
+        hover: token('hover'),         // 通用悬停底色
+        selected: token('selected'),   // 当前选中项
+        line: { DEFAULT: token('line'), strong: token('line-strong') },
+        fg: {
+          DEFAULT: token('fg'),
+          muted: token('fg-muted'),
+          subtle: token('fg-subtle'),
+          faint: token('fg-faint'),
+        },
+        accent: token('accent'),
+        primary: { DEFAULT: token('primary'), hover: token('primary-hover') },
+        success: token('success'),
+        warning: token('warning'),
+        danger: token('danger'),
+        violet: token('violet'),
+      },
+      fontSize: {
+        '2xs': ['0.75rem', { lineHeight: '1rem' }],
+        'ui': ['0.8125rem', { lineHeight: '1.25rem' }],
+      },
     },
   },
   plugins: [],

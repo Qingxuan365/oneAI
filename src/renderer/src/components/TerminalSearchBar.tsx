@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { ChevronUp, ChevronDown, X, CaseSensitive, Regex } from 'lucide-react';
+import { ChevronUp, ChevronDown, X, CaseSensitive, Regex, Search } from 'lucide-react';
 
 interface TerminalSearchBarProps {
   isOpen: boolean;
@@ -12,6 +12,8 @@ interface TerminalSearchBarProps {
   onToggleMatchCase: () => void;
   useRegex: boolean;
   onToggleRegex: () => void;
+  /** 匹配数量或「无结果」等状态文字，为空时不显示 */
+  resultText?: string;
 }
 
 export const TerminalSearchBar: React.FC<TerminalSearchBarProps> = ({
@@ -25,6 +27,7 @@ export const TerminalSearchBar: React.FC<TerminalSearchBarProps> = ({
   onToggleMatchCase,
   useRegex,
   onToggleRegex,
+  resultText,
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -39,10 +42,12 @@ export const TerminalSearchBar: React.FC<TerminalSearchBarProps> = ({
 
   if (!isOpen) return null;
 
+  const toggle = (active: boolean) => `icon-btn ${active ? 'bg-primary text-white enabled:hover:bg-primary-hover enabled:hover:text-white' : ''}`;
+
   return (
-    <div className="absolute top-2 right-4 z-30 flex items-center space-x-1.5 bg-[#161b26]/95 backdrop-blur border border-[#2a3346] px-2 py-1.5 rounded-md shadow-2xl text-xs text-slate-200 animate-in fade-in slide-in-from-top-2 duration-150">
-      {/* 搜索输入框 */}
-      <div className="relative flex items-center">
+    <div role="search" className="absolute right-6 top-3 z-30 flex items-center gap-1 rounded-lg border border-line-strong bg-elevated/95 p-1.5 text-xs text-fg shadow-xl backdrop-blur">
+      <label className="flex items-center gap-1.5 rounded-md border border-line-strong bg-canvas px-2 focus-within:border-accent">
+        <Search size={13} className="shrink-0 text-fg-faint" />
         <input
           ref={inputRef}
           type="text"
@@ -61,66 +66,33 @@ export const TerminalSearchBar: React.FC<TerminalSearchBarProps> = ({
               onClose();
             }
           }}
-          placeholder="在终端搜索..."
-          className="w-48 bg-[#0e1117] border border-[#2d3748] rounded px-2 py-1 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 text-xs font-mono"
+          placeholder="在终端中搜索"
+          aria-label="在终端中搜索"
+          className="h-7 w-52 bg-transparent font-mono text-xs text-fg placeholder-fg-faint select-text !outline-none"
         />
-      </div>
+      </label>
 
-      {/* 大小写敏感切换 */}
-      <button
-        onClick={onToggleMatchCase}
-        title={matchCase ? '区分大小写（已开启）' : '区分大小写（已关闭）'}
-        className={`p-1 rounded transition-colors ${
-          matchCase
-            ? 'bg-blue-600 text-white'
-            : 'text-slate-400 hover:text-slate-200 hover:bg-[#202736]'
-        }`}
-      >
-        <CaseSensitive size={14} />
+      {resultText && (
+        <span role="status" className={`min-w-[3.5rem] px-1 text-center tabular-nums ${resultText === '无结果' || resultText === '正则无效' ? 'text-danger' : 'text-fg-subtle'}`}>{resultText}</span>
+      )}
+
+      <button type="button" onClick={onToggleMatchCase} aria-pressed={matchCase} title="区分大小写" aria-label="区分大小写" className={toggle(matchCase)}>
+        <CaseSensitive size={15} />
+      </button>
+      <button type="button" onClick={onToggleRegex} aria-pressed={useRegex} title="使用正则表达式" aria-label="使用正则表达式" className={toggle(useRegex)}>
+        <Regex size={15} />
       </button>
 
-      {/* 正则表达式切换 */}
-      <button
-        onClick={onToggleRegex}
-        title={useRegex ? '正则表达式（已开启）' : '正则表达式（已关闭）'}
-        className={`p-1 rounded transition-colors ${
-          useRegex
-            ? 'bg-blue-600 text-white'
-            : 'text-slate-400 hover:text-slate-200 hover:bg-[#202736]'
-        }`}
-      >
-        <Regex size={14} />
+      <div className="mx-0.5 h-4 w-px bg-line-strong" />
+
+      <button type="button" onClick={onFindPrevious} title="上一个 (Shift+Enter)" aria-label="上一个匹配" className="icon-btn">
+        <ChevronUp size={15} />
       </button>
-
-      <div className="h-3.5 w-px bg-[#2a3346] my-auto" />
-
-      {/* 上一个 */}
-      <button
-        onClick={onFindPrevious}
-        title="查找上一个 (Shift+Enter)"
-        className="p-1 text-slate-400 hover:text-slate-200 hover:bg-[#202736] rounded transition-colors"
-      >
-        <ChevronUp size={14} />
+      <button type="button" onClick={onFindNext} title="下一个 (Enter)" aria-label="下一个匹配" className="icon-btn">
+        <ChevronDown size={15} />
       </button>
-
-      {/* 下一个 */}
-      <button
-        onClick={onFindNext}
-        title="查找下一个 (Enter)"
-        className="p-1 text-slate-400 hover:text-slate-200 hover:bg-[#202736] rounded transition-colors"
-      >
-        <ChevronDown size={14} />
-      </button>
-
-      <div className="h-3.5 w-px bg-[#2a3346] my-auto" />
-
-      {/* 关闭按钮 */}
-      <button
-        onClick={onClose}
-        title="关闭搜索 (Esc)"
-        className="p-1 text-slate-400 hover:text-red-400 hover:bg-[#202736] rounded transition-colors"
-      >
-        <X size={14} />
+      <button type="button" onClick={onClose} title="关闭搜索 (Esc)" aria-label="关闭搜索" className="icon-btn">
+        <X size={15} />
       </button>
     </div>
   );

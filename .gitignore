@@ -38,3 +38,6 @@ Thumbs.db
 # AI Local Configs
 .gemini/
 .antigravity/
+
+# Local task files
+.tmp/

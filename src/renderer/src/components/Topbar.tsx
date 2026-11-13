@@ -1,18 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Terminal, ChevronRight, Clock, Search, Eraser, RotateCcw, Download, Copy, FileText, Check } from 'lucide-react';
+import { Terminal, ChevronRight, Search, Eraser, RotateCcw, Download, Copy, FileText, Check, PanelLeftClose, PanelLeftOpen, History } from 'lucide-react';
 import { InlineQuotaText } from './InlineQuotaText';
 import { QuotaData, TaskSession, CliGroup } from '../types';
+import { TASK_STATUS_META } from '../taskStatus';
 import { BrandIcon } from './BrandIcon';
 
 interface TopbarProps {
+  isSidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
   currentGroup: CliGroup | null;
   activeTask: TaskSession | null;
   quota: QuotaData | null;
+  clockOffsetHours?: number;
   onRefreshQuota: () => Promise<void>;
   onOpenSearch?: () => void;
   onClearScreen?: () => void;
-  onRestartSession?: () => void;
-  onExportLogs?: (mode: 'copy' | 'save') => void;
+  onRestartSession?: () => Promise<void>;
+  onExportLogs?: (mode: 'copy' | 'save') => Promise<{ success: boolean; error?: string; canceled?: boolean }>;
+  onOpenHistory?: () => void;
 }
 
 // 数字日期转中文数字（1~30）
@@ -39,8 +44,9 @@ function getLunarStr(now: Date): string {
   }
 }
 
-function getFormattedTime(): string {
-  const now = new Date();
+// offsetHours：顶栏时间相对系统时间增加的小时数，在设置的「时间」栏目中配置
+function getFormattedTime(maximized: boolean, offsetHours: number): string {
+  const now = new Date(Date.now() + (Number.isFinite(offsetHours) ? offsetHours : 0) * 60 * 60 * 1000);
   const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
   const Y = now.getFullYear();
   const M = String(now.getMonth() + 1).padStart(2, '0');
@@ -48,6 +54,7 @@ function getFormattedTime(): string {
   const h = String(now.getHours()).padStart(2, '0');
   const m = String(now.getMinutes()).padStart(2, '0');
   const s = String(now.getSeconds()).padStart(2, '0');
+  if (!maximized) return `${h}:${m}:${s}`;
   const w = weekdays[now.getDay()];
   const lunar = getLunarStr(now);
   const lunarPart = lunar ? `（${lunar}）` : '';
@@ -55,175 +62,212 @@ function getFormattedTime(): string {
 }
 
 export const Topbar: React.FC<TopbarProps> = ({
+  isSidebarCollapsed,
+  onToggleSidebar,
   currentGroup,
   activeTask,
   quota,
+  clockOffsetHours = 0,
   onRefreshQuota,
   onOpenSearch,
   onClearScreen,
   onRestartSession,
   onExportLogs,
+  onOpenHistory,
 }) => {
-  const [currentTime, setCurrentTime] = useState<string>(getFormattedTime);
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [currentTime, setCurrentTime] = useState<string>(() => getFormattedTime(false, clockOffsetHours));
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
-  const [copiedNotification, setCopiedNotification] = useState(false);
+  const [action, setAction] = useState<{ text: string; ok: boolean } | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const actionTimerRef = useRef(0);
 
-  // 每秒精准更新时分秒 12:03:12
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(getFormattedTime());
-    }, 1000);
-    return () => clearInterval(timer);
+    let active = true;
+    const unsubscribe = window.electronAPI.onWindowMaximizedChange(setIsMaximized);
+    window.electronAPI.isWindowMaximized().then((maximized) => {
+      if (active) setIsMaximized(maximized);
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
-  // 点击外部关闭导出下拉菜单
+  // 每秒更新时钟，窗口状态或时间偏移变化时立即刷新
   useEffect(() => {
+    setCurrentTime(getFormattedTime(isMaximized, clockOffsetHours));
+    const timer = setInterval(() => {
+      setCurrentTime(getFormattedTime(isMaximized, clockOffsetHours));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isMaximized, clockOffsetHours]);
+
+  // 点击外部或按 Esc 关闭导出下拉菜单
+  useEffect(() => {
+    if (!isExportMenuOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
       if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
         setIsExportMenuOpen(false);
       }
     };
-    if (isExportMenuOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsExportMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isExportMenuOpen]);
 
-  const handleCopyLogs = () => {
-    setIsExportMenuOpen(false);
-    onExportLogs?.('copy');
-    setCopiedNotification(true);
-    setTimeout(() => setCopiedNotification(false), 2000);
+  useEffect(() => () => window.clearTimeout(actionTimerRef.current), []);
+
+  const showAction = (text: string, ok: boolean) => {
+    setAction({ text, ok });
+    window.clearTimeout(actionTimerRef.current);
+    actionTimerRef.current = window.setTimeout(() => setAction(null), 2500);
   };
 
-  const handleSaveLogs = () => {
+  const handleCopyLogs = async () => {
     setIsExportMenuOpen(false);
-    onExportLogs?.('save');
+    const result = await onExportLogs?.('copy');
+    if (result?.success) showAction('会话文本已复制', true);
+    else showAction(`复制失败：${result?.error || '操作未完成'}`, false);
   };
+
+  const handleSaveLogs = async () => {
+    setIsExportMenuOpen(false);
+    const result = await onExportLogs?.('save');
+    if (result?.success) showAction('日志已保存', true);
+    else if (!result?.canceled) showAction(`保存失败：${result?.error || '操作未完成'}`, false);
+  };
+
+  const status = activeTask ? TASK_STATUS_META[activeTask.status] : null;
+  const menuItem = 'flex w-full items-center gap-2 px-3 py-2 text-left text-fg-muted transition-colors hover:bg-hover hover:text-fg';
 
   return (
-    <header className="relative h-10 bg-[#12151d] border-b border-[#232936] flex items-center justify-between px-4 select-none shrink-0 z-10">
-      {/* 左侧：会话面包屑导航与快捷操作栏 */}
-      <div className="flex items-center space-x-3 text-xs text-slate-300">
+    <header className="topbar relative z-10 flex h-11 shrink-0 select-none items-center gap-2 border-b border-line bg-panel px-2.5">
+      {/* 左侧：侧栏开关、会话面包屑与终端工具；面包屑在空间不足时自动截断 */}
+      <div className="flex min-w-0 flex-1 items-center gap-2 text-ui text-fg-muted">
+        <button
+          type="button"
+          onClick={onToggleSidebar}
+          aria-label={isSidebarCollapsed ? '展开左侧导航栏' : '折叠左侧导航栏'}
+          aria-expanded={!isSidebarCollapsed}
+          aria-controls="oneai-sidebar"
+          title={`${isSidebarCollapsed ? '展开左侧导航栏' : '折叠左侧导航栏'} (Ctrl+Shift+B)`}
+          className="icon-btn"
+        >
+          {isSidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+        </button>
+        <div className="h-4 w-px shrink-0 bg-line-strong" />
         {currentGroup ? (
-          <div className="flex items-center space-x-1.5 min-w-0">
+          <div className="flex min-w-0 items-center gap-1.5">
             <BrandIcon icon={currentGroup.icon} size={16} />
-            <span className="font-medium text-slate-200 shrink-0">{currentGroup.name}</span>
-            {activeTask && (
+            <span className="topbar-group-name shrink-0 font-medium text-fg">{currentGroup.name}</span>
+            {activeTask && status && (
               <>
-                <ChevronRight size={13} className="text-slate-500 shrink-0" />
-                <span className="text-slate-300 font-mono max-w-[140px] truncate" title={activeTask.title}>
+                <ChevronRight size={13} className="topbar-group-name shrink-0 text-fg-faint" />
+                <span className="min-w-0 max-w-[18rem] truncate text-fg-muted" title={activeTask.title}>
                   {activeTask.title}
                 </span>
                 <span
-                  className={`ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono border shrink-0 ${
-                    activeTask.status === 'running'
-                      ? 'bg-[#1c2230] text-emerald-400 border-emerald-500/20'
-                      : activeTask.status === 'stopped'
-                      ? 'bg-[#2a1c22] text-rose-400 border-rose-500/25'
-                      : 'bg-[#1c2230] text-amber-400 border-amber-500/20'
-                  }`}
+                  className={`ml-0.5 inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-2xs ${status.badge}`}
+                  title={status.hint}
                 >
-                  {activeTask.status}
+                  <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} aria-hidden="true" />
+                  <span className="topbar-status-label">{status.label}</span>
                 </span>
               </>
             )}
           </div>
         ) : (
-          <div className="flex items-center space-x-1.5 text-slate-500">
-            <Terminal size={14} />
-            <span>无活动终端会话</span>
+          <div className="flex min-w-0 items-center gap-1.5 text-fg-faint">
+            <Terminal size={14} className="shrink-0" />
+            <span className="truncate">无活动终端会话</span>
           </div>
         )}
 
-        {/* 终端控制快捷工具栏 */}
+        {/* 终端工具 */}
         {activeTask && (
-          <div className="flex items-center space-x-1 pl-2 border-l border-[#232936]">
-            {/* 搜索 (Ctrl+F) */}
-            <button
-              onClick={onOpenSearch}
-              title="在终端中搜索关键词 (Ctrl+F)"
-              className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-[#1f2533] transition-colors"
-            >
-              <Search size={13} />
+          <div id="oneai-terminal-tools" role="group" aria-label="终端工具" className="flex shrink-0 items-center gap-0.5 border-l border-line pl-2">
+            <button type="button" onClick={onOpenSearch} title="在终端中搜索关键词 (Ctrl+Shift+F)" aria-label="在终端中搜索" className="icon-btn">
+              <Search size={15} />
             </button>
-
-            {/* 清屏 (Ctrl+K) */}
-            <button
-              onClick={onClearScreen}
-              title="清空当前屏幕与历史缓存 (Ctrl+K)"
-              className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-[#1f2533] transition-colors"
-            >
-              <Eraser size={13} />
+            <button type="button" onClick={onClearScreen} title="清空当前屏幕与历史缓存 (Ctrl+Shift+K)" aria-label="清空屏幕" className="icon-btn">
+              <Eraser size={15} />
             </button>
-
-            {/* 重启 CLI */}
             <button
+              type="button"
               onClick={onRestartSession}
-              title="重启当前 CLI 进程（保持当前目录与配置）"
-              className="p-1 rounded text-slate-400 hover:text-amber-300 hover:bg-[#1f2533] transition-colors"
+              title={activeTask.status === 'stopped' || activeTask.status === 'error' ? '启动当前终端' : activeTask.status === 'starting' ? '终端正在启动' : '重启当前终端（保持当前目录与配置）'}
+              aria-label="重启终端"
+              disabled={activeTask.status === 'starting'}
+              className="icon-btn enabled:hover:text-warning"
             >
-              <RotateCcw size={13} />
+              <RotateCcw size={15} />
             </button>
 
-            {/* 导出/复制日志下拉菜单 */}
             <div className="relative" ref={exportMenuRef}>
               <button
+                type="button"
                 onClick={() => setIsExportMenuOpen((v) => !v)}
                 title="导出或复制会话日志"
-                className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-[#1f2533] transition-colors flex items-center"
+                aria-label="导出或复制会话日志"
+                aria-haspopup="menu"
+                aria-expanded={isExportMenuOpen}
+                className={`icon-btn ${isExportMenuOpen ? 'bg-hover text-fg' : ''}`}
               >
-                {copiedNotification ? (
-                  <Check size={13} className="text-emerald-400" />
-                ) : (
-                  <Download size={13} />
-                )}
+                {action?.ok ? <Check size={15} className="text-success" /> : <Download size={15} />}
               </button>
 
               {isExportMenuOpen && (
-                <div className="absolute left-0 mt-1 w-44 bg-[#161a24] border border-[#2d3748] rounded-md shadow-2xl py-1 z-50 text-xs animate-in fade-in zoom-in-95 duration-100">
-                  <button
-                    onClick={handleCopyLogs}
-                    className="w-full text-left px-3 py-1.5 flex items-center space-x-2 text-slate-300 hover:bg-[#202738] hover:text-white transition-colors"
-                  >
-                    <Copy size={12} className="text-slate-400" />
-                    <span>复制完整会话文本</span>
+                <div role="menu" className="absolute left-0 z-50 mt-1.5 w-48 overflow-hidden rounded-lg border border-line-strong bg-elevated py-1 text-xs shadow-xl">
+                  <button type="button" role="menuitem" autoFocus onClick={handleCopyLogs} className={menuItem}>
+                    <Copy size={13} className="text-fg-subtle" />
+                    <span>复制最近会话文本</span>
                   </button>
-                  <button
-                    onClick={handleSaveLogs}
-                    className="w-full text-left px-3 py-1.5 flex items-center space-x-2 text-slate-300 hover:bg-[#202738] hover:text-white transition-colors"
-                  >
-                    <FileText size={12} className="text-slate-400" />
-                    <span>另存为日志文件...</span>
+                  <button type="button" role="menuitem" onClick={handleSaveLogs} className={menuItem}>
+                    <FileText size={13} className="text-fg-subtle" />
+                    <span>另存为日志文件…</span>
                   </button>
                 </div>
               )}
             </div>
-
-            {copiedNotification && (
-              <span className="text-[10px] text-emerald-400 font-mono animate-in fade-in">
-                已复制!
-              </span>
-            )}
           </div>
+        )}
+        {action && (
+          <span role="status" className={`min-w-0 truncate text-2xs ${action.ok ? 'text-success' : 'text-danger'}`} title={action.text}>
+            {action.text}
+          </span>
         )}
       </div>
 
-      {/* 中间区域：时分秒精准变动时钟 */}
-      <div className="flex items-center justify-center">
-        <div className="flex items-center space-x-1.5 bg-[#161a24] px-2.5 py-0.5 rounded border border-[#232a3b] text-xs font-mono tabular-nums text-slate-300 shadow-inner">
-          <Clock size={12} className="text-slate-400" />
-          <span className="tracking-wider text-slate-200 font-medium">{currentTime}</span>
-        </div>
+      {/* 时钟：空间不足时由 .topbar-clock 收起 */}
+      <div id="oneai-topbar-clock" className="topbar-clock pointer-events-none shrink-0 px-1.5 font-mono text-xs font-medium tabular-nums tracking-wide text-fg-subtle">
+        {currentTime}
       </div>
 
-      {/* 右侧：单行横排纯文字大模型配额（无弹窗、无浮窗） */}
-      <div className="flex items-center">
-        <InlineQuotaText quota={quota} onRefresh={onRefreshQuota} />
-      </div>
+      {/* 右侧：单行横排纯文字大模型配额（无弹窗、无浮窗）；没有活动终端的空页面不显示额度与刷新按钮 */}
+      {activeTask && (
+        <div id="oneai-topbar-quota" className="flex shrink-0 items-center whitespace-nowrap border-l border-line pl-2.5">
+          <InlineQuotaText quota={quota} onRefresh={onRefreshQuota} />
+        </div>
+      )}
+
+      {onOpenHistory && (
+        <button
+          type="button"
+          onClick={onOpenHistory}
+          aria-label="查看历史会话"
+          title="查看所有 CLI 的历史会话 (Ctrl+Shift+H)"
+          className="icon-btn"
+        >
+          <History size={16} />
+        </button>
+      )}
     </header>
   );
 };

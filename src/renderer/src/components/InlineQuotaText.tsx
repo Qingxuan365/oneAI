@@ -7,6 +7,29 @@ interface InlineQuotaTextProps {
   onRefresh: () => Promise<void>;
 }
 
+// 剩余百分比配色：>= 50 绿色，20-49 黄色，< 20 红色，未知为灰色
+function percentColor(pct: number): string {
+  if (pct < 0) return 'text-fg-faint';
+  if (pct >= 50) return 'text-success';
+  if (pct >= 20) return 'text-warning';
+  return 'text-danger';
+}
+
+// 推理思考等级（low | medium | high | xhigh | max）配色
+function effortColor(effort: string): string {
+  const eff = effort.toLowerCase();
+  if (eff === 'low') return 'text-accent bg-accent/10 border-accent/30';
+  if (eff === 'medium') return 'text-success bg-success/10 border-success/30';
+  if (eff === 'high') return 'text-warning bg-warning/10 border-warning/30';
+  if (eff === 'xhigh' || eff === 'max') return 'text-violet bg-violet/10 border-violet/30';
+  return 'text-fg-muted bg-fg-faint/10 border-line-strong';
+}
+
+const Divider = ({ className = '' }: { className?: string }) => (
+  <span className={`h-3 w-px shrink-0 bg-line-strong ${className}`} aria-hidden="true" />
+);
+
+/** 顶栏单行纯文字额度。空间不足时 .quota-detail 与 .quota-model 由顶栏容器查询收起，完整信息保留在 title 中。 */
 export const InlineQuotaText: React.FC<InlineQuotaTextProps> = ({ quota, onRefresh }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -21,17 +44,19 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = ({ quota, onRefre
     }
   };
 
+  const refreshButton = (title: string) => (
+    <button type="button" onClick={handleRefreshClick} className="icon-btn" title={title} aria-label={title}>
+      <RotateCw size={14} className={isRefreshing ? 'animate-spin text-success' : ''} />
+    </button>
+  );
+
   if (!quota) {
     return (
-      <div className="flex items-center space-x-2 text-xs text-slate-500 font-mono select-none">
-        <span>5h Quota: -- | 7d Quota: --</span>
-        <button
-          onClick={handleRefreshClick}
-          className="p-1 hover:text-slate-300 transition-colors"
-          title="刷新额度"
-        >
-          <RotateCw size={13} className={isRefreshing ? 'animate-spin text-emerald-400' : ''} />
-        </button>
+      <div className="flex items-center gap-2 font-mono text-ui text-fg-faint">
+        <span>5h --</span>
+        <Divider />
+        <span>7d --</span>
+        {refreshButton('刷新额度')}
       </div>
     );
   }
@@ -39,109 +64,54 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = ({ quota, onRefre
   // 离线/未配置状态
   if (quota.status === 'offline') {
     return (
-      <div className="flex items-center space-x-2 text-xs font-mono select-none text-slate-500">
-        <span className="text-slate-400 bg-[#1a1f2c] px-1.5 py-0.5 rounded border border-[#2a3346] text-[11px]">
-          {quota.cliName}
-        </span>
-        <span>{quota.message || '未检测到本地 CLI 或配置'}</span>
-        <button
-          onClick={handleRefreshClick}
-          className="p-1 text-slate-500 hover:text-slate-300 transition-colors"
-          title={`刷新 ${quota.cliName} 状态`}
-        >
-          <RotateCw size={13} className={isRefreshing ? 'animate-spin text-emerald-400' : ''} />
-        </button>
+      <div className="flex items-center gap-2 text-ui text-fg-faint">
+        <span className="rounded border border-line-strong bg-muted px-1.5 py-0.5 text-xs text-fg-muted">{quota.cliName}</span>
+        <span className="quota-detail">{quota.message || '未检测到本地 CLI 或配置'}</span>
+        {refreshButton(`刷新 ${quota.cliName} 状态`)}
       </div>
     );
   }
 
-  // 颜色根据剩余百分比微调：>= 50 绿色，20-49 黄色，< 20 红色
-  const get5hColor = (pct: number) => {
-    if (pct >= 50) return 'text-emerald-400';
-    if (pct >= 20) return 'text-amber-400';
-    return 'text-rose-400';
-  };
-
-  const get7dColor = (pct: number) => {
-    if (pct >= 50) return 'text-emerald-400';
-    if (pct >= 20) return 'text-amber-400';
-    return 'text-rose-400';
-  };
-
-  // 根据推理思考等级（low | medium | high | xhigh | max）呈现专属微光色彩
-  const getEffortBadge = (effort: string) => {
-    const eff = effort.toLowerCase();
-    let colorClass = 'text-slate-300 bg-slate-500/10 border-slate-600/40';
-    if (eff === 'low') {
-      colorClass = 'text-sky-400 bg-sky-500/10 border-sky-500/30';
-    } else if (eff === 'medium') {
-      colorClass = 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30';
-    } else if (eff === 'high') {
-      colorClass = 'text-amber-400 bg-amber-500/10 border-amber-500/30';
-    } else if (eff === 'xhigh' || eff === 'max') {
-      colorClass = 'text-purple-400 bg-purple-500/10 border-purple-500/30';
-    }
-    return (
-      <span
-        className={`font-mono text-[10px] px-1.5 py-0.2 rounded border font-semibold uppercase tracking-wider ${colorClass}`}
-        title={`推理思考等级: ${effort}`}
-      >
-        {effort}
-      </span>
-    );
-  };
+  // 系统终端是本地 Shell，没有额度窗口，只显示 Shell 名称与状态
+  const windows = quota.cliId === 'terminal' ? [] : [
+    { label: '5h', percent: quota.fiveHourPercent, reset: quota.fiveHourResetsIn },
+    { label: '7d', percent: quota.sevenDayPercent, reset: quota.sevenDayResetsOn },
+  ];
 
   return (
-    <div className="flex items-center space-x-2 text-xs font-mono select-none text-slate-300">
-      {/* CLI 模型与等级徽标 */}
+    <div className="flex items-center gap-2 font-mono text-ui text-fg-muted" title={quota.model ? (quota.effort ? `${quota.model} · 推理思考等级: ${quota.effort}` : quota.model) : undefined}>
+      {/* 模型与推理等级 */}
       {quota.model && (
-        <div className="flex items-center space-x-1.5 bg-[#1a1f2c] px-2 py-0.5 rounded border border-[#2a3346] text-[11px]">
-          <span className="text-slate-200 font-semibold">{quota.model}</span>
-          {quota.effort && getEffortBadge(quota.effort)}
-        </div>
+        <span className="quota-model-info flex items-center gap-1.5 text-xs">
+          <span className="quota-model font-semibold text-fg">{quota.model}</span>
+          {quota.effort && (
+            <span className={`rounded border px-1.5 py-px text-2xs font-semibold lowercase tracking-wider ${effortColor(quota.effort)}`}>
+              {quota.effort}
+            </span>
+          )}
+        </span>
       )}
 
-      {/* 5小时配额 */}
-      <span className="whitespace-nowrap">
-        <span className="text-slate-400">5h: </span>
-        <span className={`font-semibold ${get5hColor(quota.fiveHourPercent)}`}>
-          {quota.fiveHourPercent}%
-        </span>
-        {quota.fiveHourResetsIn !== '--' && (
-          <span className="text-slate-400 text-[11px]"> ({quota.fiveHourResetsIn})</span>
-        )}
-      </span>
-
-      {/* 分隔符 */}
-      <span className="text-slate-600 font-normal">|</span>
-
-      {/* 7天配额 */}
-      <span className="whitespace-nowrap">
-        <span className="text-slate-400">7d: </span>
-        <span className={`font-semibold ${get7dColor(quota.sevenDayPercent)}`}>
-          {quota.sevenDayPercent}%
-        </span>
-        {quota.sevenDayResetsOn !== '--' && (
-          <span className="text-slate-400 text-[11px]"> ({quota.sevenDayResetsOn})</span>
-        )}
-      </span>
+      {windows.map(({ label, percent, reset }, index) => (
+        <React.Fragment key={label}>
+          {(index > 0 || quota.model) && <Divider className={index === 0 ? 'quota-model-divider' : ''} />}
+          <span className="whitespace-nowrap" title={`${label} 额度剩余 ${percent < 0 ? '未知' : `${percent}%`}${reset !== '--' ? `，${reset}` : ''}`}>
+            <span className="text-fg-subtle">{label} </span>
+            <span className={`font-semibold ${percentColor(percent)}`}>{percent < 0 ? '--' : `${percent}%`}</span>
+            {reset !== '--' && <span className="quota-detail text-xs text-fg-subtle"> ({reset})</span>}
+          </span>
+        </React.Fragment>
+      ))}
 
       {/* 额外辅助消息（如 Ctx 上下文用量） */}
       {quota.message && (
         <>
-          <span className="text-slate-600 font-normal">|</span>
-          <span className="text-slate-400 text-[11px]">{quota.message}</span>
+          <Divider className="quota-detail" />
+          <span className="quota-detail text-xs text-fg-subtle">{quota.message}</span>
         </>
       )}
 
-      {/* 单行末尾刷新按钮 */}
-      <button
-        onClick={handleRefreshClick}
-        className="ml-1 p-1 text-slate-400 hover:text-emerald-400 transition-colors focus:outline-none"
-        title={`点击立即刷新 ${quota.cliName} 真实配额`}
-      >
-        <RotateCw size={13} className={isRefreshing ? 'animate-spin text-emerald-400' : ''} />
-      </button>
+      {refreshButton(`立即刷新 ${quota.cliName} 额度`)}
     </div>
   );
 };
