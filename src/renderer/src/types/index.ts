@@ -2,14 +2,36 @@ export type TaskStatus = 'starting' | 'running' | 'idle' | 'waiting' | 'stopped'
 
 export interface TaskSession {
   id: string;              // 任务唯一ID（对应底层的 ptyId）
-  groupId: string;         // 所属 CLI 分组ID
+  groupId: string;         // 所属 CLI 的 ID（对应 CliDef.id）
   title: string;           // 任务名称，例如 "Task 1: Auth Refactor"
   status: TaskStatus;      // 运行状态
   cwd: string;             // 执行工作目录
   command?: string;        // 该任务使用的启动命令
   errorMessage?: string;   // 启动失败原因
   historyId?: string;      // 由历史会话恢复时的 CLI 会话 ID
+  accountId?: string;      // 使用的账号配置 ID（AppSettings.accounts），缺省为 CLI 的默认账号
   createdAt: number;       // 创建时间戳
+}
+
+/** 多账号：每个账号是一个独立的 CLI 配置目录（登录凭据与会话记录都在其中），目前支持 Codex、Claude Code 与 Kimi Code */
+export interface Account {
+  id: string;
+  cliId: 'codex' | 'claude' | 'kimi';
+  name: string;
+  configDir: string;       // 绝对路径；Codex 对应 CODEX_HOME，Claude Code 对应 CLAUDE_CONFIG_DIR，Kimi Code 对应 KIMI_CODE_HOME
+  env?: string;            // 附加环境变量，每行 KEY=VALUE
+}
+
+/** 传给主进程的账号：附加环境变量已解析为键值对 */
+export interface SessionAccount {
+  cliId: Account['cliId'];
+  configDir: string;
+  env?: Record<string, string>;
+}
+
+export interface LoginStatus {
+  loggedIn: boolean | null;  // null：无法判断
+  detail?: string;           // 如 Claude 返回的邮箱
 }
 
 export interface HistoryEntry {
@@ -21,13 +43,18 @@ export interface HistoryEntry {
   command: string;
 }
 
-export interface CliGroup {
-  id: string;              // 分组ID，如 "codex", "kimi", "opencode", "claude", "grok", "shell"
-  name: string;            // 组名，如 "Codex", "Kimi Code", "Grok"
+/** CLI 定义：图标、默认命令；任务按其 groupId（即 CLI id）关联到这里 */
+export interface CliDef {
+  id: string;              // 如 "codex", "kimi", "opencode", "claude", "grok", "terminal"
+  name: string;            // 显示名称，如 "Codex", "Kimi Code"
   icon: string;            // 品牌专属 Logo，未内置的 CLI 回退为通用终端图标
   defaultCommand: string;  // 默认拉起命令模版
-  isExpanded: boolean;     // 是否展开子任务列表
-  tasks: TaskSession[];    // 子任务列表
+}
+
+/** 侧栏中的一个工作文件夹；任务按 cwd 归属到文件夹，文件夹按此数组顺序显示 */
+export interface FolderEntry {
+  path: string;            // 首次出现时的原始路径（保留大小写），比较时用 folderKey 归一化
+  isExpanded: boolean;
 }
 
 // 具体主题 id；bean 豆沙绿、parchment 羊皮纸、dusk 暖夜、nord 北极灰蓝为护眼主题
@@ -45,6 +72,7 @@ export interface AppSettings {
   musicDirectory: string; // 顶栏音乐播放目录，空字符串表示系统「音乐」目录
   musicPlayerVisible: boolean; // 侧栏底部是否显示音乐播放器，默认 true
   clockOffsetHours: number; // 顶栏时钟相对系统时间增加的小时数，默认 0（-24 ~ 24 的整数）
+  accounts: Account[]; // 多账号配置（Codex / Claude Code / Kimi Code），默认空；「恢复默认设置」不会清空
 }
 
 export interface QuotaData {
@@ -53,6 +81,8 @@ export interface QuotaData {
   model?: string;                // 如 'deepseek-v4-pro' | 'gpt-5.5'
   effort?: string;               // 推理思考等级: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   planType?: string;             // 如 'Plus' | 'Pro'
+  tokens?: number;               // 最近活跃会话累计 token，无数据时缺省
+  costUsd?: number;              // 最近活跃会话累计费用（美元），仅 Claude Code 提供
   fiveHourPercent: number;       // 5小时配额剩余百分比（0-100）
   fiveHourResetsIn: string;      // 5小时配额重置倒计时（例如 "2h 45m"）
   sevenDayPercent: number;       // 7天配额剩余百分比（0-100）
@@ -60,6 +90,14 @@ export interface QuotaData {
   lastUpdated: number;           // 最后更新时间戳
   status: 'normal' | 'warning' | 'critical' | 'offline';
   message?: string;
+}
+
+export interface SystemStats {
+  cpuPercent: number;
+  memUsedBytes: number;
+  memTotalBytes: number;
+  netUpBytesPerSec: number | null;
+  netDownBytesPerSec: number | null;
 }
 
 export interface ElectronTerminalAPI {
@@ -81,7 +119,7 @@ export interface ElectronTerminalAPI {
   listSessionHistory: () => Promise<HistoryEntry[]>;
   deleteSessionHistory: (items: Array<{ cliId: HistoryEntry['cliId']; id: string }>) => Promise<{ deleted: number; failed: number }>;
   detectClis: () => Promise<Array<{ id: string; name: string; command: string }>>;
-  createSession: (options: { id: string; command?: string; cwd?: string }) => Promise<{ success: boolean; buffer?: string; error?: string }>;
+  createSession: (options: { id: string; command?: string; cwd?: string; account?: SessionAccount }) => Promise<{ success: boolean; buffer?: string; error?: string }>;
   getSessionBuffer: (id: string) => Promise<string>;
   writeSession: (id: string, data: string) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => Promise<void>;
@@ -99,7 +137,18 @@ export interface ElectronTerminalAPI {
   getQuota: (cliId?: string) => Promise<QuotaData>;
   getAllQuotas: () => Promise<Record<string, QuotaData>>;
   refreshQuota: (cliId?: string) => Promise<Record<string, QuotaData>>;
+  /** 同步账号列表给额度服务；账号的额度以账号 id 为键，与默认账号（键为 cliId）并列返回 */
+  setQuotaAccounts?: (accounts: Array<{ key: string; cliId: string; configDir: string }>) => Promise<void>;
+  /** 读取任务对应会话里最近一条用户消息（仅 Claude / Codex / Kimi）；text 为 null 表示还没有消息 */
+  /** 窗口控件覆盖层的颜色与高度，随主题与界面缩放同步 */
+  setTitleBarOverlay?: (opts: { color: string; symbolColor: string; height: number }) => void;
+  getTaskSummaries?: (tasks: Array<{ id: string; cliId: string; cwd: string; createdAt: number; historyId?: string; configDir?: string }>) => Promise<Record<string, { text: string | null }>>;
+  /** 读取各文件夹所在 Git 仓库的当前分支（只读 .git/HEAD）；不在仓库内为 null */
+  getGitBranches?: (paths: string[]) => Promise<Record<string, string | null>>;
+  /** 在该账号的环境下运行 CLI 的状态命令，判断是否已登录 */
+  checkAccountLogin?: (account: SessionAccount) => Promise<LoginStatus | { error: string }>;
   onQuotaUpdate: (callback: (quotas: Record<string, QuotaData>) => void) => () => void;
+  onSystemStats: (callback: (stats: SystemStats) => void) => () => void;
 }
 
 export type FilePreviewResult =

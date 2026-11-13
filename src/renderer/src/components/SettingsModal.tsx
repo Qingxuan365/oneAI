@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Clock, Keyboard, LucideIcon, Minus, Monitor, Moon, Palette, Plus, RotateCcw, Settings, SlidersHorizontal, Sun, TerminalSquare } from 'lucide-react';
-import { AppSettings } from '../types';
+import { Clock, Keyboard, LucideIcon, Minus, Monitor, Moon, Palette, Plus, RotateCcw, Settings, SlidersHorizontal, Sun, TerminalSquare, Users } from 'lucide-react';
+import { Account, AppSettings } from '../types';
 import { THEME_OPTIONS } from '../themes';
 import { Modal } from './Modal';
+import { AccountsSettings } from './AccountsSettings';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -10,15 +11,18 @@ interface SettingsModalProps {
   settings: AppSettings;
   onUpdateSettings: (newSettings: AppSettings) => void;
   onResetDefault: () => void;
+  /** 设置 → 账号 → 登录：由 App 在该账号环境下新开终端任务运行登录命令 */
+  onLoginAccount: (account: Account) => void;
 }
 
-type TabId = 'appearance' | 'terminal' | 'general' | 'time' | 'shortcuts';
+type TabId = 'appearance' | 'terminal' | 'general' | 'accounts' | 'time' | 'shortcuts';
 
 const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: 'appearance', label: '外观', icon: Palette },
-  { id: 'terminal', label: '终端', icon: TerminalSquare },
-  { id: 'general', label: '提醒与音乐', icon: SlidersHorizontal },
   { id: 'time', label: '时间', icon: Clock },
+  { id: 'terminal', label: '终端', icon: TerminalSquare },
+  { id: 'accounts', label: '账号', icon: Users },
+  { id: 'general', label: '提醒', icon: SlidersHorizontal },
   { id: 'shortcuts', label: '快捷键', icon: Keyboard },
 ];
 
@@ -49,16 +53,15 @@ const SHORTCUTS: { title: string; items: [string, string][] }[] = [
     items: [
       ['Ctrl + Tab / Ctrl + Shift + Tab', '切换到下一个 / 上一个任务'],
       ['Ctrl + 1 … 9', '切换到第 N 个任务'],
-      ['Ctrl + Shift + T', '在当前 CLI 分组一键新建任务'],
+      ['Ctrl + Shift + T', '沿用当前任务的 CLI，在当前文件夹一键新建任务'],
       ['Ctrl + Shift + N', '新建任务并自定义名称、命令与目录'],
       ['Ctrl + Shift + W', '关闭当前任务'],
-      ['Alt + ↑ / ↓', '焦点在侧栏任务或分组上时调整顺序'],
+      ['Alt + ↑ / ↓', '焦点在侧栏任务或文件夹手柄上时调整顺序'],
       ['鼠标中键', '关闭侧栏中的任务'],
       ['Ctrl + Shift + B', '折叠或展开左侧导航栏'],
       ['Ctrl + Shift + H', '打开历史会话'],
       ['Ctrl + ,', '打开设置'],
       ['F2 / 双击任务', '重命名任务'],
-      ['Alt + ↑ / ↓', '移动聚焦的 CLI 分组'],
     ],
   },
   {
@@ -107,6 +110,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   settings,
   onUpdateSettings,
   onResetDefault,
+  onLoginAccount,
 }) => {
   const [tab, setTab] = useState<TabId>('appearance');
   const update = (patch: Partial<AppSettings>) => onUpdateSettings({ ...settings, ...patch });
@@ -133,7 +137,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             type="button"
             onClick={onResetDefault}
             className="mr-auto flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-fg-subtle transition-colors hover:bg-hover hover:text-fg"
-            title="还原为：主题随系统、终端 15px、竖线光标、舒适缩放"
+            title="还原为：主题随系统、终端 15px、竖线光标、舒适缩放；账号配置保留"
           >
             <RotateCcw size={12} />
             <span>恢复默认设置</span>
@@ -370,6 +374,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <p className="text-xs text-fg-faint">扫描所选目录下的 mp3 / wav / ogg / m4a / flac / aac / opus 文件，不含子目录；找到音乐后播放器显示在侧栏底部。</p>
               </Section>
             </>
+          )}
+
+          {tab === 'accounts' && (
+            <AccountsSettings
+              isActive={isOpen && tab === 'accounts'}
+              accounts={settings.accounts}
+              onChange={(accounts) => update({ accounts })}
+              onLogin={onLoginAccount}
+            />
           )}
 
           {tab === 'time' && (

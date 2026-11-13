@@ -231,21 +231,38 @@ html, body, #root {
 }
 
 /*
- * 顶栏按自身宽度逐级收起次要信息（时钟、额度重置时间、模型名），
+ * 顶栏按自身宽度逐级收起次要信息，依次为：时钟、网速、内存、CPU、Tokens / Cost、额度重置时间、模型名。
  * 断点使用 rem，随界面缩放档位一起变化，比较对象是顶栏去掉内边距后的内容宽度；
- * 面包屑由 flex 自动截断。
+ * 面包屑由 flex 自动截断。各断点按「面包屑与工具至少留约 394px（任务名约 56px）+ 已显示的各块自然宽度」估算，
+ * 其中时钟按最大化时的完整格式（约 281px）、系统资源按最宽取值（定宽）计算。
+ * 新增或加宽顶栏内容后，需要在 check-ui 的宽度扫描里重新确认没有重叠。
  */
 .topbar {
   container: topbar / inline-size;
 }
-@container topbar (max-width: 66rem) {
+@container topbar (max-width: 108rem) {
   .topbar-clock { display: none; }
+}
+@container topbar (max-width: 91rem) {
+  .topbar-sys-net { display: none; }
+}
+@container topbar (max-width: 82rem) {
+  .topbar-sys-mem { display: none; }
+}
+@container topbar (max-width: 75rem) {
+  .topbar-sys { display: none; }
+}
+@container topbar (max-width: 70rem) {
+  .quota-usage { display: none; }
 }
 @container topbar (max-width: 58rem) {
   .quota-detail { display: none; }
 }
-@container topbar (max-width: 46rem) {
+@container topbar (max-width: 50rem) {
   .quota-model { display: none; }
+  .topbar-account { display: none; }
+}
+@container topbar (max-width: 46rem) {
   .topbar-group-name { display: none; }
 }
 @container topbar (max-width: 38rem) {
@@ -256,6 +273,11 @@ html, body, #root {
   #oneai-terminal-tools { gap: 0; }
   #oneai-topbar-quota > div { gap: 0.25rem; }
 }
+
+/* 无边框窗口：顶栏与侧栏品牌头部可拖动窗口；交互控件不可拖动；顶栏右侧给窗口控件覆盖层留位（无覆盖层时为 0） */
+.window-drag, .topbar { -webkit-app-region: drag; }
+.window-drag button, .window-drag input, .window-drag a, .window-drag select, .topbar button, .topbar input, .topbar a, .topbar [role='menu'] { -webkit-app-region: no-drag; }
+.topbar { padding-right: max(0.625rem, calc(100vw - env(titlebar-area-width, 100vw))); }
 
 /* 细轨道滑块：音乐进度、音量与字号 */
 input[type='range'].slim {

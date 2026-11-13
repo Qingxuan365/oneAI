@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
 import { TerminalViewport, TerminalViewportRef } from './components/TerminalViewport';
-import { NewTaskModal, nextTaskTitle } from './components/NewTaskModal';
+import { NewTaskModal } from './components/NewTaskModal';
 import { SettingsModal } from './components/SettingsModal';
 import { HistoryModal } from './components/HistoryModal';
 import { FilePreviewPanel } from './components/FilePreviewPanel';
@@ -10,7 +10,11 @@ import { Modal } from './components/Modal';
 import { ConfirmDialog, ConfirmOptions } from './components/ConfirmDialog';
 import { BrandIcon } from './components/BrandIcon';
 import { AppLogo } from './components/AppLogo';
-import { CliGroup, TaskSession, QuotaData, AppSettings, ThemeId, HistoryEntry } from './types';
+import { CliDef, FolderEntry, TaskSession, QuotaData, AppSettings, ThemeId, HistoryEntry, Account } from './types';
+import { BUILTIN_CLIS } from './clis';
+import { SUMMARY_CLIS, formatAgo } from './taskSummary';
+import { ensureFolder, folderKey, folderName, groupRecent, loadAppState, moveBefore, nextTaskTitle, orderedTasks, saveAppState, tasksInFolder } from './workspaceState';
+import { accountCli, quotaKey, sanitizeAccounts, toSessionAccount } from './accounts';
 import { THEME_MODE } from './themes';
 import { isTaskAlive } from './taskStatus';
 
@@ -26,10 +30,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   musicDirectory: '',
   musicPlayerVisible: true,
   clockOffsetHours: 0,
+  accounts: [],
 };
 
-const DEFAULT_WORKSPACE_PATH = 'd:\\GitHub\\OneAI';
-const WORKSPACES_STORAGE_KEY = 'oneai_workspaces';
 const workReminderText = (hours: number) => `已经工作 ${hours} 个小时了，起来活动一下吧。`;
 const appOpenedAt = Date.now();
 const IDLE_AFTER_MS = 10_000;
@@ -39,255 +42,47 @@ function startOutcome(result?: { success: boolean; error?: string }): Pick<TaskS
   return result?.success ? { status: 'running', errorMessage: undefined } : { status: 'error', errorMessage: result?.error || '终端启动失败' };
 }
 
-function workspaceKey(folder: string): string {
-  return folder.replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase();
-}
-
-function readWorkspaces(): Record<string, { groups: CliGroup[]; activeTaskId: string | null }> {
-  try {
-    const saved = JSON.parse(localStorage.getItem(WORKSPACES_STORAGE_KEY) || '{}');
-    return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
-  } catch {
-    return {};
-  }
-}
-
-// 启动时以主进程落盘文件为准，回填到 localStorage（文件不存在时沿用旧 localStorage 数据）
-function hydrateWorkspacesFromDisk() {
-  try {
-    const raw = window.electronAPI?.loadWorkspaceState?.();
-    if (!raw) return;
-    const saved = JSON.parse(raw);
-    if (saved?.workspaces && typeof saved.workspaces === 'object') {
-      localStorage.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(saved.workspaces));
-    }
-    if (typeof saved?.activeWorkspace === 'string' && saved.activeWorkspace) {
-      localStorage.setItem('oneai_active_workspace', saved.activeWorkspace);
-    }
-  } catch {}
-}
-
-// 同时写入主进程文件（同步落盘、原子替换）与 localStorage
-function persistWorkspaces(workspaces: ReturnType<typeof readWorkspaces>, activeWorkspace: string) {
-  try {
-    window.electronAPI?.saveWorkspaceState?.(JSON.stringify({ workspaces, activeWorkspace }));
-  } catch {}
-  localStorage.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(workspaces));
-  localStorage.setItem('oneai_active_workspace', activeWorkspace);
-}
-
-hydrateWorkspacesFromDisk();
-
 function loadSavedSettings(): AppSettings {
   try {
     const raw = localStorage.getItem('onedesktop_settings');
     if (raw) {
-      return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+      const saved = JSON.parse(raw);
+      return { ...DEFAULT_SETTINGS, ...saved, accounts: sanitizeAccounts(saved?.accounts) };
     }
   } catch {}
   return DEFAULT_SETTINGS;
 }
 
-// 初始化默认 CLI 分组（绑定各 AI CLI 的真实执行命令）
-const INITIAL_GROUPS: CliGroup[] = [
-  {
-    id: 'codex',
-    name: 'Codex',
-    icon: 'codex',
-    defaultCommand: 'codex',
-    isExpanded: true,
-    tasks: [
-      {
-        id: 'codex-task-1',
-        groupId: 'codex',
-        title: 'Task 1: Codex CLI',
-        status: 'running',
-        cwd: 'd:\\GitHub\\OneAI',
-        createdAt: Date.now() - 1000 * 60 * 30,
-      },
-    ],
-  },
-  {
-    id: 'claude',
-    name: 'Claude Code',
-    icon: 'claude',
-    defaultCommand: 'claude',
-    isExpanded: false,
-    tasks: [
-      {
-        id: 'claude-task-1',
-        groupId: 'claude',
-        title: 'Task 1: Claude CLI',
-        status: 'running',
-        cwd: 'd:\\GitHub\\OneAI',
-        createdAt: Date.now() - 1000 * 60 * 15,
-      },
-    ],
-  },
-  {
-    id: 'kimi',
-    name: 'Kimi Code',
-    icon: 'kimi',
-    defaultCommand: 'kimi',
-    isExpanded: true,
-    tasks: [
-      {
-        id: 'kimi-task-1',
-        groupId: 'kimi',
-        title: 'Task 1: Kimi CLI',
-        status: 'running',
-        cwd: 'd:\\GitHub\\OneAI',
-        createdAt: Date.now() - 1000 * 60 * 5,
-      },
-    ],
-  },
-  {
-    id: 'opencode',
-    name: 'OpenCode',
-    icon: 'opencode',
-    defaultCommand: 'opencode',
-    isExpanded: false,
-    tasks: [
-      {
-        id: 'opencode-task-1',
-        groupId: 'opencode',
-        title: 'Task 1: OpenCode CLI',
-        status: 'running',
-        cwd: 'd:\\GitHub\\OneAI',
-        createdAt: Date.now() - 1000 * 60 * 1,
-      },
-    ],
-  },
-  {
-    id: 'grok',
-    name: 'Grok Build',
-    icon: 'grok',
-    defaultCommand: 'grok',
-    isExpanded: false,
-    tasks: [
-      {
-        id: 'grok-task-1',
-        groupId: 'grok',
-        title: 'Task 1: Grok Build',
-        status: 'running',
-        cwd: 'd:\\GitHub\\OneAI',
-        createdAt: Date.now() - 1000 * 60 * 2,
-      },
-    ],
-  },
-  {
-    id: 'terminal',
-    name: '系统终端',
-    icon: 'terminal',
-    defaultCommand: 'powershell.exe',
-    isExpanded: false,
-    tasks: [
-      {
-        id: 'terminal-task-1',
-        groupId: 'terminal',
-        title: 'Task 1: PowerShell',
-        status: 'running',
-        cwd: 'd:\\GitHub\\OneAI',
-        createdAt: Date.now(),
-      },
-    ],
-  },
-];
-
-const LEGACY_DEFAULT_ORDER = ['kimi', 'codex', 'claude', 'opencode', 'grok', 'terminal'];
-
-function loadWorkspace(folder: string): { groups: CliGroup[]; activeTaskId: string | null } {
-  try {
-    const saved = readWorkspaces()[workspaceKey(folder)]
-      || (workspaceKey(folder) === workspaceKey(DEFAULT_WORKSPACE_PATH)
-        ? JSON.parse(localStorage.getItem('oneai_workspace') || 'null')
-        : null);
-    if (saved?.groups && Array.isArray(saved.groups)) {
-      // 旧版默认顺序（kimi 在前）视为用户未手动排序，改用当前默认顺序；手动拖拽过的顺序继续保留
-      const builtinIds = new Set(INITIAL_GROUPS.map((group) => group.id));
-      const savedBuiltinOrder = saved.groups.map((item: CliGroup) => item.id).filter((id: string) => builtinIds.has(id));
-      const savedOrder: string[] = savedBuiltinOrder.join() === LEGACY_DEFAULT_ORDER.join()
-        ? INITIAL_GROUPS.map((group) => group.id)
-        : saved.groups.map((item: CliGroup) => item.id);
-      const groups = [...INITIAL_GROUPS].sort((a, b) => {
-        const aIndex = savedOrder.indexOf(a.id);
-        const bIndex = savedOrder.indexOf(b.id);
-        return (aIndex < 0 ? Infinity : aIndex) - (bIndex < 0 ? Infinity : bIndex);
-      }).map((base) => {
-        const stored = saved.groups.find((item: CliGroup) => item.id === base.id);
-        return stored ? {
-          ...base,
-          isExpanded: Boolean(stored.isExpanded),
-          tasks: Array.isArray(stored.tasks) ? stored.tasks.map((task: TaskSession) => ({
-            ...task,
-            status: 'stopped' as const,
-          })) : [],
-        } : { ...base, tasks: [] };
-      });
-      // 保留自动检测生成的扩展分组（不在内置列表中）
-      for (const stored of saved.groups as CliGroup[]) {
-        if (INITIAL_GROUPS.some((base) => base.id === stored.id) || !stored.defaultCommand) continue;
-        groups.push({
-          ...stored,
-          tasks: Array.isArray(stored.tasks) ? stored.tasks.map((task: TaskSession) => ({ ...task, status: 'stopped' as const })) : [],
-        });
-      }
-      const taskIds = new Set(groups.flatMap((group: CliGroup) => group.tasks.map((task: TaskSession) => task.id)));
-      return { groups, activeTaskId: saved.activeTaskId && taskIds.has(saved.activeTaskId) ? saved.activeTaskId : groups.flatMap((g) => g.tasks)[0]?.id || null };
-    }
-  } catch {}
-  if (workspaceKey(folder) !== workspaceKey(DEFAULT_WORKSPACE_PATH)) {
-    return { groups: INITIAL_GROUPS.map((group) => ({ ...group, tasks: [] })), activeTaskId: null };
-  }
-  return {
-    groups: INITIAL_GROUPS.map((group) => ({
-      ...group,
-      tasks: group.tasks.map((task) => ({ ...task, status: 'stopped' as const })),
-    })),
-    activeTaskId: 'codex-task-1',
-  };
-}
-
 type DetectedCli = { id: string; name: string; command: string };
 
-// 已安装但没有对应分组的 CLI，自动补一个通用分组
-function withDetectedExtras(groups: CliGroup[], detected: DetectedCli[]): CliGroup[] {
-  const extras: CliGroup[] = detected
-    .filter((cli) => !groups.some((g) => g.id === cli.id))
-    .map((cli) => ({ id: cli.id, name: cli.name, icon: cli.id, defaultCommand: cli.command, isExpanded: false, tasks: [] }));
-  return extras.length ? [...groups, ...extras] : groups;
+// 已检测到、但不在内置列表里的 CLI（如 Antigravity、Pi），自动补成可新建任务的 CLI
+function mergeDetectedExtras(current: CliDef[], detected: DetectedCli[]): CliDef[] {
+  const extras = detected
+    .filter((cli) => !BUILTIN_CLIS.some((builtin) => builtin.id === cli.id) && !current.some((item) => item.id === cli.id))
+    .map((cli): CliDef => ({ id: cli.id, name: cli.name, icon: cli.id, defaultCommand: cli.command }));
+  return extras.length ? [...current, ...extras] : current;
 }
 
-const INITIAL_WORKSPACE_PATH = localStorage.getItem('oneai_active_workspace') || DEFAULT_WORKSPACE_PATH;
-const INITIAL_WORKSPACE = loadWorkspace(INITIAL_WORKSPACE_PATH);
+// 启动时读取已保存的状态（旧的各工作区数据在首次启动时迁移）
+const INITIAL_STATE = loadAppState();
 
 export const App: React.FC = () => {
-  const [workspacePath, setWorkspacePath] = useState(INITIAL_WORKSPACE_PATH);
-  const [groups, setGroups] = useState<CliGroup[]>(INITIAL_WORKSPACE.groups);
-  const reorderGroup = useCallback((sourceId: string, targetId: string) => {
-    if (sourceId === targetId) return;
-    setGroups((current) => {
-      const sourceIndex = current.findIndex((group) => group.id === sourceId);
-      const targetIndex = current.findIndex((group) => group.id === targetId);
-      if (sourceIndex < 0 || targetIndex < 0) return current;
-      const next = [...current];
-      const [source] = next.splice(sourceIndex, 1);
-      next.splice(targetIndex, 0, source);
-      return next;
-    });
+  const [tasks, setTasks] = useState<TaskSession[]>(INITIAL_STATE.tasks);
+  const [folders, setFolders] = useState<FolderEntry[]>(INITIAL_STATE.folders);
+  const [lastFolder, setLastFolder] = useState(INITIAL_STATE.lastFolder);
+  const [extraClis, setExtraClis] = useState<CliDef[]>(INITIAL_STATE.extraClis);
+  const reorderFolder = useCallback((sourcePath: string, targetPath: string) => {
+    setFolders((current) => moveBefore(current, (folder) => folderKey(folder.path), folderKey(sourcePath), folderKey(targetPath)));
   }, []);
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(INITIAL_WORKSPACE.activeTaskId);
-  const reorderTask = useCallback((groupId: string, sourceId: string, targetId: string) => {
-    setGroups((current) => current.map((group) => {
-      if (group.id !== groupId) return group;
-      const sourceIndex = group.tasks.findIndex((task) => task.id === sourceId);
-      const targetIndex = group.tasks.findIndex((task) => task.id === targetId);
-      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return group;
-      const tasks = [...group.tasks];
-      const [source] = tasks.splice(sourceIndex, 1);
-      tasks.splice(targetIndex, 0, source);
-      return { ...group, tasks };
-    }));
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(INITIAL_STATE.activeTaskId);
+  // 任务只能在所属文件夹内调整顺序
+  const reorderTask = useCallback((sourceId: string, targetId: string) => {
+    setTasks((current) => {
+      const source = current.find((task) => task.id === sourceId);
+      const target = current.find((task) => task.id === targetId);
+      if (!source || !target || folderKey(source.cwd) !== folderKey(target.cwd)) return current;
+      return moveBefore(current, (task) => task.id, sourceId, targetId);
+    });
   }, []);
   // 待查看：后台任务输出停下或进程退出后，在侧栏标记，切换过去查看后清除（不持久化）
   const [unreadTaskIds, setUnreadTaskIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -336,6 +131,28 @@ export const App: React.FC = () => {
   }), [askConfirm]);
   // 字体与外观设置状态（自动持久化到 localStorage）
   const [settings, setSettings] = useState<AppSettings>(loadSavedSettings);
+  // 任务启动：按任务绑定的账号注入配置目录；账号配置已被删除时拒绝启动，避免悄悄回落到默认账号
+  const accountsRef = useRef(settings.accounts);
+  accountsRef.current = settings.accounts;
+  const startSession = useCallback((task: TaskSession, cli: Pick<CliDef, 'defaultCommand'>) => {
+    const account = task.accountId ? accountsRef.current.find((item) => item.id === task.accountId) : undefined;
+    if (task.accountId && !account) {
+      return Promise.resolve({ success: false, error: '该任务使用的账号配置已被删除。请关闭任务后重新新建，或在「设置 → 账号」中重新添加该账号。' });
+    }
+    return window.electronAPI.createSession({
+      id: task.id,
+      command: task.command || cli.defaultCommand,
+      cwd: task.cwd,
+      account: account && toSessionAccount(account),
+    });
+  }, []);
+  useEffect(() => {
+    void window.electronAPI?.setQuotaAccounts?.(settings.accounts.map((a) => ({ key: a.id, cliId: a.cliId, configDir: a.configDir })));
+  }, [settings.accounts]);
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
+  const extraClisRef = useRef(extraClis);
+  extraClisRef.current = extraClis;
   const voiceReminderEnabledRef = useRef(settings.voiceReminderEnabled);
   voiceReminderEnabledRef.current = settings.voiceReminderEnabled;
 
@@ -380,19 +197,23 @@ export const App: React.FC = () => {
   const [previewWidth, setPreviewWidth] = useState(420);
   // null 表示尚未检测完成（或非 Electron 预览），此时显示全部分组
   const [installed, setInstalled] = useState<Record<string, boolean> | null>(null);
-  // 启动时的检测结果，切换工作文件夹后用它重新补齐扩展分组
-  const detectedClisRef = useRef<DetectedCli[]>([]);
-  const visibleGroups = useMemo(
-    () => installed ? groups.filter((g) => g.id === 'terminal' || installed[g.id]) : groups,
-    [groups, installed],
+  const allClis = useMemo(() => [...BUILTIN_CLIS, ...extraClis], [extraClis]);
+  const visibleClis = useMemo(
+    () => installed ? allClis.filter((cli) => cli.id === 'terminal' || installed[cli.id]) : allClis,
+    [allClis, installed],
   );
+  // 未安装 CLI 的任务不在侧栏显示，也不参与 Ctrl+Tab / Ctrl+数字
+  const visibleTasks = useMemo(() => {
+    const ids = new Set(visibleClis.map((cli) => cli.id));
+    return tasks.filter((task) => ids.has(task.groupId));
+  }, [tasks, visibleClis]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     try { return localStorage.getItem('oneai_sidebar_collapsed') === 'true'; } catch { return false; }
   });
 
   // 弹窗状态
-  const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
-  const [selectedGroupIdForNewTask, setSelectedGroupIdForNewTask] = useState<string | null>(null);
+  const [newTaskContext, setNewTaskContext] = useState<{ folderPath: string; cliId?: string } | null>(null);
+  const isNewTaskOpen = newTaskContext !== null;
 
   // 动态应用全局 UI 界面缩放比例
   useEffect(() => {
@@ -409,14 +230,8 @@ export const App: React.FC = () => {
   }, [settings]);
 
   useEffect(() => {
-    try {
-      const workspaces = readWorkspaces();
-      workspaces[workspaceKey(workspacePath)] = { groups, activeTaskId };
-      persistWorkspaces(workspaces, workspacePath);
-    } catch (error) {
-      console.warn('[OneAI] 无法保存工作区状态', error);
-    }
-  }, [groups, activeTaskId, workspacePath]);
+    saveAppState({ tasks, folders, activeTaskId, lastFolder, extraClis });
+  }, [tasks, folders, activeTaskId, lastFolder, extraClis]);
 
   useEffect(() => {
     try { localStorage.setItem('oneai_sidebar_collapsed', String(isSidebarCollapsed)); } catch {}
@@ -451,26 +266,29 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // 所有子任务扁平数组
-  const allTasks = useMemo(() => {
-    return groups.flatMap((g) => g.tasks);
-  }, [groups]);
+  const allTasks = tasks;
 
-  // 当前激活的任务与对应的 CLI 组
+  // 当前激活的任务与对应的 CLI
   const activeTask = useMemo(() => {
-    return allTasks.find((t) => t.id === activeTaskId) || null;
-  }, [allTasks, activeTaskId]);
+    return tasks.find((t) => t.id === activeTaskId) || null;
+  }, [tasks, activeTaskId]);
 
   const currentGroup = useMemo(() => {
     if (!activeTask) return null;
-    return groups.find((g) => g.id === activeTask.groupId) || null;
-  }, [groups, activeTask]);
+    return allClis.find((cli) => cli.id === activeTask.groupId) || null;
+  }, [allClis, activeTask]);
+
+  // 没有活动任务时，新建任务默认使用的文件夹
+  const workspacePath = activeTask?.cwd ?? lastFolder;
+  useEffect(() => {
+    if (activeTask) setLastFolder(activeTask.cwd);
+  }, [activeTask?.cwd]);
 
   // 当前选中 CLI 对应的实时配额
   const currentQuota = useMemo(() => {
     if (!currentGroup) return null;
-    return quotas[currentGroup.id] || null;
-  }, [quotas, currentGroup]);
+    return quotas[quotaKey(currentGroup.id, activeTask?.accountId)] || null;
+  }, [quotas, currentGroup, activeTask?.accountId]);
 
   // 初始化拉取各 CLI 真实配额与订阅后台推送
   useEffect(() => {
@@ -558,18 +376,20 @@ export const App: React.FC = () => {
         if (disposed) return;
         const detected = list ? Object.fromEntries(list.map((cli) => [cli.id, true])) : null;
         setInstalled(detected);
-        detectedClisRef.current = list || [];
-        setGroups((prev) => withDetectedExtras(prev, detectedClisRef.current));
-        const visible = detected ? groups.filter((g) => g.id === 'terminal' || detected[g.id]) : groups;
-        const initialGroup = visible.find((group) => group.tasks.some((task) => task.id === activeTaskId))
-          || visible.find((group) => group.tasks.length > 0);
-        const initialTask = initialGroup?.tasks.find((task) => task.id === activeTaskId) || initialGroup?.tasks[0];
-        if (initialGroup && initialTask) {
+        if (list) setExtraClis((prev) => mergeDetectedExtras(prev, list));
+        const isVisibleCli = (id: string) => id === 'terminal' || !detected || Boolean(detected[id]);
+        const candidates = tasksRef.current.filter((task) => isVisibleCli(task.groupId));
+        const initialTask = candidates.find((task) => task.id === activeTaskId) || candidates[0];
+        const initialCli = initialTask && (
+          [...BUILTIN_CLIS, ...extraClisRef.current].find((cli) => cli.id === initialTask.groupId)
+          ?? list?.map((cli) => ({ defaultCommand: cli.command, id: cli.id })).find((cli) => cli.id === initialTask.groupId)
+        );
+        if (initialTask && initialCli) {
           if (initialTask.id !== activeTaskId) setActiveTaskId(initialTask.id);
-          setGroups((prev) => prev.map((g) => ({ ...g, tasks: g.tasks.map((t) => t.id === initialTask.id ? { ...t, status: 'starting' } : t) })));
-          window.electronAPI.createSession({ id: initialTask.id, command: initialTask.command || initialGroup.defaultCommand, cwd: initialTask.cwd }).then((result) => {
-            setGroups((prev) => prev.map((g) => ({ ...g, tasks: g.tasks.map((t) => t.id === initialTask.id ? { ...t, ...startOutcome(result) } : t) })));
-          }).catch(() => setGroups((prev) => prev.map((g) => ({ ...g, tasks: g.tasks.map((t) => t.id === initialTask.id ? { ...t, status: 'error' } : t) }))));
+          setTasks((prev) => prev.map((t) => t.id === initialTask.id ? { ...t, status: 'starting' } : t));
+          startSession(initialTask, initialCli).then((result) => {
+            setTasks((prev) => prev.map((t) => t.id === initialTask.id ? { ...t, ...startOutcome(result) } : t));
+          }).catch(() => setTasks((prev) => prev.map((t) => t.id === initialTask.id ? { ...t, status: 'error' } : t)));
         } else {
           setActiveTaskId(null);
         }
@@ -577,130 +397,193 @@ export const App: React.FC = () => {
 
       // 监听终端进程退出事件，将对应任务状态翻转为 'stopped'
       const unsub = window.electronAPI.onSessionExit(({ id }) => {
-        const exited = groupsRef.current.flatMap((g) => g.tasks).find((t) => t.id === id);
+        const exited = tasksRef.current.find((t) => t.id === id);
         if (exited && isTaskAlive(exited.status)) markUnread([id]);
-        setGroups((prev) =>
-          prev.map((g) => ({
-            ...g,
-            tasks: g.tasks.map((t) =>
-              t.id === id ? { ...t, status: 'stopped' } : t
-            ),
-          }))
-        );
+        setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, status: 'stopped' } : t)));
       });
       return () => { disposed = true; unsub(); };
     }
   }, []);
 
+  // 历史会话：启动后稍等再读（避开启动高峰），之后每 2 分钟刷新；「最近任务」由它按文件夹归类
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  useEffect(() => {
+    const list = window.electronAPI?.listSessionHistory;
+    if (!list) return;
+    let disposed = false;
+    const refresh = () => {
+      void list().then((entries) => { if (!disposed && Array.isArray(entries)) setHistory(entries); }).catch(() => {});
+    };
+    const first = window.setTimeout(refresh, 1500);
+    const timer = window.setInterval(refresh, 120_000);
+    return () => { disposed = true; window.clearTimeout(first); window.clearInterval(timer); };
+  }, []);
+  const recentFolders = useMemo(() => {
+    const cliIds = new Set(visibleClis.map((cli) => cli.id));
+    return groupRecent(history.filter((entry) => cliIds.has(entry.cliId)), new Set(folders.map((folder) => folderKey(folder.path))));
+  }, [history, visibleClis, folders]);
+
+  // Git 分支：只读 .git/HEAD；文件夹列表变化、窗口获得焦点和每 30 秒刷新
+  const [gitBranches, setGitBranches] = useState<Record<string, string | null>>({});
+  const branchPathsKey = [...folders.map((folder) => folder.path), ...recentFolders.map((recent) => recent.path)].join('\n');
+  useEffect(() => {
+    const read = window.electronAPI?.getGitBranches;
+    if (!read) return;
+    const paths = branchPathsKey ? branchPathsKey.split('\n') : [];
+    let disposed = false;
+    const refresh = () => {
+      void read(paths).then((result) => {
+        if (disposed) return;
+        const next: Record<string, string | null> = {};
+        for (const [dir, branch] of Object.entries(result)) next[folderKey(dir)] = branch;
+        setGitBranches((prev) => (Object.keys(next).length === Object.keys(prev).length && Object.entries(next).every(([key, value]) => prev[key] === value) ? prev : next));
+      }).catch(() => {});
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 30_000);
+    window.addEventListener('focus', refresh);
+    return () => { disposed = true; window.clearInterval(timer); window.removeEventListener('focus', refresh); };
+  }, [branchPathsKey]);
+
+  // 原生标题栏已隐藏：把窗口控件覆盖层的底色、符号色和高度同步为顶栏的实际样式
+  useEffect(() => {
+    const header = document.querySelector('header');
+    if (!header || !window.electronAPI?.setTitleBarOverlay) return;
+    {
+      const toHex = (css: string) => {
+        const m = css.match(/\d+(\.\d+)?/g);
+        return m && m.length >= 3 ? `#${m.slice(0, 3).map((n) => Math.round(Number(n)).toString(16).padStart(2, '0')).join('')}` : null;
+      };
+      const color = toHex(getComputedStyle(header).backgroundColor);
+      const symbolColor = toHex(getComputedStyle(header).color);
+      if (color && symbolColor) window.electronAPI.setTitleBarOverlay({ color, symbolColor, height: Math.round(header.getBoundingClientRect().height) });
+    }
+  }, [resolvedTheme, settings.uiScale]);
+
+  // 任务行第二行：任务对应会话里最近一条用户消息（仅 Claude / Codex / Kimi），每 5 秒与窗口获得焦点时刷新。
+  // 使用账号的任务读该账号的配置目录；账号配置已被删除的任务不读，避免误取默认账号的会话
+  const [summaries, setSummaries] = useState<Record<string, { text: string | null }>>({});
+  const summaryTasks = useMemo(() => tasks
+    .filter((task) => SUMMARY_CLIS.has(task.groupId))
+    .flatMap((task) => {
+      const account = task.accountId ? settings.accounts.find((item) => item.id === task.accountId) : undefined;
+      if (task.accountId && !account) return [];
+      return [{ id: task.id, cliId: task.groupId, cwd: task.cwd, createdAt: task.createdAt, historyId: task.historyId, configDir: account?.configDir }];
+    }), [tasks, settings.accounts]);
+  const summaryKey = JSON.stringify(summaryTasks);
+  useEffect(() => {
+    const read = window.electronAPI?.getTaskSummaries;
+    if (!read || summaryTasks.length === 0) return;
+    let disposed = false;
+    const refresh = () => {
+      if (document.hidden) return;
+      void read(summaryTasks).then((result) => {
+        if (!disposed) setSummaries((prev) => (JSON.stringify(prev) === JSON.stringify(result) ? prev : result));
+      }).catch(() => {});
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 5_000);
+    window.addEventListener('focus', refresh);
+    return () => { disposed = true; window.clearInterval(timer); window.removeEventListener('focus', refresh); };
+  }, [summaryKey]);
+
   // 空闲检测：运行中的任务连续 IDLE_AFTER_MS 没有输出标为「空闲」，再有输出立即回到「运行中」。
   // 只能判断输出静默，无法区分「已完成」与「在等待确认」。
-  const groupsRef = useRef(groups);
-  groupsRef.current = groups;
   useEffect(() => {
     if (!window.electronAPI?.onSessionData) return;
     const lastOutput = new Map<string, number>();
     const setStatus = (ids: string[], from: TaskSession['status'], to: TaskSession['status']) => {
       if (ids.length === 0) return;
-      setGroups((prev) => prev.map((g) => ({
-        ...g,
-        tasks: g.tasks.map((t) => ids.includes(t.id) && t.status === from ? { ...t, status: to } : t),
-      })));
+      setTasks((prev) => prev.map((t) => ids.includes(t.id) && t.status === from ? { ...t, status: to } : t));
     };
     const unsub = window.electronAPI.onSessionData(({ id }) => {
       lastOutput.set(id, Date.now());
-      const task = groupsRef.current.flatMap((g) => g.tasks).find((t) => t.id === id);
+      const task = tasksRef.current.find((t) => t.id === id);
       if (task?.status === 'idle') setStatus([id], 'idle', 'running');
     });
     const timer = window.setInterval(() => {
       const now = Date.now();
-      const idleIds = groupsRef.current.flatMap((g) => g.tasks)
+      const idleIds = tasksRef.current
         .filter((t) => t.status === 'running' && now - (lastOutput.get(t.id) ?? now) > IDLE_AFTER_MS)
         .map((t) => t.id);
       // 尚无输出记录的任务从现在开始计时
-      groupsRef.current.flatMap((g) => g.tasks).forEach((t) => { if (!lastOutput.has(t.id)) lastOutput.set(t.id, now); });
+      tasksRef.current.forEach((t) => { if (!lastOutput.has(t.id)) lastOutput.set(t.id, now); });
       setStatus(idleIds, 'running', 'idle');
       markUnread(idleIds);
     }, 2000);
     return () => { unsub?.(); window.clearInterval(timer); };
   }, []);
 
-  // 切换折叠/展开 CLI 分组
-  const handleToggleGroup = (groupId: string) => {
-    setGroups((prev) =>
-      prev.map((g) => (g.id === groupId ? { ...g, isExpanded: !g.isExpanded } : g))
-    );
+  // 折叠 / 展开文件夹
+  const handleToggleFolder = (folderPath: string) => {
+    setFolders((prev) => prev.map((folder) => (folderKey(folder.path) === folderKey(folderPath) ? { ...folder, isExpanded: !folder.isExpanded } : folder)));
   };
 
   // 选中具体某个子任务
   // startIfStopped 为 false 时只切换视图，不拉起已停止的任务（键盘轮换、关闭后接替）
-  const handleSelectTask = (taskId: string, groupId: string, startIfStopped = true) => {
-    setActiveTaskId(taskId);
-    // 保证该分组处于展开状态
-    setGroups((prev) =>
-      prev.map((g) => (g.id === groupId ? { ...g, isExpanded: true } : g))
-    );
+  const handleSelectTask = (taskId: string, startIfStopped = true) => {
     const task = allTasks.find((item) => item.id === taskId);
-    const group = groups.find((item) => item.id === groupId);
+    setActiveTaskId(taskId);
+    // 保证该任务所在的文件夹处于展开状态
+    if (task) setFolders((prev) => ensureFolder(prev, task.cwd, true));
+    const cli = task && allClis.find((item) => item.id === task.groupId);
     // createSession 对已存在的 PTY 是幂等操作。每次选择都校验一次，避免界面状态
     // 与主进程真实会话脱节后，键盘输入被 writeSession 静默丢弃。
-    if (window.electronAPI && task && group && (startIfStopped || isTaskAlive(task.status))) {
+    if (window.electronAPI && task && cli && (startIfStopped || isTaskAlive(task.status))) {
       if (!isTaskAlive(task.status) || task.status === 'starting') {
-        setGroups((prev) => prev.map((g) => ({ ...g, tasks: g.tasks.map((t) => t.id === taskId ? { ...t, status: 'starting' } : t) })));
+        setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, status: 'starting' } : t));
       }
-      window.electronAPI.createSession({ id: taskId, command: task.command || group.defaultCommand, cwd: task.cwd }).then((result) => {
-        setGroups((prev) => prev.map((g) => ({ ...g, tasks: g.tasks.map((t) => t.id === taskId ? { ...t, ...startOutcome(result) } : t) })));
-      }).catch(() => setGroups((prev) => prev.map((g) => ({ ...g, tasks: g.tasks.map((t) => t.id === taskId ? { ...t, status: 'error' } : t) }))));
+      startSession(task, cli).then((result) => {
+        setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, ...startOutcome(result) } : t));
+      }).catch(() => setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, status: 'error' } : t)));
     }
   };
 
-  // 触发新建子任务弹窗
-  const handleOpenNewTask = (groupId: string) => {
-    setSelectedGroupIdForNewTask(groupId);
-    setIsNewTaskOpen(true);
+  // 触发新建任务弹窗：在哪个文件夹里、预选哪个 CLI
+  const handleOpenNewTask = (folderPath: string, cliId?: string) => {
+    setNewTaskContext({ folderPath, cliId });
   };
 
-  const handleSwitchWorkspace = async () => {
+  // 添加文件夹：只把文件夹加入侧栏，不结束任何已在运行的终端
+  const handleAddFolder = async () => {
     const folder = await window.electronAPI?.selectWorkspaceDirectory?.(workspacePath);
-    if (!folder || workspaceKey(folder) === workspaceKey(workspacePath)) return;
+    if (!folder) return;
+    setFolders((prev) => ensureFolder(prev, folder, true));
+    setLastFolder(folder);
+  };
 
-    const runningCount = allTasks.filter((task) => isTaskAlive(task.status)).length;
-    if (runningCount > 0 && !await askConfirm({
-      title: '切换工作文件夹',
-      message: `切换会结束当前文件夹的 ${runningCount} 个终端进程，任务列表会保留。`,
-      confirmLabel: '结束并切换',
+  // 从侧栏移除文件夹：结束该文件夹里的全部终端并删除这些任务，历史会话不受影响
+  const handleRemoveFolder = async (folderPath: string) => {
+    const doomed = tasksInFolder(tasks, folderPath);
+    const alive = doomed.filter((task) => isTaskAlive(task.status)).length;
+    if (!await askConfirm({
+      title: '从侧栏移除文件夹',
+      message: doomed.length === 0
+        ? `把“${folderName(folderPath)}”从侧栏移除？`
+        : `“${folderName(folderPath)}”里的 ${doomed.length} 个任务会被移除${alive > 0 ? `，其中 ${alive} 个终端进程会被终止` : ''}。文件夹本身和 CLI 的历史会话不受影响。`,
+      confirmLabel: '移除',
       danger: true,
     })) return;
-
-    try {
-      const workspaces = readWorkspaces();
-      workspaces[workspaceKey(workspacePath)] = { groups, activeTaskId };
-      persistWorkspaces(workspaces, folder);
-      await Promise.all(allTasks.map((task) => window.electronAPI.killSession(task.id)));
-      const next = loadWorkspace(folder);
-      setWorkspacePath(folder);
-      setGroups(withDetectedExtras(next.groups, detectedClisRef.current));
-      setActiveTaskId(next.activeTaskId);
-      setIsNewTaskOpen(false);
-      setUnreadTaskIds(new Set());
-
-      const nextGroup = next.groups.find((group) => group.tasks.some((task) => task.id === next.activeTaskId));
-      const nextTask = nextGroup?.tasks.find((task) => task.id === next.activeTaskId);
-      if (nextTask && nextGroup) {
-        setGroups((prev) => prev.map((group) => ({ ...group, tasks: group.tasks.map((task) => task.id === nextTask.id ? { ...task, status: 'starting' } : task) })));
-        const result = await window.electronAPI.createSession({ id: nextTask.id, command: nextTask.command || nextGroup.defaultCommand, cwd: nextTask.cwd });
-        setGroups((prev) => prev.map((group) => ({ ...group, tasks: group.tasks.map((task) => task.id === nextTask.id ? { ...task, ...startOutcome(result) } : task) })));
-      }
-    } catch (error) {
-      void notify('切换工作文件夹失败', error instanceof Error ? error.message : '未知错误');
+    const doomedIds = new Set(doomed.map((task) => task.id));
+    doomed.forEach((task) => window.electronAPI?.killSession(task.id));
+    const remaining = orderedTasks(folders, visibleTasks).filter((task) => !doomedIds.has(task.id));
+    setTasks((prev) => prev.filter((task) => !doomedIds.has(task.id)));
+    setFolders((prev) => prev.filter((folder) => folderKey(folder.path) !== folderKey(folderPath)));
+    if (activeTaskId && doomedIds.has(activeTaskId)) {
+      const next = remaining[0];
+      setActiveTaskId(next?.id ?? null);
+      if (next) setFolders((prev) => ensureFolder(prev, next.cwd, true));
     }
   };
 
   // 创建子任务
-  const handleCreateTask = useCallback(async (groupId: string, title: string, command: string, cwd: string, historyId?: string): Promise<{ success: boolean; error?: string }> => {
+  const handleCreateTask = useCallback(async (groupId: string, title: string, command: string, cwd: string, historyId?: string, accountId?: string): Promise<{ success: boolean; error?: string }> => {
     const newTaskId = `${groupId}-task-${Date.now().toString(36)}`;
     const resolvedCwd = cwd || workspacePath;
+    const account = accountId ? settings.accounts.find((item) => item.id === accountId) : undefined;
+    if (accountId && !account) return { success: false, error: '所选账号配置不存在，请在「设置 → 账号」中检查。' };
     if (window.electronAPI) {
-      const result = await window.electronAPI.createSession({ id: newTaskId, command: command || 'powershell.exe', cwd: resolvedCwd });
+      const result = await window.electronAPI.createSession({ id: newTaskId, command: command || 'powershell.exe', cwd: resolvedCwd, account: account && toSessionAccount(account) });
       if (!result.success) return { success: false, error: result.error || '终端启动失败' };
     }
     const newTask: TaskSession = {
@@ -709,38 +592,34 @@ export const App: React.FC = () => {
       title,
       command: command || 'powershell.exe',
       historyId,
+      accountId,
       status: 'running',
       cwd: resolvedCwd,
       createdAt: Date.now(),
     };
 
-    setGroups((prev) =>
-      prev.map((g) =>
-        g.id === groupId
-          ? { ...g, isExpanded: true, tasks: [...g.tasks, newTask] }
-          : g
-      )
-    );
-
+    setTasks((prev) => [...prev, newTask]);
+    setFolders((prev) => ensureFolder(prev, resolvedCwd, true));
     setActiveTaskId(newTaskId);
 
     return { success: true };
-  }, [workspacePath]);
+  }, [workspacePath, settings.accounts]);
 
-  // 一键新建：用默认名称、分组默认命令和当前工作文件夹直接启动；失败时转到自定义弹窗修改
+  // 一键新建：用默认名称、该 CLI 的默认命令在指定文件夹直接启动；失败时转到自定义弹窗修改
   const quickCreatingRef = useRef(new Set<string>());
-  const handleQuickNewTask = async (groupId: string) => {
-    const group = groups.find((item) => item.id === groupId);
-    if (!group || quickCreatingRef.current.has(groupId)) return;
-    quickCreatingRef.current.add(groupId);
+  const handleQuickNewTask = async (folderPath: string, cliId: string, accountId?: string) => {
+    const cli = allClis.find((item) => item.id === cliId);
+    const lockKey = `${folderKey(folderPath)}:${cliId}`;
+    if (!cli || quickCreatingRef.current.has(lockKey)) return;
+    quickCreatingRef.current.add(lockKey);
     try {
-      const result = await handleCreateTask(groupId, nextTaskTitle(group), group.defaultCommand, workspacePath);
+      const result = await handleCreateTask(cliId, nextTaskTitle(tasksInFolder(tasks, folderPath)), cli.defaultCommand, folderPath, undefined, accountId);
       if (!result.success) {
         await notify('任务启动失败', `${result.error || '终端启动失败'}。可以在接下来的窗口中修改启动命令或工作目录。`);
-        handleOpenNewTask(groupId);
+        handleOpenNewTask(folderPath, cliId);
       }
     } finally {
-      quickCreatingRef.current.delete(groupId);
+      quickCreatingRef.current.delete(lockKey);
     }
   };
 
@@ -760,37 +639,41 @@ export const App: React.FC = () => {
       window.electronAPI.killSession(taskId);
     }
 
-    setGroups((prev) => {
-      const updated = prev.map((g) => ({
-        ...g,
-        tasks: g.tasks.filter((t) => t.id !== taskId),
-      }));
-      return updated;
-    });
+    setTasks((prev) => prev.filter((t) => t.id !== taskId));
 
     if (activeTaskId === taskId) {
-      // 优先切到同一 CLI 分组内的相邻任务，再回退到其他分组。
-      const sourceGroup = groups.find((group) => group.id === task?.groupId);
-      const groupIndex = sourceGroup?.tasks.findIndex((item) => item.id === taskId) ?? -1;
-      const remainingInGroup = sourceGroup?.tasks.filter((item) => item.id !== taskId) || [];
-      const sameGroupTask = groupIndex >= 0
-        ? remainingInGroup[groupIndex] || remainingInGroup[groupIndex - 1]
-        : undefined;
-      const remaining = visibleGroups.flatMap((g) => g.tasks).filter((t) => t.id !== taskId);
-      const nextTask = sameGroupTask || remaining[0];
+      // 优先切到同一文件夹内的相邻任务，再回退到侧栏里的其他任务。
+      const ordered = orderedTasks(folders, visibleTasks);
+      const mates = task ? ordered.filter((item) => folderKey(item.cwd) === folderKey(task.cwd)) : [];
+      const index = mates.findIndex((item) => item.id === taskId);
+      const remainingMates = mates.filter((item) => item.id !== taskId);
+      const sameFolderTask = index >= 0 ? remainingMates[index] || remainingMates[index - 1] : undefined;
+      const nextTask = sameFolderTask || ordered.filter((t) => t.id !== taskId)[0];
       setActiveTaskId(nextTask?.id || null);
-      if (nextTask) setGroups((prev) => prev.map((group) => group.id === nextTask.groupId ? { ...group, isExpanded: true } : group));
+      if (nextTask) setFolders((prev) => ensureFolder(prev, nextTask.cwd, true));
     }
-  }, [activeTaskId, allTasks, groups, visibleGroups, askConfirm]);
+  }, [activeTaskId, allTasks, folders, visibleTasks, askConfirm]);
 
   const handleRenameTask = useCallback((taskId: string, title: string) => {
-    setGroups((prev) => prev.map((g) => ({ ...g, tasks: g.tasks.map((t) => t.id === taskId ? { ...t, title } : t) })));
+    setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, title } : t));
   }, []);
+
+  // 设置 → 账号 → 登录：在该账号环境下新开一个终端任务运行 CLI 自带的登录命令，凭据由 CLI 自己写入账号目录
+  const handleLoginAccount = async (account: Account) => {
+    const cli = accountCli(account.cliId);
+    if (!cli || !visibleClis.some((item) => item.id === account.cliId)) {
+      void notify('无法登录', `本机未检测到 ${cli?.name ?? account.cliId} 命令。`);
+      return;
+    }
+    const result = await handleCreateTask(account.cliId, `登录 ${account.name}`, cli.loginCommand, workspacePath, undefined, account.id);
+    if (result.success) setIsSettingsOpen(false);
+    else void notify('登录任务启动失败', result.error || '终端启动失败');
+  };
 
   // 手动刷新当前选中 CLI 的真实配额
   const handleRefreshQuota = async () => {
     if (window.electronAPI) {
-      const latest = await window.electronAPI.refreshQuota(currentGroup?.id);
+      const latest = await window.electronAPI.refreshQuota(currentGroup ? quotaKey(currentGroup.id, activeTask?.accountId) : undefined);
       if (latest) setQuotas(latest);
     }
   };
@@ -805,9 +688,9 @@ export const App: React.FC = () => {
       confirmLabel: '重启',
       danger: true,
     })) return;
-    setGroups((prev) => prev.map((g) => ({ ...g, tasks: g.tasks.map((t) => t.id === taskId ? { ...t, status: 'starting' } : t) })));
+    setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, status: 'starting' } : t));
     const result = await terminalViewportRef.current?.restartActiveTerminal(taskId);
-    setGroups((prev) => prev.map((g) => ({ ...g, tasks: g.tasks.map((t) => t.id === taskId ? { ...t, ...startOutcome(result) } : t) })));
+    setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, ...startOutcome(result) } : t));
   }, [activeTaskId, allTasks, askConfirm]);
 
   // 侧栏右键「重启」：已停止的任务切过去并启动，存活的任务原地重启
@@ -815,33 +698,29 @@ export const App: React.FC = () => {
     const task = allTasks.find((item) => item.id === taskId);
     if (!task) return;
     if (isTaskAlive(task.status)) void handleRestartSession(taskId);
-    else handleSelectTask(taskId, task.groupId);
+    else handleSelectTask(taskId);
   };
 
-  const handleOpenTaskDirectory = async (taskId: string) => {
-    const task = allTasks.find((item) => item.id === taskId);
-    if (!task) return;
-    if (!await window.electronAPI?.openDirectory?.(task.cwd)) void notify('无法打开目录', `${task.cwd} 不存在或无法访问。`);
+  const handleOpenDirectory = async (dir: string) => {
+    if (!await window.electronAPI?.openDirectory?.(dir)) void notify('无法打开目录', `${dir} 不存在或无法访问。`);
   };
 
   // 从历史会话恢复：已有对应任务则直接切换，否则用 CLI 自带的恢复命令新建任务
   const handleResumeHistory = async (entry: HistoryEntry) => {
-    const group = groups.find((g) => g.id === entry.cliId);
-    if (!group || !visibleGroups.includes(group)) {
+    const cli = visibleClis.find((item) => item.id === entry.cliId);
+    if (!cli) {
       void notify('无法恢复会话', `本机未检测到 ${entry.cliId} 命令。`);
       return;
     }
     setIsHistoryOpen(false);
     const existing = allTasks.find((task) => task.historyId === entry.id);
     if (existing) {
-      handleSelectTask(existing.id, group.id);
+      handleSelectTask(existing.id);
       return;
     }
-    const result = await handleCreateTask(group.id, entry.title, entry.command, entry.cwd, entry.id);
+    const result = await handleCreateTask(cli.id, entry.title, entry.command, entry.cwd, entry.id);
     if (!result.success) void notify('恢复会话失败', result.error || '终端启动失败');
   };
-
-  const currentGroupForModal =groups.find((g) => g.id === selectedGroupIdForNewTask) || null;
 
   // 全局快捷键。在捕获阶段处理并阻止继续传播，避免同一按键再被 xterm 发往 CLI；
   // 只占用终端程序基本不用的组合（Ctrl+Tab、Ctrl+数字、Ctrl+Shift+字母、Ctrl+,）。
@@ -849,34 +728,35 @@ export const App: React.FC = () => {
   shortcutRef.current = (e) => {
     if (!e.ctrlKey || e.altKey || e.metaKey) return false;
     if (isNewTaskOpen || isSettingsOpen || isHistoryOpen || workReminderVisible || confirmOptions) return false;
-    const tasks = visibleGroups.flatMap((group) => group.tasks);
+    const ordered = orderedTasks(folders, visibleTasks);
     const key = e.key.toLowerCase();
     if (key === 'tab') {
-      if (tasks.length < 2) return true;
-      const index = tasks.findIndex((task) => task.id === activeTaskId);
+      if (ordered.length < 2) return true;
+      const index = ordered.findIndex((task) => task.id === activeTaskId);
       const next = index < 0
-        ? tasks[e.shiftKey ? tasks.length - 1 : 0]
-        : tasks[(index + (e.shiftKey ? -1 : 1) + tasks.length) % tasks.length];
-      handleSelectTask(next.id, next.groupId, false);
+        ? ordered[e.shiftKey ? ordered.length - 1 : 0]
+        : ordered[(index + (e.shiftKey ? -1 : 1) + ordered.length) % ordered.length];
+      handleSelectTask(next.id, false);
       return true;
     }
     if (!e.shiftKey && e.code.startsWith('Digit') && e.code !== 'Digit0') {
-      const target = tasks[Number(e.code.slice(5)) - 1];
-      if (target) handleSelectTask(target.id, target.groupId, false);
+      const target = ordered[Number(e.code.slice(5)) - 1];
+      if (target) handleSelectTask(target.id, false);
       return true;
     }
     if (!e.shiftKey && key === ',') { setIsSettingsOpen(true); return true; }
     if (!e.shiftKey) return false;
     if (key === 't' || key === 'n') {
-      const group = (currentGroup && visibleGroups.includes(currentGroup) ? currentGroup : visibleGroups[0]);
-      if (group) {
-        if (key === 't') void handleQuickNewTask(group.id);
-        else handleOpenNewTask(group.id);
+      // 沿用当前任务的 CLI，在当前文件夹新建
+      const cli = currentGroup && visibleClis.some((item) => item.id === currentGroup.id) ? currentGroup : visibleClis[0];
+      if (cli) {
+        if (key === 't') void handleQuickNewTask(workspacePath, cli.id);
+        else handleOpenNewTask(workspacePath, cli.id);
       }
       return true;
     }
     if (key === 'w') {
-      if (activeTask && visibleGroups.some((group) => group.id === activeTask.groupId)) void handleCloseTask(activeTask.id);
+      if (activeTask && visibleClis.some((cli) => cli.id === activeTask.groupId)) void handleCloseTask(activeTask.id);
       return true;
     }
     if (key === 'b') { setIsSidebarCollapsed((collapsed) => !collapsed); return true; }
@@ -896,18 +776,46 @@ export const App: React.FC = () => {
   }, []);
 
   // 没有活动任务时的引导：列出本机可用的 CLI，点击即进入新建任务
+  // 没有活动任务时：最近 3 条历史会话（只含本机已安装的 CLI），点击直接恢复
+  const recentForEmpty = [...history].filter((entry) => visibleClis.some((cli) => cli.id === entry.cliId)).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 3);
   const emptyState = (
-    <div className={`w-full text-center ${visibleGroups.length <= 4 ? 'max-w-md' : 'max-w-lg'}`}>
+    <div className={`w-full text-center ${visibleClis.length <= 4 ? 'max-w-md' : 'max-w-lg'}`}>
       <AppLogo size={44} className="mx-auto" />
       <h2 className="mt-4 text-lg font-semibold text-fg">开始一个任务</h2>
-      <p className="mt-1.5 text-ui text-fg-subtle">点击 CLI 直接在当前工作文件夹中启动，右键可自定义命令与目录。</p>
-      <div className={`mt-6 grid grid-cols-2 gap-2.5 ${visibleGroups.length <= 4 ? '' : 'sm:grid-cols-3'}`}>
-        {visibleGroups.map((group) => (
+      <div className="mt-2 flex items-center justify-center gap-2 text-ui text-fg-subtle" data-empty-folder-line>
+        <span>在「<span className="font-medium text-fg-muted">{folderName(workspacePath)}</span>」</span>
+        {gitBranches[folderKey(workspacePath)] && <span className="rounded-full border border-violet/30 bg-violet/10 px-1.5 text-2xs text-violet">{gitBranches[folderKey(workspacePath)]}</span>}
+        <button type="button" onClick={() => void handleAddFolder()} className="rounded px-1 text-xs text-accent hover:underline">换文件夹</button>
+      </div>
+      {recentForEmpty.length > 0 && (
+        <div className="mt-5 text-left" data-empty-recent>
+          <p className="mb-1.5 px-1 text-xs font-medium text-fg-faint">继续上次</p>
+          <div className="space-y-1">
+            {recentForEmpty.map((entry) => (
+              <button
+                key={`${entry.cliId}:${entry.id}`}
+                type="button"
+                onClick={() => void handleResumeHistory(entry)}
+                title={`${entry.title}
+${entry.cwd}`}
+                className="flex w-full items-center gap-2.5 rounded-lg border border-line bg-surface px-3 py-2 text-left text-ui text-fg-muted transition-colors hover:border-accent/60 hover:bg-hover hover:text-fg"
+              >
+                <BrandIcon icon={entry.cliId} size={16} />
+                <span className="min-w-0 flex-1 truncate">{entry.title}</span>
+                <span className="shrink-0 text-xs text-fg-faint">{folderName(entry.cwd)} · {formatAgo(entry.updatedAt)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <p className="mt-5 px-1 text-left text-xs font-medium text-fg-faint">新建任务</p>
+      <div className={`mt-1.5 grid grid-cols-2 gap-2.5 ${visibleClis.length <= 4 ? '' : 'sm:grid-cols-3'}`}>
+        {visibleClis.map((group) => (
           <button
             key={group.id}
             type="button"
-            onClick={() => void handleQuickNewTask(group.id)}
-            onContextMenu={(e) => { e.preventDefault(); handleOpenNewTask(group.id); }}
+            onClick={() => void handleQuickNewTask(workspacePath, group.id)}
+            onContextMenu={(e) => { e.preventDefault(); handleOpenNewTask(workspacePath, group.id); }}
             title={`启动 ${group.name}（右键可自定义命令与目录）`}
             className="flex items-center gap-2.5 rounded-lg border border-line bg-surface px-3.5 py-3 text-left text-ui font-medium text-fg-muted transition-colors hover:border-accent/60 hover:bg-hover hover:text-fg"
           >
@@ -916,10 +824,12 @@ export const App: React.FC = () => {
           </button>
         ))}
       </div>
-      <p className="mt-6 text-xs text-fg-faint">
+      <p className="relative left-1/2 mt-6 w-max -translate-x-1/2 whitespace-nowrap text-xs text-fg-faint">
         <kbd className="rounded border border-line-strong bg-muted px-1.5 py-0.5 font-mono">Ctrl + Shift + T</kbd> 新建任务
         <span className="mx-2">·</span>
-        <kbd className="rounded border border-line-strong bg-muted px-1.5 py-0.5 font-mono">Ctrl + Shift + H</kbd> 恢复历史会话
+        <kbd className="rounded border border-line-strong bg-muted px-1.5 py-0.5 font-mono">Ctrl + Shift + N</kbd> 自定义新建
+        <span className="mx-2">·</span>
+        <kbd className="rounded border border-line-strong bg-muted px-1.5 py-0.5 font-mono">Ctrl + Shift + H</kbd> 全部历史会话
       </p>
     </div>
   );
@@ -929,20 +839,29 @@ export const App: React.FC = () => {
       {/* 左侧：CLI 品牌 Logo + 多任务树状菜单 */}
       <Sidebar
         isCollapsed={isSidebarCollapsed}
-        groups={visibleGroups}
-        workspacePath={workspacePath}
-        onSwitchWorkspace={handleSwitchWorkspace}
+        clis={visibleClis}
+        folders={folders}
+        tasks={visibleTasks}
+        accounts={settings.accounts}
+        gitBranches={gitBranches}
+        summaries={summaries}
+        clockOffsetHours={settings.clockOffsetHours}
+        recentFolders={recentFolders}
         activeTaskId={activeTaskId}
+        onAddFolder={() => void handleAddFolder()}
         onSelectTask={handleSelectTask}
-        onToggleGroup={handleToggleGroup}
-        onReorderGroup={reorderGroup}
-        onNewTask={(groupId) => void handleQuickNewTask(groupId)}
+        onToggleFolder={handleToggleFolder}
+        onReorderFolder={reorderFolder}
+        onNewTask={(folderPath, cliId, accountId) => void handleQuickNewTask(folderPath, cliId, accountId)}
         onCustomNewTask={handleOpenNewTask}
         onCloseTask={handleCloseTask}
         onRenameTask={handleRenameTask}
         onReorderTask={reorderTask}
         onRestartTask={handleRestartTask}
-        onOpenTaskDirectory={(taskId) => void handleOpenTaskDirectory(taskId)}
+        onOpenFolder={(dir) => void handleOpenDirectory(dir)}
+        onRemoveFolder={(dir) => void handleRemoveFolder(dir)}
+        onResumeHistory={(entry) => void handleResumeHistory(entry)}
+        onOpenHistory={() => setIsHistoryOpen(true)}
         unreadTaskIds={unreadTaskIds}
         onOpenSettings={() => setIsSettingsOpen(true)}
         musicDirectory={settings.musicDirectory}
@@ -956,6 +875,8 @@ export const App: React.FC = () => {
           onToggleSidebar={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
           currentGroup={currentGroup}
           activeTask={activeTask}
+          emptyFolder={{ name: folderName(workspacePath), branch: gitBranches[folderKey(workspacePath)] }}
+          accountName={activeTask?.accountId ? (settings.accounts.find((a) => a.id === activeTask.accountId)?.name ?? '账号已删除') : undefined}
           quota={currentQuota}
           clockOffsetHours={settings.clockOffsetHours}
           onRefreshQuota={handleRefreshQuota}
@@ -996,17 +917,21 @@ export const App: React.FC = () => {
 
       {/* 新建子任务弹窗 */}
       <NewTaskModal
-        group={currentGroupForModal}
-        workspacePath={workspacePath}
         isOpen={isNewTaskOpen}
-        onClose={() => setIsNewTaskOpen(false)}
-        onCreate={handleCreateTask}
+        onClose={() => setNewTaskContext(null)}
+        clis={visibleClis}
+        initialCliId={newTaskContext?.cliId}
+        folderPath={newTaskContext?.folderPath ?? workspacePath}
+        tasks={tasks}
+        accounts={settings.accounts}
+        onCreate={(cliId, title, command, cwd, accountId) => handleCreateTask(cliId, title, command, cwd, undefined, accountId)}
       />
 
       <HistoryModal
         isOpen={isHistoryOpen}
         onClose={() => setIsHistoryOpen(false)}
         onResume={handleResumeHistory}
+        openHistoryIds={new Set(tasks.flatMap((task) => (task.historyId ? [task.historyId] : [])))}
       />
 
       {/* 外观与字体大小设置弹窗 */}
@@ -1015,7 +940,8 @@ export const App: React.FC = () => {
         onClose={() => setIsSettingsOpen(false)}
         settings={settings}
         onUpdateSettings={setSettings}
-        onResetDefault={() => setSettings(DEFAULT_SETTINGS)}
+        onResetDefault={() => setSettings((prev) => ({ ...DEFAULT_SETTINGS, accounts: prev.accounts }))}
+        onLoginAccount={(account) => void handleLoginAccount(account)}
       />
       <Modal
         isOpen={workReminderVisible}

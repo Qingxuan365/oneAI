@@ -4,6 +4,7 @@ export interface CreateSessionOptions {
   id: string;
   command?: string;
   cwd?: string;
+  account?: { cliId: 'codex' | 'claude' | 'kimi'; configDir: string; env?: Record<string, string> };
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -92,12 +93,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAllQuotas: () => ipcRenderer.invoke('quota:get-all'),
 
   refreshQuota: (cliId?: string) => ipcRenderer.invoke('quota:refresh', cliId),
+  setQuotaAccounts: (accounts: Array<{ key: string; cliId: string; configDir: string }>) => ipcRenderer.invoke('quota:set-accounts', accounts),
+  checkAccountLogin: (account: unknown) => ipcRenderer.invoke('account:login-status', account),
+  setTitleBarOverlay: (opts: { color: string; symbolColor: string; height: number }) => ipcRenderer.send('window:set-title-bar-overlay', opts),
+  getGitBranches: (paths: string[]) => ipcRenderer.invoke('git:branches', paths),
+  getTaskSummaries: (tasks: unknown[]) => ipcRenderer.invoke('task:summaries', tasks),
 
   onQuotaUpdate: (callback: (quotas: any) => void) => {
     const subscription = (_event: any, value: any) => callback(value);
     ipcRenderer.on('quota:update', subscription);
     return () => {
       ipcRenderer.removeListener('quota:update', subscription);
+    };
+  },
+
+  onSystemStats: (callback: (stats: any) => void) => {
+    const subscription = (_event: any, value: any) => callback(value);
+    ipcRenderer.on('system:stats', subscription);
+    return () => {
+      ipcRenderer.removeListener('system:stats', subscription);
     };
   },
 });

@@ -1,12 +1,16 @@
 # OneAI 开发路线图与进度看板
 
 ## 1. 当前阶段
-- **阶段**：Phase 25 - 界面布局重整与操作效率
-- **状态**：语音识别功能已移除；一键新建、后台任务「待查看」标记、任务右键菜单与拖拽排序已完成并通过自动检查；桌面实际操作和中文输入法仍待手工验收
+- **阶段**：Phase 27 - 多账号配置；Phase 26 参照效果图重做顶栏与侧栏（第一至三步完成，标题栏融合待决定）
+- **状态**：Phase 26 第三步（任务行第二行显示最近一条用户消息）已完成并通过自动检查与真实应用端到端检查；Phase 26 第二步（侧栏改为「文件夹 → 任务」、Git 分支徽标、最近任务）已完成并通过自动检查与真实应用端到端检查；多账号（Codex、Claude Code、Kimi Code）已完成并通过自动检查，便携包已生成，真实应用里的环境注入与账号隔离已端到端验证，真实登录流程待手工验收；Phase 26 第一步（顶栏 Tokens / Cost / CPU / Mem / Net 与侧栏品牌头部）已完成并通过自动检查与真实应用启动检查；第二步（侧栏按文件夹分组、Git 分支、最近任务）和第三步（任务行消息预览）尚未开始；桌面实际观感与中文输入法仍待手工验收
 
 ## 2. 进度看板
 
 ### 已完成
+- [x] Phase 26 第三步：任务行第二行显示该任务会话里最近一条用户消息（Claude / Codex / Kimi），没有消息时显示「新会话 · 创建时间」，其他 CLI 保持单行。
+- [x] Phase 26 第二步：侧栏按文件夹分组（多个文件夹的终端同时运行，不再因切换而结束），文件夹行带 Git 分支徽标，文件夹「+」弹出 CLI 菜单新建任务，新增「最近任务」区（由 Claude / Codex / Kimi 历史会话按文件夹归类），旧的按工作区存储的数据首次启动时合并迁移并保留。
+- [x] Phase 27：多账号配置，支持 Codex、Claude Code、Kimi Code；设置新增「账号」页，新建任务可选账号，任务行与顶栏显示账号名，额度按账号读取。
+- [x] Phase 26 第一步：顶栏新增 Tokens / Cost 与整机 CPU / Mem / Net，额度文案改为带标签的 `•` 分隔，侧栏顶部改为 Logo + 标语 + 版本号的品牌头部。
 - [x] Phase 25：重排顶栏并修复元素重叠，音乐播放器移入侧栏，统一弹窗外壳与控件样式，设置分页，新增任务重命名、全局快捷键、应用内确认框和空状态快捷启动。
 - [x] Phase 24：统一主题和状态表达，提高字号，补齐键盘操作与终端工具入口。
 - [x] 完成多 CLI 工作台 UI 效果图设计与确认（含各大模型品牌 Logo、树状多任务分组与顶栏单行横排实时额度）。
@@ -71,15 +75,35 @@
 - [ ] 桌面验收文件预览面板：点击 Claude / Codex 输出中的文件路径、拖拽面板宽度后终端字符矩阵重排、工作目录外路径不出现链接；后续可选增强为语法高亮与 Markdown 渲染。
 - [ ] 桌面验收侧栏交互：一键新建在各 CLI 下的实际启动、真实 CLI 长时间思考（超过 10 秒无输出）时「待查看」是否误报、鼠标拖拽任务排序的手感、中键关闭、右键「在资源管理器中打开」，以及 `Ctrl+Shift+T` / `Ctrl+Shift+W` 在各 CLI 运行时是否被正确拦截。
 - [ ] 后续多窗口分屏支持（Split Terminal View）。
+- [ ] 桌面验收 Phase 26 第三步（便携版）：用真实 Claude / Codex / Kimi 并行工作时，第二行是否对应到正确的任务（同文件夹开多个同类任务时的归属）；「新会话 · 时间」与顶栏时钟一致；会话很长时的刷新延迟与 CPU 占用。
+- [ ] 桌面验收 Phase 26 第二步（便携版）：用真实使用中的多个文件夹和 CLI 并行工作的手感；文件夹与任务的拖拽排序手感；折叠窄条里文件夹按钮的可用性；「最近任务」点击会话恢复真实 Claude / Codex / Kimi 会话（端到端检查有意没有触发，会启动真实 CLI）；旧版数据较多时迁移后的侧栏是否过长。
+- [ ] 待决定：窗口标题栏与顶栏融合（隐藏原生标题栏 + `titleBarOverlay`，窗口按钮在右侧；需随主题更新按钮颜色，并让顶栏横跨侧栏，涉及 `App.tsx` 整体布局）。
+- [ ] 桌面验收多账号（便携版）：设置 → 账号里点「登录」走完 Codex / Claude Code / Kimi Code 的真实登录流程（登录会打开浏览器，端到端检查有意没有触发）；两个账号同时登录并各开任务并行运行，确认互不影响；Kimi 账号登录后的额度接口读数；顶栏额度随切换任务变化的实际手感。
+- [ ] Antigravity（`agy`）多账号：暂不支持。其 Google 登录保存在 Windows 凭据管理器、每个 Windows 用户只有一份；实测把 HOME / USERPROFILE 指向空目录后 `agy -p /usage` 的额度读数与默认账号完全一致，二进制里的 `AGY_ACCOUNT` 只用于沙箱命令选第三方账号。官方文档提供的另一条路是 `GEMINI_API_KEY`（需 `modelProvider: gemini`）或 `AGY_ADC_AUTH`，属于按量计费而非 Google 账号订阅，如需接入须先确认并实测。
+- [ ] 桌面验收 Phase 26 第一步（安装版）：顶栏 Tokens / Cost / CPU / Mem / Net 的实际观感与跳动、各窗口宽度下的收起顺序、品牌头部在各主题下的观感、窗口最小化后网速恢复是否正常、关闭应用后无残留 PowerShell 子进程。
 - [ ] 桌面验收 Pi 会话：滚轮滚动全屏视窗、拖拽选中复制、启动速度（自带 OpenConsole 首次启动可能较慢）与中文输入法；以及设置页关闭 / 开启音乐播放器后侧栏即时变化。
 - [ ] 手工验收会话全关后重建、跨会话快捷键、关闭确认、目录错误提示、日志复制保存与应用重启恢复流程。
 
 ## 3. 阻塞与风险
-- 默认 1280 宽窗口、舒适缩放且侧栏展开时，顶栏放不下全部信息，时钟与额度重置时间会被收起（悬停额度可见）；折叠侧栏、加宽窗口或改用标准缩放后显示完整。
+- 任务行第二行的任务与会话对应是启发式的（从历史恢复的任务按会话 id 精确对应，其余按创建时间归属）：同文件夹并发多个同类任务，或在 OneAI 之外手动开同文件夹的会话，可能对错；重启一个已停止的任务后它开的新会话也可能被归给同文件夹里更晚创建的任务。要做到精确需要在 CLI 的会话里带上任务标识（例如 Claude 的 statusLine 脚本读取环境变量），涉及修改外部配置，需先授权。
+- 侧栏改版后，旧的按工作区存储的数据只迁移一次、之后不再更新；回退到旧版本会看到升级前的状态。「最近任务」只覆盖 Claude Code、Codex、Kimi Code 三个有可读历史会话的 CLI；Git 徽标只显示分支名，不显示改动状态；折叠文件夹里的任务不在侧栏渲染，但仍参与 Ctrl+Tab / Ctrl+数字。
+- 默认 1280 宽窗口、舒适缩放且侧栏展开时，顶栏只保留模型与 5h / 7d；Tokens / Cost、CPU / Mem / Net、额度重置时间与时钟依次收起（悬停额度可见）。侧栏展开的 1920 最大化窗口显示用量与全部系统资源，但不显示时钟（时钟优先级最低，侧栏折叠或更宽屏幕才显示）；若更想保留时钟，调整 `index.css` 的 `topbar` 断点即可。
+- 多账号：Claude Code 非默认账号拿不到额度（statusLine 快照由所有会话共用，无法区分账号）；Kimi Code 账号额度读取该账号目录下的 `credentials/kimi-code.json` 并请求 Kimi 官方额度接口；账号附加环境变量以明文存放在 localStorage，不要填密钥；历史会话（`session-history.ts`）仍只读默认账号目录，从历史恢复的任务使用默认账号。
+- Tokens / Cost 是「最近活跃会话」的累计值：Claude Code 共用同一个 statusLine 快照，多个会话并行时显示最后写入的那个，Tokens 不含子代理的独立记录；Codex 无 Cost。网速依赖系统 Windows PowerShell，读取连续失败两次后显示「--」。
 - 本轮交互修复已通过生产构建；桌面端实际点击与多终端并发行为尚未手工验收。
 - 会话日志缓冲保留最近约 2 MiB 输出；更早内容不会出现在复制和导出的日志中。
 
 ## 4. 最近验证
+
+- **2026-11-13 12:00**：Phase 26 第三步后 `tsc --noEmit` 通过；`npm run check:ui` 142 项全部通过（新增：有会话的任务显示第二行、新会话显示「新会话 · 时间」、未读到时占位、不支持的 CLI 保持单行、长文本单行截断、两行行高、序号与徽标靠右、新会话时间跟随时钟偏移）。检查中发现并修复了一处我引入的排版问题：任务按钮是 flex 列容器，子元素没有被拉伸到整行宽度（第一行只有 89px），会让摘要无法截断、账号徽标与序号贴着标题而不靠右，已给两个子元素加 `w-full` 并补检查。主进程读取逻辑单元测试 22 项（任务到会话的分配：最近创建的任务优先、闲置的旧任务不抢新任务的会话、早于所有任务的会话视为历史、恢复型任务按 id 直接对应、2 秒容差只在没有候选时才用；Claude 过滤工具结果 / 命令标签 / 中断提示 / meta / 子代理、长文本截到 100 字、尾部很大时扩大读取范围、账号目录隔离；Codex 取 user_message 事件并忽略注入上下文 / 子代理 / 其他目录；Kimi 读 state.json 的 lastPrompt 并忽略已归档；输入校验）。单元测试中途发现一处真实缺陷：原先 10 秒的时钟容差会让后创建的任务抢走前一个任务的会话，已改为先严格按创建时间归属、没有候选时才用 2 秒容差。真实数据耗时：本机 48MB、23 个会话文件的 Claude 目录冷读 72ms、缓存后 4ms。真实应用端到端 14 项（隔离 userData + 合成的账号目录会话文件 + 真实 PowerShell）：Claude / Codex / Kimi 任务各显示自己会话的最近消息，同文件夹先后创建的两个 Claude 任务各得各的会话，新会话显示创建时间，系统终端保持单行，恢复型任务按会话 id 对应，账号已删除的任务不读取摘要（不借用默认账号），追加消息后几秒内更新，原本的新会话产生会话文件后显示消息，选中并启动停止的任务后第二行仍在；截图核对观感。`npm run build:portable` 通过，`release/OneAI-Portable-1.0.0.exe` 74911897 字节（北京时间 2026-11-13 12:00），包内含新代码；安装版仍是 10:42 的旧产物。未验证：用真实 AI CLI 并行工作时的归属准确度。
+
+- **2026-11-13 11:48**：Phase 26 第二步后 `tsc --noEmit` 通过；`npm run check:ui` 132 项全部通过（侧栏检查按新结构重写：文件夹行与任务数、Git 徽标仅出现在仓库、「+」CLI 菜单、文件夹右键菜单、新建 / 自定义 / 打开 / 移除事件、任务只能在文件夹内排序且 Alt+方向键到边界无效、拖到其他文件夹无效、文件夹手柄与拖拽排序、最近任务折叠 / 展开 / 恢复 / 查看全部、添加文件夹、折叠窄条的文件夹按钮；新建任务弹窗的 CLI 切换、命令重置、账号选择与按文件夹生成默认名）。数据层单元测试 34 项（旧格式多工作区合并与去重、空工作区不导入、上次使用的工作区优先并展开、首次启动示例任务、旧单工作区存储、损坏数据忽略、迁移不修改旧数据、状态校验、排序语义、最近任务归类与截断）；Git 读取 10 项（HEAD、子目录、游离 HEAD、worktree、损坏文件、批量上限，本仓库读出 main）。真实应用端到端 28 项（隔离 userData + 旧格式种子状态 + 真实 PowerShell + CDP）：三个有任务的旧工作区合并为三个文件夹且空工作区不导入、OneAI 展开其余折叠、本仓库徽标 main、仓库文件夹 feature/a 且仓库外的普通文件夹无徽标、新格式落盘且旧数据逐字节保留；两个文件夹同时运行真实终端、切换后第一个终端仍存活；「+」菜单列出已安装的 CLI 并在该文件夹新建任务、新任务在该目录运行；Ctrl+Tab 四次按键都符合侧栏顺序（含回绕与反向）；最近任务由本机真实历史归类、已打开的文件夹不重复；重启后文件夹顺序 / 展开状态 / 任务 / 活动任务一致；移除文件夹有应用内确认且持久化。端到端中途出现过 3 项 Ctrl+Tab 失败，改为读取持久化的侧栏顺序作为标准答案并多等 100 毫秒后 4 次按键全部符合，上一轮失败的确切原因没有完全定位（怀疑是读取活动任务早于界面刷新）。截图核对侧栏观感。`npm run build:portable` 通过，`release/OneAI-Portable-1.0.0.exe` 74910621 字节（北京时间 2026-11-13 11:48），包内含新代码；安装版仍是 10:42 的旧产物。未验证：点击「最近任务」恢复真实 CLI 会话、用真实 AI CLI 并行、鼠标拖拽的实际手感。
+
+- **2026-11-13 11:23**：多账号端到端检查（真实应用 + 隔离 userData + 真实 PTY + CDP）21 项全部通过：默认账号任务未设置 `CODEX_HOME` 且 `codex login status` 为已登录；Codex 账号任务的 `CODEX_HOME` 指向账号目录、附加变量 `FOO_TEST` 生效、该账号为未登录，账号目录由 OneAI 自动创建；Claude 账号任务 `CLAUDE_CONFIG_DIR` 生效且 `claude auth status` 的 `loggedIn:false`、目录跟随；Kimi 账号任务 `KIMI_CODE_HOME` 生效且 `kimi provider list` 为「No providers configured.」；无效账号被拒绝启动；重启后仍沿用账号环境；设置页三个账号经真实状态命令均显示「未登录」；用「用 alt 新建」在真实界面启动 Codex / Claude 账号任务，任务行显示 `alt`，Codex 终端显示新账号的登录引导、Claude 显示初始化界面（而非默认账号的已登录界面），顶栏额度为「--」；三个账号的额度读数符合预期（Codex / Claude 未知，Kimi 无凭据离线）且默认 Codex 额度仍是真实数据；默认账号的 `auth.json`、`kimi-code.json`、`.credentials.json` 修改时间前后一致；结束后无残留 electron / PowerShell / CLI 进程。截图核对设置页与账号任务观感。检查中发现默认 1280 窗口下顶栏账号徽标被收起（断点 58rem 过于保守，且该条断言只读 DOM 文字、被隐藏元素蒙过），已改为 50rem 与模型名同时收起，并新增 1280 / 1440 宽度下「徽标可见」检查；`npm run check:ui` 108 项全部通过，`tsc --noEmit` 通过。`npm run build:portable` 通过，`release/OneAI-Portable-1.0.0.exe` 74909980 字节（北京时间 2026-11-13 11:23），包内 CSS 含新断点；安装版仍是 10:42 的旧产物。未触发真实登录流程（会打开浏览器）、未验证 Kimi 账号登录后的额度接口。
+
+- **2026-11-13 11:10**：多账号改动后 `tsc --noEmit` 通过；`npm run check:ui` 106 项全部通过（新增 23 项：侧栏账号徽标与「用 <账号> 新建」、已删除账号标记、新建任务弹窗账号选择、设置页账号添加 / 编辑 / 删除二次确认 / 登录入口、相对路径 / 同名 / 同目录 / 无效环境变量被拒、顶栏账号徽标在 7 种宽度下任务名不少于 48px）。主进程逻辑用临时目录跑了 32 项：环境变量构造（配置目录变量不会被附加环境变量覆盖、无效路径 / 文件 / 未知 CLI 被拒、目录自动创建）、Codex 账号按自己的 `CODEX_HOME` 读取 5h 70% / 7d 45% / 模型 / Tokens 且无会话时记为未知而不是 100%、Claude 账号读自己的 settings.json 且不借用默认账号的 Tokens / Cost、Kimi 账号无凭据时为离线、删除账号后缓存清理、`codex login status` / `claude auth status` 在空目录为未登录而默认目录为已登录。CLI 层实测：`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`KIMI_CODE_HOME` 指向空目录后三者都显示未登录（Codex 在目录不存在时直接报错，故启动前自动创建），默认账号凭据不受影响；`agy` 覆盖 HOME / USERPROFILE 后仍是同一登录。`npm run build:portable` 通过，`release/OneAI-Portable-1.0.0.exe` 74908981 字节（北京时间 2026-11-13 11:10），包内含新代码；安装版 `OneAI-Setup-1.0.0.exe` 仍是 10:42 的旧产物、不含多账号。未验证：真实应用里 PTY 注入环境变量的端到端效果、真实登录流程、Kimi 账号的额度接口。
+
+- **2026-11-13 10:42**：Phase 26 第一步后 `tsc --noEmit` 通过；`npm run check:ui` 83 项全部通过（新增：品牌头部、Tokens / Cost 与系统资源文案、7 种窗口宽度下顶栏各块不重叠且任务名不少于 48px、2800 宽度时钟与全部系统资源可见、1920 最大化保留用量与系统资源）。用 node 抓取并对照三种来源：Claude 会话记录去重后累计 token（与快照里的当前上下文大小不同）、Codex `token_count` 累计值、物理网卡计数。网速实测：`netstat -e` 在本机（有 FlClash 虚拟网卡）下载 57 MB 时汇总读到 335 MB，故弃用，改读物理网卡；新读法 57.2 MB 下载对应约 10 MB/s × 6 秒 ≈ 61 MB，本机回环 200 MB 不计入，空闲单次采样约 27 毫秒，常驻 PowerShell 首次启动约 1.4 秒。`vite build` 后用隔离的 userData 启动真实应用，通过 CDP 读到品牌头部 `v1.0.0`、顶栏 `CPU: 12% • Mem: 17.1 GB • Net: ↑24K/s ↓554K/s`，`getAllQuotas` 返回 Claude tokens 8242782 / cost 4.29、Codex tokens 26722，关闭后无残留 PowerShell 子进程。`npm run build:win` 通过，`release/OneAI-Setup-1.0.0.exe` 85124203 字节（北京时间 2026-11-13 10:42）。安装包未安装运行，真实终端任务下的顶栏观感与窗口最小化恢复未在桌面实测。注意：本机时钟取到的北京时间早于上一条记录，按规范仍取 `date` 的值。
 
 - **2026-11-13 12:47**：Pi 滚动修复与音乐播放器开关改动后 `tsc --noEmit` 通过；`npm run check:ui` 72 项全部通过；`npm run build:win` 通过，`release/OneAI-Setup-1.0.0.exe` 85120974 字节（北京时间 2026-11-13 12:46），`win-unpacked` 中已带 `node-pty/prebuilds/win32-x64/conpty/conpty.dll`。用 node-pty 抓取真实输出：系统 ConPTY 下 Pi 只有 `?1049h`、没有 `?1000h/?1003h/?1006h`，换 `useConptyDll` 后鼠标追踪序列完整透传；最小复现确认系统 ConPTY 会吞掉「开启原始输入前」写入的鼠标模式，滚轮 SGR 输入两种方式都能到达程序。其余 CLI：Claude Code、Codex 在备用屏幕并自带鼠标追踪，滚轮由 CLI 自行滚动；Kimi Code 走普通缓冲区，使用 xterm 原生滚动条；Antigravity 进入后又退出备用屏幕，同样走原生滚动条。安装包未安装运行，Pi 的实际滚轮手感与音乐开关界面待桌面确认。
 
@@ -111,19 +135,23 @@
 
 - **2026-11-12 16:13**：空闲状态改动后 `tsc --noEmit` 通过，`npm run check:ui` 无失败项；`npm run build:win` 通过，`release/OneAI-Setup-1.0.0.exe` 1576281511 字节。真实 CLI 下 10 秒阈值是否合适（如思考期间长时间无输出）未验证，待桌面验收。
 
-- **2026-11-12 16:09**：上述四处修复后 `tsc --noEmit` 通过，`npm run check:ui` 无失败项；`npm run build:win` 通过，`release/OneAI-Setup-1.0.0.exe` 1576280850 字节。多行粘贴、新快捷键和键盘切换已停止任务的实际表现未在真实 PTY 中验证，待桌面验收。
-
-- **2026-11-12 15:54**：侧栏加宽与顶栏适配通过 52 项 `npm run check:ui`；隐藏 Electron 夹具验证四种界面缩放与 900、1100、1280、1440、1920 像素窗口的 20 种组合，侧栏宽度分别为 290、320、350、400 CSS 像素，额度均为 100% 时顶栏工具、额度及历史按钮未重叠。夹具未连接真实 PTY，桌面实际效果待手工验收。
-
-- **2026-11-12 04:59**：空状态引导显示条件修复后 `npm run build:win` 通过，`release/OneAI-Setup-1.0.0.exe` 1576280505 字节（北京时间 2026-11-12 04:58:31）。桌面端「任务只在隐藏分组时显示引导」的实际效果待手工验收。
-
-- **2026-11-12 04:29**：合成中文技术语音（Huihui，约 12 秒）文件转写：`base` 输出「幫」「够检 Relectron」「爆错」，`large-v3-turbo` 全句正确，模型加载 3.3 秒、推理 8.2 秒，`beam_size` 1 与 5 耗时相近；麦克风模式录 5 秒后 0.4 秒返回，确认预加载生效。剪贴板探针在真实剪贴板上分别验证文件（含空格路径）、位图、文本三种来源均返回预期结果。`npx tsc --noEmit` 通过，`npm run check:ui` 52 项通过，新增 `Ctrl+V` 不重复写入检查，去掉修复后该项失败。`npm run build:win` 改为默认生成安装版：`release/OneAI-Setup-1.0.0.exe` 1576280607 字节（北京时间 2026-11-12 04:41:30），`7z t` 校验安装包与内层 `app-64.7z` 均通过，确认包内含 `model-large-v3-turbo`、语音程序及新的主进程代码。打包日志中混入一条 makensis 0xC0000142 报错，判断来自先前中止的打包进程，本次产物不受影响；安装包未实际安装运行。真实人声与桌面端粘贴待手工验收。
-
-- **2026-11-12 04:09**：透明图标：像素检查四角与外围 alpha 为 0、中心 alpha 为 255，分别叠在洋红和深蓝底色上目视核对圆角边缘无白边。`npm run build:win` 通过，`release/OneAI-Portable-1.0.0.exe` 267122102 字节（北京时间 2026-11-12 04:07:53）；安装版 `release/installer/OneAI.exe` 283894404 字节（北京时间 2026-11-12 04:08:55）。安装版未实际安装运行；桌面与任务栏中的图标显示待确认（Windows 可能缓存旧图标）。首次在 `release/` 下直接构建安装版时 `win-unpacked` 目录被占用（EBUSY），改用 `release/installer/` 输出。
-
-- **2026-11-12 04:01**：移除 Antigravity / Gemini 检测并调整分组默认顺序后，`tsc --noEmit` 通过，`npm run check:ui` 无失败项；`npm run build:win` 通过，`release/OneAI-Portable-1.0.0.exe` 266888590 字节（北京时间 2026-11-12 04:01:17）。侧栏与启动页实际顺序、旧工作区顺序迁移未在运行时验证。
-
 ## 5. 最近完成
+
+- **2026-11-13 13:10**：修复终端 WebGL 上下文溢出：侧栏改为文件夹树并合并旧工作区后，启动时会给每个任务都创建 xterm 实例与 WebGL 上下文，实测 24 个任务时只有 16 个保住 WebGL、控制台报 24 次「Too many active WebGL contexts」，最早创建的（即启动时的当前任务）被丢弃并退回 DOM 渲染。现改为任务第一次被选中时才创建实例（之后照常隐藏保活），WebGL 最多保留最近显示过的 8 个，当前终端一定有。实测：启动 1 个实例；再打开 12 个任务后 13 个实例、8 个 WebGL、当前终端有 WebGL、警告 0 次；`check:ui` 151 项通过（新增按需创建的 2 项回归检查）。入口：[TerminalViewport.tsx](D:/GitHub/OneAI/src/renderer/src/components/TerminalViewport.tsx)。
+
+- **2026-11-13 12:35**：历史会话抽屉优化：按今天 / 昨天 / 更早分段；每条显示所在文件夹名与 Git 分支（完整路径放悬停提示）、相对时间；已在侧栏有任务的会话标「已打开」；「删除列表中全部」的确认说明会同时删除本机会话文件；空状态说明只读取 Claude / Codex / Kimi。设置菜单改为 外观、时间、终端、账号、提醒、快捷键，「提醒与音乐」改名「提醒」；空状态快捷键提示改为单行。`check:ui` 149 项通过。历史条目不带账号信息（历史只读默认账号目录）。入口：[HistoryModal.tsx](D:/GitHub/OneAI/src/renderer/src/components/HistoryModal.tsx)。
+
+- **2026-11-13 12:20**：标题栏与顶栏融合：隐藏原生标题栏并启用窗口控件覆盖层，顶栏与侧栏品牌头部可拖动（按钮不可拖动），顶栏右侧为窗口按钮让出位置，覆盖层颜色与高度随主题和界面缩放同步（`window:set-title-bar-overlay`）；真实应用里确认覆盖层可见、高度与顶栏一致（48px）、最右按钮不重叠。空状态改版：顶栏显示当前文件夹与分支，中间区域新增「继续上次」（最近 3 条历史会话，点击恢复）并保留 CLI 新建网格；`check:ui` 143 项通过。未验证：窗口按钮的实际颜色观感、拖动与双击最大化手感；有用户截图里顶栏右侧 `Net:` 被截断，未能复现。
+
+- **2026-11-13 12:00**：Phase 26 第三步：任务行第二行。主进程新增 `task:summaries` 接口，读取各任务对应的本机会话文件（Claude `projects/<目录>/*.jsonl`、Codex `sessions/**/rollout-*.jsonl`、Kimi `sessions/*/*/state.json`，多账号任务读账号配置目录），取最近一条真实用户消息（过滤工具结果、命令标签、中断提示、注入的上下文），按文件签名缓存；渲染进程每 5 秒与窗口获得焦点时刷新，没有消息时显示「新会话 · 创建时间」（跟随「设置 → 时间」的偏移），不支持的 CLI 保持单行，读到之前占位避免行高跳动。任务与会话的对应为启发式，见「阻塞与风险」。入口：[task-summary.ts](D:/GitHub/OneAI/src/main/task-summary.ts)、[taskSummary.ts](D:/GitHub/OneAI/src/renderer/src/taskSummary.ts)、[Sidebar.tsx](D:/GitHub/OneAI/src/renderer/src/components/Sidebar.tsx)、[App.tsx](D:/GitHub/OneAI/src/renderer/src/App.tsx)、[check-ui.mjs](D:/GitHub/OneAI/scripts/check-ui.mjs)。
+
+- **2026-11-13 11:48**：Phase 26 第二步：侧栏改为「文件夹 → 任务」。① 任务改为全局有序数组，新增 `folders` 与 `v2` 持久化状态；多个文件夹的终端同时运行，「切换工作文件夹」改为「添加文件夹」且不再结束终端。② 文件夹行带 Git 分支徽标（主进程只读 `.git/HEAD`，新增 `git:branches` 接口）、任务数与「+」；「+」弹出 CLI 菜单（有账号的 CLI 另有「用 <账号> 新建」），`Ctrl+Shift+T` 沿用当前任务的 CLI 在当前文件夹新建；文件夹右键可新建 / 打开 / 复制路径 / 从侧栏移除（确认后结束其中终端）；文件夹与文件夹内的任务可拖拽或 Alt+方向键排序。③ 新增「最近任务」区：历史会话按文件夹归类，已打开的文件夹不重复，点击会话恢复；文件夹和任务行的 CLI 区分改用任务行里的 CLI 图标。④ 新建任务弹窗增加 CLI 选择。⑤ 首次启动把旧的各工作区数据合并迁移，旧数据保留。入口：[workspaceState.ts](D:/GitHub/OneAI/src/renderer/src/workspaceState.ts)、[Sidebar.tsx](D:/GitHub/OneAI/src/renderer/src/components/Sidebar.tsx)、[App.tsx](D:/GitHub/OneAI/src/renderer/src/App.tsx)、[git-branch.ts](D:/GitHub/OneAI/src/main/git-branch.ts)、[NewTaskModal.tsx](D:/GitHub/OneAI/src/renderer/src/components/NewTaskModal.tsx)、[check-ui.mjs](D:/GitHub/OneAI/scripts/check-ui.mjs)。
+
+- **2026-11-13 11:23**：顶栏账号徽标的收起断点由 58rem 调为 50rem，默认 1280 窗口下面包屑里也能看到当前任务的账号名。入口：[index.css](D:/GitHub/OneAI/src/renderer/src/index.css)、[check-ui.mjs](D:/GitHub/OneAI/scripts/check-ui.mjs)。
+
+- **2026-11-13 11:10**：Phase 27 多账号：① 设置新增「账号」页，为 Codex、Claude Code、Kimi Code 各自维护多个账号（名称 + 配置目录 + 可选附加环境变量），可添加、编辑、删除（二次确认，只删配置不删目录与凭据），每个账号有「登录」按钮（在该账号环境下新开终端任务运行登录命令）和登录状态。② 启动 PTY 时按账号注入 `CODEX_HOME` / `CLAUDE_CONFIG_DIR` / `KIMI_CODE_HOME` 并自动创建目录，重启沿用，账号配置被删除后拒绝启动而不回落默认账号。③ 新建任务弹窗可选账号，分组右键菜单「用 <账号> 新建」，任务行与顶栏面包屑显示账号名。④ 额度按账号读取：Codex 读该账号会话记录与配置，Kimi Code 读该账号凭据请求额度接口，Claude Code 非默认账号显示模型与推理等级、额度为「--」。⑤ 「恢复默认设置」保留账号。不支持 Antigravity（原因见待办）。入口：[account-env.ts](D:/GitHub/OneAI/src/main/account-env.ts)、[account-login.ts](D:/GitHub/OneAI/src/main/account-login.ts)、[quota-service.ts](D:/GitHub/OneAI/src/main/quota-service.ts)、[pty-manager.ts](D:/GitHub/OneAI/src/main/pty-manager.ts)、[accounts.ts](D:/GitHub/OneAI/src/renderer/src/accounts.ts)、[AccountsSettings.tsx](D:/GitHub/OneAI/src/renderer/src/components/AccountsSettings.tsx)、[App.tsx](D:/GitHub/OneAI/src/renderer/src/App.tsx)、[check-ui.mjs](D:/GitHub/OneAI/scripts/check-ui.mjs)。
+
+- **2026-11-13 10:42**：Phase 26 第一步：① 顶栏额度文案改为 `Tokens: • Cost: • 5h: • 7d: • Model:`，用 `•` 分隔；Tokens / Cost 为最近活跃会话累计值（Claude 从会话记录按 message.id + requestId 去重累计，增量读取；Cost 取 statusLine 快照；Codex 只有 Tokens，取最新会话的 `total_token_usage`），无数据的 CLI 不显示。② 顶栏右侧新增整机 `CPU / Mem / Net`，主进程每 2 秒采样并推送 `system:stats`，窗口最小化时暂停；网速读物理网卡（常驻 PowerShell，网卡集合变化或计数重置时丢弃该次读数）。③ 顶栏收起顺序改为：时钟、网速、内存、CPU、Tokens / Cost、额度重置时间、模型名，断点按各块自然宽度重新估算。④ 侧栏顶部改为 Logo + `OneAI` + `All agents in one.` + 版本号与问候语。未做：标题栏融合、按文件夹分组。入口：[system-stats.ts](D:/GitHub/OneAI/src/main/system-stats.ts)、[quota-service.ts](D:/GitHub/OneAI/src/main/quota-service.ts)、[SystemStatsText.tsx](D:/GitHub/OneAI/src/renderer/src/components/SystemStatsText.tsx)、[InlineQuotaText.tsx](D:/GitHub/OneAI/src/renderer/src/components/InlineQuotaText.tsx)、[Sidebar.tsx](D:/GitHub/OneAI/src/renderer/src/components/Sidebar.tsx)、[index.css](D:/GitHub/OneAI/src/renderer/src/index.css)、[check-ui.mjs](D:/GitHub/OneAI/scripts/check-ui.mjs)。
 
 - **2026-11-13 12:47**：修复 Pi 内容超过一屏后无法滚动：Pi 全屏模式在开启原始输入前写入鼠标追踪序列，被系统自带 ConPTY 吞掉，xterm 未进入鼠标模式，滚轮在备用屏幕里被转成上下方向键。现仅对 `pi` 开头的命令启用 node-pty 自带的 `conpty.dll`（`useConptyDll`），其余 CLI 保持系统 ConPTY。另在设置「提醒与音乐」页新增「显示音乐播放器」开关（`musicPlayerVisible`，默认开启），关闭后侧栏底部卸载播放器并停止播放。入口：[pty-manager.ts](D:/GitHub/OneAI/src/main/pty-manager.ts)、[SettingsModal.tsx](D:/GitHub/OneAI/src/renderer/src/components/SettingsModal.tsx)、[Sidebar.tsx](D:/GitHub/OneAI/src/renderer/src/components/Sidebar.tsx)。
 
@@ -155,14 +183,3 @@
 
 - **2026-11-12 17:38**：修复 Kimi 输入法候选框在输入框下闪现后跳到右侧或右下角：17:22 的做法是改写 textarea 的内联 `left/top`，而 xterm 在重绘、光标移动和每次组合更新后的延时回调里都会把它写回真实光标，输入法在回写之后读到的是真实光标位置。现在定位点写入 `.xterm` 元素的 `--ime-left/--ime-top` 变量，由 `index.css` 的 `.xterm.ime-anchored` 规则以 `!important` 应用到 textarea 和组合视图，xterm 的内联回写不再生效，逐帧修正循环已删除；找不到 Kimi 输入框时移除该类，回到 xterm 默认行为。`check:ui` 新增真实光标停在行尾和状态栏两种情况的回归检查，夹具页面补上 UTF-8 声明。入口：[TerminalViewport.tsx](D:/GitHub/OneAI/src/renderer/src/components/TerminalViewport.tsx)、[index.css](D:/GitHub/OneAI/src/renderer/src/index.css)、[check-ui.mjs](D:/GitHub/OneAI/scripts/check-ui.mjs)。
 
-- **2026-11-12 17:16**：语音按钮由终端右下角的悬浮圆钮改为贴在 CLI 输入行最右侧：跟随光标所在行（Kimi 按输入框定位），边长取终端单行高度，录音与识别提示显示在按钮上方。入口：[TerminalViewport.tsx](D:/GitHub/OneAI/src/renderer/src/components/TerminalViewport.tsx)。
-
-- **2026-11-12 17:16**：工作时长提醒的间隔改为可设置：新增设置项 `workReminderHours`（默认 1，1 到 12 的整数），在「设置 → 提醒与音乐」中调整；从应用启动起算，改小到已经过去的时长时不补弹。入口：[App.tsx](D:/GitHub/OneAI/src/renderer/src/App.tsx)、[SettingsModal.tsx](D:/GitHub/OneAI/src/renderer/src/components/SettingsModal.tsx)。
-
-- **2026-11-12 17:16**：当前任务为系统终端时，顶栏不再显示 5h / 7d 额度，只保留 Shell 名称与状态。入口：[InlineQuotaText.tsx](D:/GitHub/OneAI/src/renderer/src/components/InlineQuotaText.tsx)。
-
-- **2026-11-12 17:16**：修复终端搜索框聚焦后输入区多出一圈矩形描边：全局 `:focus-visible` 描边优先级高于 `focus:outline-none`，输入框改用 `!outline-none`，聚焦态由外层边框变色表示。入口：[TerminalSearchBar.tsx](D:/GitHub/OneAI/src/renderer/src/components/TerminalSearchBar.tsx)。
-
-- **2026-11-12 16:28**：历史会话由居中弹窗改为右侧抽屉：[Modal.tsx](D:/GitHub/OneAI/src/renderer/src/components/Modal.tsx) 新增 `variant="drawer"`（靠右、与窗口等高、从右侧滑入，遮罩点击与 Esc 关闭不变），[HistoryModal.tsx](D:/GitHub/OneAI/src/renderer/src/components/HistoryModal.tsx) 采用该形态，宽度由 `max-w-2xl` 收窄为 `max-w-xl`。
-
-- **2026-11-12 16:24**：处理 CLI 面板低优先级问题：① 新建任务默认名取已有「Task N」最大编号加一，不再重复；② 任务行右键菜单（重命名、复制工作目录、关闭任务）；③ 切换任务时清除旧终端搜索高亮，并在新终端按当前关键字重新搜索；④ 语音按钮缩小至 36px 并默认半透明，悬停或聚焦时恢复；⑤ 侧栏折叠后保留 48px 窄条，每个任务一个品牌图标带状态点，可直接切换。入口：[Sidebar.tsx](D:/GitHub/OneAI/src/renderer/src/components/Sidebar.tsx)、[NewTaskModal.tsx](D:/GitHub/OneAI/src/renderer/src/components/NewTaskModal.tsx)、[TerminalViewport.tsx](D:/GitHub/OneAI/src/renderer/src/components/TerminalViewport.tsx)。麦克风按钮仍悬浮在终端右下角，只是减弱了遮挡。

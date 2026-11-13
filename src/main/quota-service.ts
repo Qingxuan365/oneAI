@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import https from 'node:https';
 import { execFile } from 'node:child_process';
+import { isAccountCli, resolveConfigDir, AccountCliId } from './account-env';
 
 export interface QuotaData {
   cliId: string;
@@ -11,6 +12,8 @@ export interface QuotaData {
   model?: string;
   effort?: string;              // 推理思考等级: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   planType?: string;
+  tokens?: number;              // 最近活跃会话累计 token（输入 + 输出 + 缓存读写），无数据时缺省
+  costUsd?: number;             // 最近活跃会话累计费用（美元），仅 Claude Code 提供
   fiveHourPercent: number;      // 5h remaining pct (0-100)
   fiveHourResetsIn: string;     // e.g. "2h 45m"
   sevenDayPercent: number;      // 7d remaining pct (0-100)
@@ -20,6 +23,9 @@ export interface QuotaData {
   message?: string;
 }
 
+const CODEX_HOME_DEFAULT = path.join(os.homedir(), '.codex');
+const CLAUDE_HOME_DEFAULT = path.join(os.homedir(), '.claude');
+const KIMI_HOME_DEFAULT = path.join(os.homedir(), '.kimi-code');
 const CLAUDE_STATUS_FILE = path.join(os.homedir(), '.config', 'oneai', 'claude-status.json');
 const AGY_SETTINGS_FILE = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'settings.json');
 const PI_SETTINGS_FILE = path.join(os.homedir(), '.pi', 'agent', 'settings.json');
@@ -70,6 +76,8 @@ export class QuotaService {
   private agyUsageAt = 0;
   private agyUsageError = '';
   private agyUsagePending: Promise<void> | null = null;
+  // 多账号：key 为渲染进程里的账号 id，与默认账号（key 为 cliId）并列缓存、轮询和广播
+  private accounts = new Map<string, { cliId: AccountCliId; dir: string }>();
 
   constructor() {
     const kimiInfo = this.getKimiInfo();
@@ -269,6 +277,23 @@ export class QuotaService {
     return this.quotasCache;
   }
 
+  /** 同步账号列表：只保留有效账号，配置目录变化或已删除的账号丢弃旧缓存，然后立即刷新 */
+  public setAccounts(list: Array<{ key: string; cliId: string; configDir: string }>): void {
+    const next = new Map<string, { cliId: AccountCliId; dir: string }>();
+    for (const item of list) {
+      const dir = resolveConfigDir(item?.configDir);
+      if (typeof item?.key === 'string' && item.key && isAccountCli(item.cliId) && dir) next.set(item.key, { cliId: item.cliId, dir });
+    }
+    for (const [key, old] of this.accounts) {
+      if (next.get(key)?.dir !== old.dir) {
+        delete this.quotasCache[key];
+        delete this.cacheExpiry[key];
+      }
+    }
+    this.accounts = next;
+    void this.refreshAllQuotas();
+  }
+
   public async refreshQuota(cliId?: string): Promise<Record<string, QuotaData>> {
     if (cliId && this.quotasCache[cliId]) {
       this.cacheExpiry[cliId] = 0;
@@ -280,7 +305,7 @@ export class QuotaService {
   }
 
   public async refreshAllQuotas(): Promise<Record<string, QuotaData>> {
-    const cliIds = ['kimi', 'codex', 'claude', 'opencode', 'agy', 'pi', 'grok'];
+    const cliIds = ['kimi', 'codex', 'claude', 'opencode', 'agy', 'pi', 'grok', ...this.accounts.keys()];
     await Promise.allSettled(cliIds.map((id) => this.fetchQuotaForCli(id)));
     this.broadcast();
     return this.quotasCache;
@@ -294,15 +319,16 @@ export class QuotaService {
 
     try {
       let data: QuotaData | null = null;
-      switch (cliId) {
+      const account = this.accounts.get(cliId);
+      switch (account ? account.cliId : cliId) {
         case 'kimi':
-          data = await this.fetchKimiQuota();
+          data = await this.fetchKimiQuota(cliId, account?.dir);
           break;
         case 'codex':
-          data = await this.fetchCodexQuota();
+          data = await this.fetchCodexQuota(cliId, account?.dir);
           break;
         case 'claude':
-          data = await this.fetchClaudeQuota();
+          data = await this.fetchClaudeQuota(account?.dir);
           break;
         case 'opencode':
           data = await this.fetchOpenCodeQuota();
@@ -327,8 +353,8 @@ export class QuotaService {
     }
   }
 
-  public getKimiInfo(): { model: string; effort?: string } {
-    const configPath = path.join(os.homedir(), '.kimi-code', 'config.toml');
+  public getKimiInfo(home: string = KIMI_HOME_DEFAULT): { model: string; effort?: string } {
+    const configPath = path.join(home, 'config.toml');
     if (!fs.existsSync(configPath)) {
       return { model: 'K3', effort: undefined };
     }
@@ -381,10 +407,10 @@ export class QuotaService {
     return { model, effort };
   }
 
-  public getCodexInfo(): { model: string; effort?: string } {
+  public getCodexInfo(home: string = CODEX_HOME_DEFAULT): { model: string; effort?: string } {
     let model = 'Auto';
     let effort: string | undefined = undefined;
-    const configPath = path.join(os.homedir(), '.codex', 'config.toml');
+    const configPath = path.join(home, 'config.toml');
     if (fs.existsSync(configPath)) {
       try {
         const content = fs.readFileSync(configPath, 'utf8');
@@ -405,32 +431,35 @@ export class QuotaService {
     return { model, effort };
   }
 
-  public getClaudeInfo(): { model: string; effort?: string } {
+  public getClaudeInfo(configDir?: string): { model: string; effort?: string } {
     let modelId = '';
     let settings: any = null;
 
-    const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+    // 非默认账号只读它自己的 settings.json：statusLine 快照与 ~/.claude.json 都属于默认账号
+    const settingsPath = path.join(configDir ?? CLAUDE_HOME_DEFAULT, 'settings.json');
     if (fs.existsSync(settingsPath)) {
       try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch {}
     }
 
     // 1. statusLine 落盘文件：会话内 /model、推理等级切换后立即更新，是唯一实时来源
     let statusEffort: string | undefined;
-    try {
-      const d = JSON.parse(fs.readFileSync(CLAUDE_STATUS_FILE, 'utf8'));
-      modelId = d.model?.id || d.model?.display_name || '';
-      if (typeof d.effort?.level === 'string') statusEffort = d.effort.level;
-    } catch {}
+    if (!configDir) {
+      try {
+        const d = JSON.parse(fs.readFileSync(CLAUDE_STATUS_FILE, 'utf8'));
+        modelId = d.model?.id || d.model?.display_name || '';
+        if (typeof d.effort?.level === 'string') statusEffort = d.effort.level;
+      } catch {}
+    }
 
     // 2. settings.json / 环境变量
     if (!modelId && settings) {
       const m = settings.model ? String(settings.model) : '';
       modelId = settings.env?.[`ANTHROPIC_DEFAULT_${m.toUpperCase()}_MODEL`] || settings.env?.ANTHROPIC_MODEL || m;
     }
-    if (!modelId) modelId = process.env.ANTHROPIC_MODEL || process.env.CLAUDE_MODEL || '';
+    if (!modelId && !configDir) modelId = process.env.ANTHROPIC_MODEL || process.env.CLAUDE_MODEL || '';
 
     // 3. 兜底：~/.claude.json 中最近启动项目的 lastModelUsage。它是上一个已结束会话的用量统计，不随 /model 变化
-    if (!modelId) {
+    if (!modelId && !configDir) {
       try {
         const c = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8'));
         const projs = Object.values(c.projects || {})
@@ -640,9 +669,11 @@ export class QuotaService {
     return this.getOpenCodeInfo().model;
   }
 
-  private async fetchKimiQuota(): Promise<QuotaData> {
-    const credPath = path.join(os.homedir(), '.kimi-code', 'credentials', 'kimi-code.json');
-    const kimiInfo = this.getKimiInfo();
+  /** key 为缓存键（默认账号是 'kimi'），home 为该账号的 KIMI_CODE_HOME；账号读取失败时额度记为未知，不借用默认账号的缓存 */
+  private async fetchKimiQuota(key: string = 'kimi', home: string = KIMI_HOME_DEFAULT): Promise<QuotaData> {
+    const isAccount = home !== KIMI_HOME_DEFAULT;
+    const credPath = path.join(home, 'credentials', 'kimi-code.json');
+    const kimiInfo = this.getKimiInfo(home);
     const currentModel = kimiInfo.model;
     const currentEffort = kimiInfo.effort;
 
@@ -742,26 +773,30 @@ export class QuotaService {
       };
     } catch (err: any) {
       console.warn('[QuotaService] Kimi fetch fallback:', err.message);
-      return this.quotasCache['kimi'] || {
+      return this.quotasCache[key] || {
         cliId: 'kimi',
         cliName: 'Kimi Code',
         model: currentModel,
         effort: currentEffort,
-        fiveHourPercent: 100,
+        fiveHourPercent: isAccount ? -1 : 100,
         fiveHourResetsIn: '--',
-        sevenDayPercent: 100,
+        sevenDayPercent: isAccount ? -1 : 100,
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'normal',
+        message: isAccount ? `额度读取失败：${err.message}` : undefined,
       };
     }
   }
 
-  private async fetchCodexQuota(): Promise<QuotaData> {
-    const codexInfo = this.getCodexInfo();
+  /** key 为缓存键（默认账号是 'codex'），home 为该账号的 CODEX_HOME；账号没有会话记录时额度记为未知而不是 100% */
+  private async fetchCodexQuota(key: string = 'codex', home: string = CODEX_HOME_DEFAULT): Promise<QuotaData> {
+    const isAccount = home !== CODEX_HOME_DEFAULT;
+    const unknownPct = isAccount ? -1 : 100;
+    const codexInfo = this.getCodexInfo(home);
     const currentModel = codexInfo.model;
     const currentEffort = codexInfo.effort;
-    const codexSessionsDir = path.join(os.homedir(), '.codex', 'sessions');
+    const codexSessionsDir = path.join(home, 'sessions');
     if (!fs.existsSync(codexSessionsDir)) {
       return {
         cliId: 'codex',
@@ -769,12 +804,13 @@ export class QuotaService {
         model: currentModel,
         effort: currentEffort,
         planType: 'Plus',
-        fiveHourPercent: 100,
+        fiveHourPercent: unknownPct,
         fiveHourResetsIn: '--',
-        sevenDayPercent: 100,
+        sevenDayPercent: unknownPct,
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'normal',
+        message: isAccount ? '该账号暂无会话记录' : undefined,
       };
     }
 
@@ -866,13 +902,27 @@ export class QuotaService {
         } catch {}
       }
 
+      // 累计 token 只取最新会话文件的最后一条 token_count，新会话尚无记录时不显示
+      let tokens: number | undefined;
+      if (filesWithStats[0]) {
+        try {
+          for (const line of readTail(filesWithStats[0].path).split('\n').reverse()) {
+            if (!line.includes('"total_token_usage"')) continue;
+            try {
+              const total = JSON.parse(line)?.payload?.info?.total_token_usage?.total_tokens;
+              if (typeof total === 'number') { tokens = total; break; }
+            } catch {}
+          }
+        } catch {}
+      }
+
       // 会话内切换的模型与推理等级只记录在会话日志里：最近一轮比 config.toml 的修改时间新时以它为准，
       // 配置未写模型时也采用；之后又改过配置则仍以配置为准
       let model = currentModel;
       let effort = currentEffort;
       if (turnContext) {
         let configMtime = 0;
-        try { configMtime = fs.statSync(path.join(os.homedir(), '.codex', 'config.toml')).mtimeMs; } catch {}
+        try { configMtime = fs.statSync(path.join(home, 'config.toml')).mtimeMs; } catch {}
         if (turnContext.at > configMtime || model === 'Auto') {
           model = turnContext.model || model;
           effort = turnContext.effort || effort;
@@ -914,6 +964,7 @@ export class QuotaService {
           model,
           effort,
           planType,
+          tokens,
           fiveHourPercent,
           fiveHourResetsIn,
           sevenDayPercent,
@@ -929,21 +980,73 @@ export class QuotaService {
         model,
         effort,
         planType,
-        fiveHourPercent: 100,
+        tokens,
+        fiveHourPercent: unknownPct,
         fiveHourResetsIn: '--',
-        sevenDayPercent: 100,
+        sevenDayPercent: unknownPct,
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'normal',
+        message: isAccount ? '该账号暂无额度记录' : undefined,
       };
     } catch (err: any) {
       console.warn('[QuotaService] Error parsing Codex sessions:', err.message);
-      return this.quotasCache['codex'];
+      return this.quotasCache[key];
     }
   }
 
-  private async fetchClaudeQuota(): Promise<QuotaData> {
-    const { model, effort } = this.getClaudeInfo();
+  private claudeTokenCache: { file: string; offset: number; pending: Buffer; perMessage: Map<string, number>; total: number } | null = null;
+
+  /**
+   * 累计 Claude Code 会话 token：快照里的 context_window 只是当前上下文大小，累计值要从会话记录算。
+   * 同一条 assistant 消息会按内容块写成多行（usage 相同或递增），按 message.id + requestId 去重并以最后一行为准。
+   * 只统计主会话记录，不含子代理的独立记录；会话文件只追加，按偏移增量读取并分片，避免大文件一次读入。
+   */
+  private readClaudeSessionTokens(file: string): number | undefined {
+    try {
+      const size = fs.statSync(file).size;
+      let cache = this.claudeTokenCache;
+      if (!cache || cache.file !== file || size < cache.offset) {
+        cache = { file, offset: 0, pending: Buffer.alloc(0), perMessage: new Map(), total: 0 };
+        this.claudeTokenCache = cache;
+      }
+      const SLICE = 8 * 1024 * 1024;
+      const fd = fs.openSync(file, 'r');
+      try {
+        while (cache.offset < size) {
+          const chunk = Buffer.alloc(Math.min(SLICE, size - cache.offset));
+          const read = fs.readSync(fd, chunk, 0, chunk.length, cache.offset);
+          if (read <= 0) break;
+          cache.offset += read;
+          const data = Buffer.concat([cache.pending, chunk.subarray(0, read)]);
+          const lastNewline = data.lastIndexOf(0x0a);
+          cache.pending = lastNewline < 0 ? data : data.subarray(lastNewline + 1);
+          if (lastNewline < 0) continue;
+          for (const line of data.subarray(0, lastNewline).toString('utf8').split('\n')) {
+            if (!line.includes('"type":"assistant"') || !line.includes('"usage"')) continue;
+            try {
+              const e = JSON.parse(line);
+              const u = e.message?.usage;
+              if (e.type !== 'assistant' || !u) continue;
+              const sum = (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+              const key = `${e.message.id}:${e.requestId}`;
+              cache.total += sum - (cache.perMessage.get(key) ?? 0);
+              cache.perMessage.set(key, sum);
+            } catch {}
+          }
+        }
+      } finally {
+        fs.closeSync(fd);
+      }
+      return cache.total;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** configDir 缺省为默认账号；非默认账号只显示模型与推理等级，额度来自共用的 statusLine 快照，无法区分账号，故显示「--」 */
+  private async fetchClaudeQuota(configDir?: string): Promise<QuotaData> {
+    const { model, effort } = this.getClaudeInfo(configDir);
     const base: QuotaData = {
       cliId: 'claude',
       cliName: 'Claude Code',
@@ -956,6 +1059,8 @@ export class QuotaService {
       lastUpdated: Date.now(),
       status: 'normal',
     };
+
+    if (configDir) return { ...base, message: '非默认账号暂无额度数据' };
 
     // 额度来源：~/.claude/oneai-statusline.js 通过 Claude Code statusLine 写入的快照
     let data: any;
@@ -979,6 +1084,8 @@ export class QuotaService {
 
     return {
       ...base,
+      tokens: typeof data.transcript_path === 'string' ? this.readClaudeSessionTokens(data.transcript_path) : undefined,
+      costUsd: typeof data.cost?.total_cost_usd === 'number' ? data.cost.total_cost_usd : undefined,
       fiveHourPercent: five.pct,
       fiveHourResetsIn: five.resetMs ? formatDuration(five.resetMs - now) : '--',
       sevenDayPercent: seven.pct,

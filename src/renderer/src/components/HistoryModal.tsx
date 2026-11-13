@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Search, History, Trash2 } from 'lucide-react';
+import { Search, History, Trash2, GitBranch } from 'lucide-react';
 import { BrandIcon } from './BrandIcon';
 import { Modal } from './Modal';
 import { HistoryEntry } from '../types';
+import { folderKey, folderName } from '../workspaceState';
+import { formatAgo } from '../taskSummary';
 
 const CLI_LABELS: Record<HistoryEntry['cliId'], string> = {
   claude: 'Claude Code',
@@ -18,13 +20,23 @@ function formatTime(timestamp: number): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+/** 按本地日期分段：今天 / 昨天 / 更早 */
+function dayGroup(timestamp: number): '今天' | '昨天' | '更早' {
+  const startOfToday = new Date().setHours(0, 0, 0, 0);
+  if (timestamp >= startOfToday) return '今天';
+  if (timestamp >= startOfToday - 86_400_000) return '昨天';
+  return '更早';
+}
+
 interface HistoryModalProps {
   isOpen: boolean;
   onClose: () => void;
   onResume: (entry: HistoryEntry) => void;
+  /** 已在侧栏里有对应任务的会话 id（点击会切换过去，而不是再开一个） */
+  openHistoryIds?: ReadonlySet<string>;
 }
 
-export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onResume }) => {
+export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onResume, openHistoryIds }) => {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -33,6 +45,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [branches, setBranches] = useState<Record<string, string | null>>({});
 
   useEffect(() => {
     if (!isOpen) return;
@@ -40,7 +53,18 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
     setLoading(true);
     setError('');
     window.electronAPI.listSessionHistory()
-      .then((list) => { if (active) setEntries(list); })
+      .then((list) => {
+        if (!active) return;
+        setEntries(list);
+        // 目录上的 Git 分支（只读 .git/HEAD），最多读 64 个不同目录
+        const dirs = [...new Set(list.map((entry) => entry.cwd))].slice(0, 64);
+        void window.electronAPI.getGitBranches?.(dirs).then((result) => {
+          if (!active) return;
+          const byKey: Record<string, string | null> = {};
+          for (const [dir, branch] of Object.entries(result)) byKey[folderKey(dir)] = branch;
+          setBranches(byKey);
+        }).catch(() => {});
+      })
       .catch((err) => { if (active) setError(err instanceof Error ? err.message : '读取历史会话失败'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -113,7 +137,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
           ))}
           {visible.length > 0 && (confirmAll ? (
             <span className="ml-auto flex items-center gap-1.5">
-              <button type="button" disabled={deleting} onClick={() => removeEntries(visible)} className={`${small} border-danger/60 bg-danger/10 text-danger hover:bg-danger/20`}>确认删除 {visible.length} 条</button>
+              <button type="button" disabled={deleting} onClick={() => removeEntries(visible)} className={`${small} border-danger/60 bg-danger/10 text-danger hover:bg-danger/20`}>确认删除 {visible.length} 条（同时删除本机会话文件）</button>
               <button type="button" onClick={() => setConfirmAll(false)} className={`${small} border-line text-fg-muted hover:bg-hover`}>取消</button>
             </span>
           ) : (
@@ -128,27 +152,44 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
         {loading && <p className="p-8 text-center text-sm text-fg-subtle">正在读取…</p>}
         {error && <p role="alert" className="p-4 text-center text-sm text-danger">{error}</p>}
         {!loading && !error && visible.length === 0 && (
-          <p className="p-8 text-center text-sm text-fg-subtle">{entries.length === 0 ? '还没有历史会话' : '没有符合条件的会话'}</p>
+          <div className="p-8 text-center text-sm text-fg-subtle">
+            <p>{entries.length === 0 ? '还没有历史会话' : '没有符合条件的会话'}</p>
+            {entries.length === 0 && <p className="mt-1.5 text-xs text-fg-faint">只读取 Claude Code、Codex、Kimi Code 的本机会话；其他 CLI 没有可读的历史。</p>}
+          </div>
         )}
-        {visible.map((entry) => {
+        {visible.map((entry, index) => {
           const key = entryKey(entry);
           const confirming = pendingKey === key;
+          const group = dayGroup(entry.updatedAt);
+          const showGroup = index === 0 || dayGroup(visible[index - 1].updatedAt) !== group;
+          const isOpenTask = openHistoryIds?.has(entry.id) ?? false;
+          const branch = branches[folderKey(entry.cwd)];
           return (
-            <div key={key} className="group/row flex items-center gap-1 rounded-lg transition-colors hover:bg-hover">
+            <React.Fragment key={key}>
+            {showGroup && <p className="px-3 pb-1 pt-3 text-xs font-medium text-fg-faint" data-history-group>{group}</p>}
+            <div className="group/row flex items-center gap-1 rounded-lg transition-colors hover:bg-hover">
               <button
                 type="button"
                 onClick={() => onResume(entry)}
-                title="恢复此会话"
+                title={isOpenTask ? '已在侧栏打开，点击切换过去' : '恢复此会话'}
                 className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-3 py-2.5 text-left"
               >
                 <BrandIcon icon={entry.cliId} size={18} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-ui font-medium text-fg">{entry.title}</span>
-                  <span className="block truncate font-mono text-xs text-fg-subtle" title={entry.cwd}>{entry.cwd}</span>
+                  <span className="flex items-center gap-1.5 text-xs text-fg-subtle" title={entry.cwd}>
+                    <span className="truncate">{folderName(entry.cwd)}</span>
+                    {branch && (
+                      <span className="flex shrink-0 items-center gap-1 rounded-full border border-violet/30 bg-violet/10 px-1.5 text-2xs text-violet" data-git-branch>
+                        <GitBranch size={10} aria-hidden="true" /><span className="max-w-[6rem] truncate font-mono">{branch}</span>
+                      </span>
+                    )}
+                  </span>
                 </span>
                 <span className="shrink-0 text-right text-xs">
                   <span className="block text-fg-muted">{CLI_LABELS[entry.cliId]}</span>
-                  <span className="block font-mono tabular-nums text-fg-faint">{formatTime(entry.updatedAt)}</span>
+                  <span className="block tabular-nums text-fg-faint" title={formatTime(entry.updatedAt)}>{formatAgo(entry.updatedAt)}</span>
+                  {isOpenTask && <span className="mt-0.5 inline-block rounded-full bg-accent/15 px-1.5 text-2xs font-medium text-accent" data-history-open>已打开</span>}
                 </span>
               </button>
               {confirming ? (
@@ -168,6 +209,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
                 </button>
               )}
             </div>
+            </React.Fragment>
           );
         })}
       </div>

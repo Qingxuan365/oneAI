@@ -84,6 +84,12 @@ export function matchToLinkRange(logical: LogicalLine, start: number, length: nu
   };
 }
 
+/**
+ * Chromium 同时只允许约 16 个 WebGL 上下文，超出时最早的会被强制丢弃（往往就是当前终端）。
+ * 只给最近显示过的终端保留 WebGL，当前终端一定有；更早的隐藏终端释放后退回 DOM 渲染，切回来时再挂上。
+ */
+const MAX_WEBGL_TERMINALS = 8;
+
 const SEARCH_DECORATIONS = {
   matchBackground: '#b58900',
   matchOverviewRuler: '#b58900',
@@ -524,10 +530,12 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
       }
     });
 
-    // 2. 为新任务创建并挂载 xterm 容器
+    // 2. 按需创建：任务第一次被选中时才创建 xterm 实例（之后隐藏保活，不销毁）。
+    //    启动时不为所有任务一次性创建，避免实例和 WebGL 上下文随任务数量线性增长；
+    //    未创建实例期间的输出由主进程缓冲，创建时回放。
     const terminalHost = containerRef.current;
     tasks.forEach((task) => {
-      if (!instancesRef.current.has(task.id)) {
+      if (task.id === activeTaskId && !instancesRef.current.has(task.id)) {
         const termContainer = document.createElement('div');
         termContainer.id = `terminal-${task.id}`;
         termContainer.className = 'w-full h-full overflow-hidden';
@@ -567,18 +575,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
 
         term.open(termContainer);
 
-        // 挂载 GPU 硬件加速 WebglAddon
-        let webglAddon: WebglAddon | undefined;
-        try {
-          webglAddon = new WebglAddon();
-          webglAddon.onContextLoss(() => {
-            webglAddon?.dispose();
-          });
-          term.loadAddon(webglAddon);
-        } catch (e) {
-          console.warn('[OneAI] WebglAddon failed to load, fallback to DOM renderer:', e);
-        }
-
+        // WebGL 渲染在终端显示时由下方的切换逻辑按需挂载，见 MAX_WEBGL_TERMINALS
         fitAddon.fit();
 
         const findAnchor = IME_ANCHOR_FINDERS[task.groupId];
@@ -851,7 +848,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
           term,
           fitAddon,
           searchAddon,
-          webglAddon,
+          webglAddon: undefined,
           container: termContainer,
           pendingData: '',
           flushTimer: null,
@@ -893,7 +890,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
         });
       }
     }
-  }, [tasks]);
+  }, [tasks, activeTaskId]);
 
   // 启动失败时把原因写进终端区，避免只剩空白；同一条错误只打印一次
   const printedErrorsRef = useRef<Map<string, string>>(new Map());
@@ -911,8 +908,36 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
     });
   }, [tasks]);
 
+  // 最近显示过的终端，越靠前越新；用来决定哪些隐藏终端保留 WebGL
+  const recentShownRef = useRef<string[]>([]);
+  const attachWebgl = (instance: TerminalInstance) => {
+    if (instance.webglAddon) return;
+    try {
+      const addon = new WebglAddon();
+      addon.onContextLoss(() => {
+        addon.dispose();
+        if (instance.webglAddon === addon) instance.webglAddon = undefined;
+      });
+      instance.term.loadAddon(addon);
+      instance.webglAddon = addon;
+    } catch (e) {
+      console.warn('[OneAI] WebglAddon failed to load, fallback to DOM renderer:', e);
+    }
+  };
+
   // 当活动激活任务变化时，显示对应终端，隐藏其他终端，并自动 fit 和 focus
   useEffect(() => {
+    if (activeTaskId && instancesRef.current.has(activeTaskId)) {
+      recentShownRef.current = [activeTaskId, ...recentShownRef.current.filter((id) => id !== activeTaskId && instancesRef.current.has(id))];
+      attachWebgl(instancesRef.current.get(activeTaskId)!);
+      for (const id of recentShownRef.current.slice(MAX_WEBGL_TERMINALS)) {
+        const stale = instancesRef.current.get(id);
+        if (stale?.webglAddon) {
+          stale.webglAddon.dispose();
+          stale.webglAddon = undefined;
+        }
+      }
+    }
     instancesRef.current.forEach((instance, id) => {
       const isCurrent = id === activeTaskId;
       instance.container.style.display = isCurrent ? 'block' : 'none';

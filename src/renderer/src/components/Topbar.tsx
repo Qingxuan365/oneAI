@@ -1,15 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Terminal, ChevronRight, Search, Eraser, RotateCcw, Download, Copy, FileText, Check, PanelLeftClose, PanelLeftOpen, History } from 'lucide-react';
+import { FolderOpen, ChevronRight, Search, Eraser, RotateCcw, Download, Copy, FileText, Check, PanelLeftClose, PanelLeftOpen, History } from 'lucide-react';
 import { InlineQuotaText } from './InlineQuotaText';
-import { QuotaData, TaskSession, CliGroup } from '../types';
+import { SystemStatsText } from './SystemStatsText';
+import { QuotaData, TaskSession, CliDef } from '../types';
 import { TASK_STATUS_META } from '../taskStatus';
 import { BrandIcon } from './BrandIcon';
 
 interface TopbarProps {
   isSidebarCollapsed: boolean;
   onToggleSidebar: () => void;
-  currentGroup: CliGroup | null;
+  currentGroup: CliDef | null;
   activeTask: TaskSession | null;
+  /** 当前任务使用的账号名；默认账号时缺省 */
+  accountName?: string;
+  /** 没有活动任务时显示的当前文件夹（新任务将在此启动）与 Git 分支 */
+  emptyFolder?: { name: string; branch?: string | null };
   quota: QuotaData | null;
   clockOffsetHours?: number;
   onRefreshQuota: () => Promise<void>;
@@ -66,6 +71,8 @@ export const Topbar: React.FC<TopbarProps> = ({
   onToggleSidebar,
   currentGroup,
   activeTask,
+  accountName,
+  emptyFolder,
   quota,
   clockOffsetHours = 0,
   onRefreshQuota,
@@ -173,6 +180,11 @@ export const Topbar: React.FC<TopbarProps> = ({
                 <span className="min-w-0 max-w-[18rem] truncate text-fg-muted" title={activeTask.title}>
                   {activeTask.title}
                 </span>
+                {accountName && (
+                  <span className="topbar-account max-w-[7rem] shrink-0 truncate rounded border border-line-strong px-1.5 py-px text-2xs text-fg-subtle" title={`账号：${accountName}`}>
+                    {accountName}
+                  </span>
+                )}
                 <span
                   className={`ml-0.5 inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-2xs ${status.badge}`}
                   title={status.hint}
@@ -185,8 +197,10 @@ export const Topbar: React.FC<TopbarProps> = ({
           </div>
         ) : (
           <div className="flex min-w-0 items-center gap-1.5 text-fg-faint">
-            <Terminal size={14} className="shrink-0" />
-            <span className="truncate">无活动终端会话</span>
+            <FolderOpen size={14} className="shrink-0 text-accent" />
+            <span className="truncate font-medium text-fg-muted" data-empty-folder>{emptyFolder?.name ?? '无活动终端会话'}</span>
+            {emptyFolder?.branch && <span className="shrink-0 rounded-full border border-violet/30 bg-violet/10 px-1.5 text-2xs text-violet">{emptyFolder.branch}</span>}
+            {emptyFolder && <span className="truncate">· 选择 CLI 开始任务</span>}
           </div>
         )}
 
@@ -256,6 +270,9 @@ export const Topbar: React.FC<TopbarProps> = ({
           <InlineQuotaText quota={quota} onRefresh={onRefreshQuota} />
         </div>
       )}
+
+      {/* 整机 CPU / 内存 / 网速：与活动终端无关，始终显示；空间不足时由 .topbar-sys-* 依次收起 */}
+      <SystemStatsText />
 
       {onOpenHistory && (
         <button

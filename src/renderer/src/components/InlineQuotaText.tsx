@@ -26,8 +26,15 @@ function effortColor(effort: string): string {
 }
 
 const Divider = ({ className = '' }: { className?: string }) => (
-  <span className={`h-3 w-px shrink-0 bg-line-strong ${className}`} aria-hidden="true" />
+  <span className={`shrink-0 text-fg-faint ${className}`} aria-hidden="true">•</span>
 );
+
+function formatTokens(n: number): string {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${Math.round(n / 1e3)}k`;
+  return String(n);
+}
 
 /** 顶栏单行纯文字额度。空间不足时 .quota-detail 与 .quota-model 由顶栏容器查询收起，完整信息保留在 title 中。 */
 export const InlineQuotaText: React.FC<InlineQuotaTextProps> = ({ quota, onRefresh }) => {
@@ -80,28 +87,54 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = ({ quota, onRefre
 
   return (
     <div className="flex items-center gap-2 font-mono text-ui text-fg-muted" title={quota.model ? (quota.effort ? `${quota.model} · 推理思考等级: ${quota.effort}` : quota.model) : undefined}>
-      {/* 模型与推理等级 */}
-      {quota.model && (
-        <span className="quota-model-info flex items-center gap-1.5 text-xs">
-          <span className="quota-model font-semibold text-fg">{quota.model}</span>
-          {quota.effort && (
-            <span className={`rounded border px-1.5 py-px text-2xs font-semibold lowercase tracking-wider ${effortColor(quota.effort)}`}>
-              {quota.effort}
+      {/* 最近活跃会话的累计用量；没有数据的 CLI 不显示。空间不足时整段由 .quota-usage 收起 */}
+      {(quota.tokens !== undefined || quota.costUsd !== undefined) && (
+        <span className="quota-usage flex items-center gap-2 whitespace-nowrap">
+          {quota.tokens !== undefined && (
+            <span title={`最近活跃会话累计 token（输入 + 输出 + 缓存读写）：${quota.tokens.toLocaleString('en-US')}`}>
+              <span className="text-fg-subtle">Tokens: </span>
+              <span className="font-semibold text-fg">{formatTokens(quota.tokens)}</span>
             </span>
           )}
+          {quota.tokens !== undefined && quota.costUsd !== undefined && <Divider />}
+          {quota.costUsd !== undefined && (
+            <span title="最近活跃会话累计费用（美元）">
+              <span className="text-fg-subtle">Cost: </span>
+              <span className="font-semibold text-fg">${quota.costUsd.toFixed(2)}</span>
+            </span>
+          )}
+          <Divider />
         </span>
       )}
 
       {windows.map(({ label, percent, reset }, index) => (
         <React.Fragment key={label}>
-          {(index > 0 || quota.model) && <Divider className={index === 0 ? 'quota-model-divider' : ''} />}
+          {index > 0 && <Divider />}
           <span className="whitespace-nowrap" title={`${label} 额度剩余 ${percent < 0 ? '未知' : `${percent}%`}${reset !== '--' ? `，${reset}` : ''}`}>
-            <span className="text-fg-subtle">{label} </span>
+            <span className="text-fg-subtle">{label}: </span>
             <span className={`font-semibold ${percentColor(percent)}`}>{percent < 0 ? '--' : `${percent}%`}</span>
             {reset !== '--' && <span className="quota-detail text-xs text-fg-subtle"> ({reset})</span>}
           </span>
         </React.Fragment>
       ))}
+
+      {/* 模型与推理等级放在额度之后；窗口继续变窄时先收起模型名，再整体收起 */}
+      {quota.model && (
+        <>
+          {windows.length > 0 && <Divider className="quota-model-divider" />}
+          <span className="quota-model-info flex items-center gap-1.5 text-xs">
+            <span className="quota-model">
+              <span className="text-fg-subtle">Model: </span>
+              <span className="font-semibold text-fg">{quota.model}</span>
+            </span>
+            {quota.effort && (
+              <span className={`rounded border px-1.5 py-px text-2xs font-semibold lowercase tracking-wider ${effortColor(quota.effort)}`}>
+                {quota.effort}
+              </span>
+            )}
+          </span>
+        </>
+      )}
 
       {/* 额外辅助消息（如 Ctx 上下文用量） */}
       {quota.message && (

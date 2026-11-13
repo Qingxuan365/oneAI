@@ -2,11 +2,13 @@ import * as pty from 'node-pty';
 import { BrowserWindow } from 'electron';
 import * as os from 'node:os';
 import fs from 'node:fs';
+import { buildAccountEnv, SessionAccount } from './account-env';
 
 interface CreateSessionOptions {
   id: string;
   command?: string;
   cwd?: string;
+  account?: SessionAccount; // 多账号：按账号的配置目录注入 CODEX_HOME / CLAUDE_CONFIG_DIR；重启时沿用
   cols?: number;
   rows?: number;
 }
@@ -99,6 +101,13 @@ export class PtyManager {
         return { success: false, error: `工作目录不存在或不是文件夹：${workDir}` };
       }
 
+      let accountEnv: Record<string, string> = {};
+      if (resolvedOptions.account) {
+        const built = buildAccountEnv(resolvedOptions.account);
+        if ('error' in built) return { success: false, error: built.error };
+        accountEnv = built.env;
+      }
+
       // 正确拆分可执行文件与命令行参数
       let file = defaultShell;
       let args: string[] = [];
@@ -163,6 +172,7 @@ export class PtyManager {
         cwd: workDir,
         env: {
           ...process.env,
+          ...accountEnv,
           TERM: 'xterm-256color',
           COLORTERM: 'truecolor',
         } as Record<string, string>,

@@ -1,51 +1,71 @@
 import React, { useState } from 'react';
 import { FolderOpen, Play } from 'lucide-react';
-import { CliGroup } from '../types';
+import { Account, CliDef, TaskSession } from '../types';
+import { folderName, nextTaskTitle, tasksInFolder } from '../workspaceState';
 import { BrandIcon } from './BrandIcon';
 import { Modal } from './Modal';
 
 interface NewTaskModalProps {
-  group: CliGroup | null;
-  workspacePath: string;
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (groupId: string, title: string, command: string, cwd: string) => Promise<{ success: boolean; error?: string }>;
-}
-
-/** 新任务的默认名称：取已有「Task N」的最大编号加一，避免关闭中间任务后出现重复编号 */
-export function nextTaskTitle(group: CliGroup): string {
-  const taskIndex = group.tasks.reduce((max, task) => Math.max(max, Number(/^Task (\d+)/.exec(task.title)?.[1] ?? 0)), group.tasks.length) + 1;
-  return `Task ${taskIndex}`;
+  /** 可选的 CLI（本机已安装的） */
+  clis: CliDef[];
+  /** 打开时预选的 CLI */
+  initialCliId?: string;
+  /** 新任务默认的工作目录，即在哪个文件夹上点的「+」 */
+  folderPath: string;
+  /** 用于生成默认任务名（取该文件夹里已有的「Task N」） */
+  tasks: TaskSession[];
+  /** 配置了多账号的 CLI 可在弹窗中选择账号；accountId 缺省为默认账号 */
+  accounts?: Account[];
+  onCreate: (cliId: string, title: string, command: string, cwd: string, accountId?: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 export const NewTaskModal: React.FC<NewTaskModalProps> = ({
-  group,
-  workspacePath,
   isOpen,
   onClose,
+  clis,
+  initialCliId,
+  folderPath,
+  tasks,
+  accounts = [],
   onCreate,
 }) => {
+  const [cliId, setCliId] = useState('');
   const [title, setTitle] = useState('');
   const [command, setCommand] = useState('');
   const [cwd, setCwd] = useState('');
+  const [accountId, setAccountId] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // 打开时初始化预设值
   React.useEffect(() => {
-    if (group) {
-      setTitle(nextTaskTitle(group));
-      setCommand(group.defaultCommand);
-      setCwd(workspacePath);
-      setError('');
-    }
-  }, [group?.id, isOpen, workspacePath]);
+    if (!isOpen) return;
+    const cli = clis.find((item) => item.id === initialCliId) ?? clis[0];
+    setCliId(cli?.id ?? '');
+    setTitle(nextTaskTitle(tasksInFolder(tasks, folderPath)));
+    setCommand(cli?.defaultCommand ?? '');
+    setCwd(folderPath);
+    setAccountId('');
+    setError('');
+  }, [isOpen, initialCliId, folderPath]);
 
-  if (!isOpen || !group) return null;
+  const cli = clis.find((item) => item.id === cliId);
+  if (!isOpen || !cli) return null;
+  const cliAccounts = accounts.filter((account) => account.cliId === cli.id);
+
+  const changeCli = (id: string) => {
+    const next = clis.find((item) => item.id === id);
+    if (!next) return;
+    setCliId(id);
+    setCommand(next.defaultCommand);
+    setAccountId('');
+  };
 
   const handleChooseDirectory = async () => {
     try {
-      const selected = await window.electronAPI?.selectWorkspaceDirectory?.(cwd || workspacePath);
+      const selected = await window.electronAPI?.selectWorkspaceDirectory?.(cwd || folderPath);
       if (selected) {
         setCwd(selected);
         setError('');
@@ -61,7 +81,7 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
     setIsSubmitting(true);
     setError('');
     try {
-      const result = await onCreate(group.id, title.trim(), command.trim(), cwd.trim());
+      const result = await onCreate(cli.id, title.trim(), command.trim(), cwd.trim(), accountId || undefined);
       if (result.success) onClose();
       else setError(result.error || '终端启动失败，请检查工作目录和启动命令。');
     } catch (err) {
@@ -80,8 +100,8 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
       onClose={onClose}
       closeDisabled={isSubmitting}
       titleId="new-task-modal-title"
-      title={`新建 ${group.name} 任务`}
-      icon={<BrandIcon icon={group.icon} size={18} />}
+      title={`新建任务 · ${folderName(folderPath)}`}
+      icon={<BrandIcon icon={cli.icon} size={18} />}
       footer={(
         <>
           <button type="button" onClick={onClose} disabled={isSubmitting} className="btn-secondary">取消</button>
@@ -94,6 +114,15 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
     >
       <form id="new-task-form" onSubmit={handleSubmit} className="space-y-4">
         {error && <div role="alert" className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">{error}</div>}
+        {clis.length > 1 && (
+          <div>
+            <label htmlFor="new-task-cli" className={label}>CLI</label>
+            <select id="new-task-cli" value={cli.id} onChange={(e) => changeCli(e.target.value)} className="input">
+              {clis.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </div>
+        )}
+
         <div>
           <label htmlFor="new-task-title" className={label}>任务名称</label>
           <input
@@ -108,6 +137,17 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
             required
           />
         </div>
+
+        {cliAccounts.length > 0 && (
+          <div>
+            <label htmlFor="new-task-account" className={label}>账号</label>
+            <select id="new-task-account" value={accountId} onChange={(e) => setAccountId(e.target.value)} className="input">
+              <option value="">默认账号</option>
+              {cliAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+            </select>
+            <p className={hint}>账号使用各自独立的配置目录；首次使用请先在「设置 → 账号」中登录。</p>
+          </div>
+        )}
 
         <div>
           <label htmlFor="new-task-command" className={label}>启动命令</label>
@@ -131,7 +171,7 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
               value={cwd}
               onChange={(e) => setCwd(e.target.value)}
               className="input min-w-0 flex-1 font-mono"
-              placeholder={workspacePath}
+              placeholder={folderPath}
             />
             <button
               type="button"
@@ -144,7 +184,7 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
               <span>选择文件夹</span>
             </button>
           </div>
-          <p className={hint}>只用于当前任务，不改变左下角的工作文件夹。</p>
+          <p className={hint}>改成其他目录时，任务会出现在对应的文件夹下。</p>
         </div>
       </form>
     </Modal>

@@ -4,6 +4,10 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ptyManager } from './pty-manager';
 import { quotaService } from './quota-service';
+import { startSystemStats } from './system-stats';
+import { checkAccountLogin } from './account-login';
+import { setupGitBranch } from './git-branch';
+import { setupTaskSummary } from './task-summary';
 import { listSessionHistory, deleteSessionHistory } from './session-history';
 import { detectInstalledClis } from './cli-detect';
 import { setupWorkspaceStore } from './workspace-store';
@@ -41,8 +45,9 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    // 暗色主题标题栏
-    titleBarStyle: 'default',
+    // 隐藏原生标题栏，由顶栏承担拖动与标题栏职责；窗口控件（最小化 / 最大化 / 关闭）以覆盖层显示在右上角，颜色由渲染进程随主题同步
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#161b22', symbolColor: '#e2e8f0', height: 44 },
     autoHideMenuBar: true,
   });
 
@@ -52,6 +57,7 @@ function createWindow() {
   ptyManager.setWindow(mainWindow);
   quotaService.setWindow(mainWindow);
   quotaService.startPolling(30000); // 每 30 秒轮询一次大模型配额
+  const stopSystemStats = startSystemStats(mainWindow);
 
   mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     console.log(`[Renderer Log ${level}]: ${message} (${sourceId}:${line})`);
@@ -93,6 +99,7 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    stopSystemStats();
     quotaService.stopPolling();
     ptyManager.destroyAll();
   });
@@ -103,6 +110,8 @@ function setupIPC() {
   setupWorkspaceStore();
   setupMusicLibrary(() => mainWindow);
   setupFilePreview();
+  setupGitBranch();
+  setupTaskSummary();
   ipcMain.handle('history:list', () => listSessionHistory());
   ipcMain.handle('history:delete', (_event, items) => deleteSessionHistory(Array.isArray(items) ? items : []));
   ipcMain.handle('cli:detect', () => detectInstalledClis());
@@ -156,6 +165,21 @@ function setupIPC() {
 
   ipcMain.handle('quota:refresh', async (_event, cliId?: string) => {
     return quotaService.refreshQuota(cliId);
+  });
+
+  // 窗口控件覆盖层随主题变色；只接受 #rrggbb 与合理的高度
+  ipcMain.on('window:set-title-bar-overlay', (_event, opts: { color?: unknown; symbolColor?: unknown; height?: unknown }) => {
+    const hex = /^#[0-9a-f]{6}$/i;
+    if (typeof opts?.color !== 'string' || !hex.test(opts.color) || typeof opts.symbolColor !== 'string' || !hex.test(opts.symbolColor)) return;
+    const height = typeof opts.height === 'number' && opts.height >= 24 && opts.height <= 80 ? Math.round(opts.height) : 44;
+    try { mainWindow?.setTitleBarOverlay({ color: opts.color, symbolColor: opts.symbolColor, height }); } catch {}
+  });
+
+  ipcMain.handle('account:login-status', (_event, account) => checkAccountLogin(account));
+
+  // 多账号：渲染进程同步账号列表，额度服务按各账号的配置目录单独读取
+  ipcMain.handle('quota:set-accounts', async (_event, accounts: Array<{ key: string; cliId: string; configDir: string }>) => {
+    quotaService.setAccounts(Array.isArray(accounts) ? accounts : []);
   });
 
   // 读取剪贴板内容（支持纯文本，以及图片自动存盘返回临时路径）

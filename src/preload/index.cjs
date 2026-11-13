@@ -55,11 +55,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getQuota: (cliId) => ipcRenderer.invoke('quota:get', cliId),
   getAllQuotas: () => ipcRenderer.invoke('quota:get-all'),
   refreshQuota: (cliId) => ipcRenderer.invoke('quota:refresh', cliId),
+  setQuotaAccounts: (accounts) => ipcRenderer.invoke('quota:set-accounts', accounts),
+  checkAccountLogin: (account) => ipcRenderer.invoke('account:login-status', account),
+  setTitleBarOverlay: (opts) => ipcRenderer.send('window:set-title-bar-overlay', opts),
+  getGitBranches: (paths) => ipcRenderer.invoke('git:branches', paths),
+  getTaskSummaries: (tasks) => ipcRenderer.invoke('task:summaries', tasks),
   onQuotaUpdate: (callback) => {
     const subscription = (_event, value) => callback(value);
     ipcRenderer.on('quota:update', subscription);
     return () => {
       ipcRenderer.removeListener('quota:update', subscription);
+    };
+  },
+  onSystemStats: (callback) => {
+    const subscription = (_event, value) => callback(value);
+    ipcRenderer.on('system:stats', subscription);
+    return () => {
+      ipcRenderer.removeListener('system:stats', subscription);
     };
   },
 });
