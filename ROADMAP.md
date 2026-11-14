@@ -7,7 +7,7 @@
 ## 2. 进度看板
 
 ### 已完成
-- [x] 2026-11-14 11:22 新增英文版 README：`README.en.md` 与 `README.md` 内容对应，两份顶部互设语言切换链接，`AGENTS.md` 目录结构登记并要求两份同步更新。
+- [x] 2026-11-14 11:30 README 中英双语：`README.md` 改为英文（GitHub 默认展示），中文版移至 `README.zh-CN.md`，两份顶部互设语言切换链接，`AGENTS.md` 目录结构登记并要求两份同步更新。
 - [x] 2026-11-14 10:03 本周用量面板：顶栏用量按钮 / `Ctrl+Shift+U` 打开弹窗，统计本机 Claude Code、Codex、Antigravity 会话记录（含账号配置目录）中本周各 CLI × 模型的请求数、会话数与输入 / 输出 / 缓存 Tokens，并显示近 26 周每日请求数的 GitHub 风格绿色方块图（`usage-stats.ts`、`UsageModal.tsx`、IPC `usage:stats`）。
 - [x] 2026-11-14 10:47 文件预览面板新增代码缩略图（minimap）：右侧 canvas 按缩进与长度绘制每行色块，半透明滑块标出可见范围，点击 / 拖动 / 滚轮可滚动预览，目标行高亮，换主题自动重绘，内容无需滚动时不显示滑块；「设置 → 终端 → 文件预览」可开关（`previewMinimap`，默认开启，随「恢复默认设置」重置）。终端输出区的 minimap 按计划作为第二步，默认关闭，尚未开始。
 - [x] 2026-11-14 10:47 新增 Kiro IDE 的 Kiro Dark、Kiro Light 两个主题（色值取自开源还原主题 `BioHazard786/kiro-theme-vscode`），终端配色同步。

@@ -1,115 +1,115 @@
-**简体中文** | [English](README.en.md)
+**English** | [简体中文](README.zh-CN.md)
 
-# OneAI 全栈工作台
+# OneAI Workbench
 
-OneAI 是专为本地运行多个 AI 编程 CLI 工具（如 Codex、Kimi Code、OpenCode 等）打造的桌面集成工作台。
-
----
-
-## 核心特性
-
-1. **左侧文件夹树与多任务**：
-   - 任务行用各大模型官方品牌矢量 Logo（Codex、Kimi Code、OpenCode 等）区分 CLI。
-   - 一级是工作文件夹（Git 分支徽标、任务数、折叠状态），二级是该文件夹里并发运行的任务（独立状态指示灯与关闭入口）。多个文件夹的终端可以同时运行，切换任务或文件夹不会结束任何终端。
-   - 可通过 `Tab` 聚焦文件夹、任务和关闭按钮，使用 `Enter` 或空格操作；聚焦任务行时显示关闭入口。运行中和等待输入的状态点保持静态。
-   - 点击文件夹行右侧的「+」，在弹出的菜单里选 CLI（有账号的 CLI 下方另有「用 <账号> 新建」），直接用默认名称（`Task N`）、该 CLI 的默认命令在该文件夹启动，不经过弹窗；菜单里的「自定义命令与目录…」或 `Ctrl + Shift + N` 打开弹窗自定义 CLI、名称、命令与目录。`Ctrl + Shift + T` 沿用当前任务的 CLI，在当前文件夹一键新建。
-   - 任务行第二行显示该任务会话里最近一条用户消息（Claude Code、Codex、Kimi Code），还没有消息时显示「新会话 · 创建时间」（时间与顶栏时钟共用「设置 → 时间」的偏移）；其他 CLI 没有可读的会话文件，保持单行。每 5 秒刷新，停止的任务也显示。使用账号的任务读取该账号配置目录里的会话。
-   - 任务与会话的对应是启发式的：从历史恢复的任务按会话 id 对应；其余任务按「会话开始时间不早于任务创建时间」，把会话分给同文件夹、同 CLI（同账号目录）里最近创建的任务。同一文件夹里并发多个同类任务时可能对错，在 OneAI 之外手动开的同文件夹会话也可能被误归。
-   - 右键文件夹可新建任务、在资源管理器中打开、复制路径或从侧栏移除（会结束其中的终端并移除这些任务，CLI 的历史会话不受影响）。
-   - 「最近任务」区由 Claude Code、Codex、Kimi Code 的本机历史会话按文件夹归类（已在「当前任务」里的文件夹不重复，最多 8 个文件夹、每个 5 条），默认折叠；展开后点击会话即恢复为当前任务。其他 CLI 没有可读的历史会话，不会出现在这里。
-   - Git 分支徽标只读 `.git/HEAD`（向上查找仓库，兼容 worktree；游离 HEAD 显示 7 位提交号），不执行 git 命令，也不显示改动状态；文件夹列表变化、窗口获得焦点和每 30 秒刷新。
-   - 后台任务的输出停下（转为空闲）或进程退出后，侧栏该任务行显示「待查看」，折叠窄条上以实心高亮显示，收起的文件夹计数同步变色；切换到该任务后标记消失。标记只按输出静默判断，不区分「已完成」与「等待确认」，重启应用后不保留。
-   - 右键任务可重命名、重启（已停止时为启动）、复制工作目录、在资源管理器中打开目录或关闭任务；鼠标中键点击任务、或按 `Ctrl + Shift + W` 关闭当前任务，进程仍在运行时会先确认。
-   - 任务可在所属文件夹内拖拽排序（不能拖到其他文件夹），聚焦任务后也可按 `Alt + ↑/↓` 移动；`Ctrl + 数字` 的序号随顺序变化。
-   - 双击任务或按 `F2` 可重命名；`Ctrl + Tab` / `Ctrl + Shift + Tab` 切换任务，`Ctrl + 1…9` 跳到第 N 个任务，`Ctrl + Shift + B` 折叠侧栏。完整列表见「设置 → 快捷键」。
-   - 音乐目录中有音频文件时，侧栏底部显示迷你播放器；目录在「设置 → 提醒」中选择。
-   - 拖动文件夹名称左侧的排序手柄可调整文件夹顺序；聚焦手柄后也可按 `Alt + ↑/↓` 排序。
-   - 侧栏顶部显示 Logo、`All agents in one.` 标语、版本号（取自 `package.json`）与问候语。
-   - 点击顶栏左端的侧栏按钮可折叠或展开导航栏；折叠状态会保存，当前终端继续运行。折叠后保留窄条：每个文件夹一个按钮（点击弹出 CLI 菜单新建任务），其下是任务序号按钮（点击切换），底部保留添加文件夹与设置。
-
-2. **右上方顶栏单行横排实时额度**：
-   - 纯扁平单行横向纯文字排版（如 `Tokens: 8.2M • Cost: $4.29 • 5h: 82% (2h 45m) • 7d: 65% (Resets Sun) • Model: Sonnet 5.5 medium ↻`）。
-   - 严格遵循零弹窗、零悬浮窗、零遮挡原则，集成倒计时与极简刷新。
-   - 搜索、清屏、重启和日志导出入口直接显示在会话状态旁；启动中禁用重启按钮。顶栏空间不足时依次收起时钟、网速、内存、CPU、Tokens / Cost、额度重置时间和模型名，任务标题自动截断；收起的额度信息可在鼠标悬停提示中查看。
-   - 没有活动终端会话时不显示额度与刷新按钮。Claude Code 的模型与推理等级取自 statusLine 快照，Codex 取最近一轮会话记录（之后改过 `config.toml` 时以配置为准），会话内切换后随即更新。
-   - 顶栏时钟默认显示系统时间，可在「设置 → 时间」中设置增加的小时数（-24 到 24）。
-   - Tokens 与 Cost 是「最近活跃会话」的累计值：Claude Code 的 Tokens 从会话记录累计（输入 + 输出 + 缓存读写，不含子代理的独立记录），Cost 取自 statusLine 快照；Codex 只有 Tokens（取最新会话的累计 token），没有 Cost；其他 CLI 不显示。多个同类会话并行时无法区分是哪一个。
-   - 顶栏右侧另有整机 `CPU / Mem / Net`，每 2 秒刷新，与当前是否有终端无关；窗口最小化时暂停采样。网速只统计状态为 Up 的物理网卡（不含 VPN / 代理的虚拟网卡与本机回环），需要系统自带的 Windows PowerShell。
-
-   - 原生标题栏已隐藏：顶栏与侧栏品牌头部可拖动窗口，最小化 / 最大化 / 关闭按钮在右上角，颜色和高度随主题与界面缩放同步。
-   - 没有活动任务时，顶栏左侧显示新任务将要启动的文件夹与 Git 分支；中间区域列出最近 3 条历史会话（点击恢复）和各 CLI 的新建按钮。
-   - 顶栏右侧的历史按钮（或 `Ctrl + Shift + H`）打开历史会话抽屉：按今天 / 昨天 / 更早分段，显示文件夹名、Git 分支和相对时间，已在侧栏打开的会话标「已打开」，可按 CLI 筛选、搜索和删除（删除会同时删除本机会话文件）。
-   - 历史按钮左侧的用量按钮（或 `Ctrl + Shift + U`）打开「本周用量」面板：统计本机 Claude Code、Codex、Antigravity、Pi 的会话记录（含已配置账号的目录；Codex 同时读取 `sessions` 与 `archived_sessions`，并支持已压缩的 `.jsonl.zst`，Codex 自动审查子会话排在 Codex 组末尾并标「子会话」），按 CLI → 账号 → 模型分组（每组带请求数与 Tokens 小计；某个 CLI 只有默认账号时不多显示账号一层，账号名取自「设置 → 账号」，默认账号显示为「默认账号」；Antigravity、Pi 无法区分账号，统一归默认账号），列出本周（周一起）各 CLI 下各模型的请求数、会话数和输入 / 输出 / 缓存 Tokens，并附近 26 周每日请求数的绿色方块图（类似 GitHub 贡献图，颜色越深当天请求越多，悬停显示各 CLI（及账号）的请求数）。请求数为模型回复次数；Antigravity 记录里没有模型字段，模型名按会话内的切换记录推断；Kimi Code、OpenCode 暂不统计（缺少可核对的本机会话样本），只存在于 Codex 的 SQLite 线程库（`thread_history_1.sqlite`）而没有会话文件的对话也统计不到；首次打开需解压历史会话，可能要几秒，之后走缓存；本机只保留一段时间的会话记录，更早的日期显示为空。
-
-3. **高性能保活终端视窗（Keep-Alive Viewport）**：
-   - 基于 `@xterm/xterm` 与 Windows ConPTY（`node-pty`）底层原生驱动。
-   - 终端输出中指向任务工作目录内真实文件的路径（绝对或相对，可带 `:行号`）会显示为链接，按住 `Ctrl` 单击后在终端右侧打开只读预览面板（网址同样按住 `Ctrl` 单击打开），支持文本和图片，面板宽度可拖拽；文本预览右侧带有类似 VS Code 的代码缩略图（minimap），显示可见范围，点击或拖动可快速滚动，可在「设置 → 终端 → 文件预览」中开关（默认开启）；带行号时定位并高亮该行，预览文字可选中复制，再次点击路径或点刷新按钮会重新读取文件。超过 1 MB 的文本、超过 5 MB 的图片、二进制文件和工作目录外的文件不预览。
-   - 在 AI CLI 任务中按 `Shift + Enter` 在输入框内换行（系统终端任务保持普通回车）；`Ctrl + Shift + F` 搜索终端内容，高亮全部匹配并显示匹配数量。
-   - 导出与复制的会话文本取自终端实际渲染的内容（含回滚区，最多 5000 行）。
-   - 仍有终端进程运行时关闭窗口会先确认。
-   - 切换左侧会话与子任务时，DOM 采用保活显隐机制，进程持续运行，输出与上下文绝不中断丢失。
-   - 自适应窗口缩放，自动重算字符矩阵行高列宽。
-
-4. **工作文件夹**：
-   - 点击侧栏底部「添加文件夹」，选择一个本地文件夹加入侧栏；只加入，不结束任何已在运行的终端。没有活动任务时，新任务默认在最近使用的文件夹启动。
-   - 文件夹列表、各文件夹的任务和当前选择整体保存，重启后恢复（任务状态为已停止，选中时再启动）。
-   - 从旧版升级时，首次启动会把旧版「每个文件夹各存一份」的任务按各自目录合并进来（空工作区不导入）；旧数据原样保留，不删除。
-   - 新建任务弹窗的「工作目录」可改成其他文件夹，任务会出现在对应的文件夹下。
-
-5. **主题色设置**：
-   - 点击左下角设置按钮，可选择「随系统」「浅色」「深色」。选择即时生效并保存在本地；「随系统」会在系统外观变化时同步切换。
-   - 「设置 → 外观」另有护眼配色（豆沙绿、羊皮纸、暖夜、北极灰蓝）和编辑器配色：Darcula、Sublime Material，Sublime Text 内置的 Monokai、Mariana、Breakers、Solarized Dark、Solarized Light、Cobalt，以及 IntelliJ IDEA 自带的 IntelliJ Light、IDEA Light、IDEA Dark（新版界面）、IDEA 高对比度，以及 Kiro IDE 的 Kiro Dark、Kiro Light；终端配色同步切换。
-   - 界面配色统一由语义颜色变量控制；任务名和主要额度文字使用 13px，辅助信息至少为 12px（默认 UI 缩放下）。
-
-6. **多账号（Codex、Claude Code、Kimi Code）**：
-   - 在「设置 → 账号」为这三个 CLI 各自添加多个账号。每个账号是一个独立的配置目录（登录凭据与会话记录都在其中），启动任务时分别注入 `CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`KIMI_CODE_HOME`；目录不存在时自动创建。可选附加环境变量（如代理），以明文保存在本机应用设置中，不要填写密钥。
-   - 点击账号的「登录」，会在该账号环境下新开终端任务运行 `codex login` / `claude auth login` / `kimi login`。列表中的登录状态来自 `codex login status` / `claude auth status`；Kimi Code 没有状态命令，只检查凭据文件是否存在。OneAI 不复制、不读取凭据。
-   - 新建任务弹窗可选账号，文件夹「+」菜单里每个有账号的 CLI 下方提供「用 <账号> 新建」，任务行与顶栏面包屑显示账号名。重启沿用任务绑定的账号；账号配置被删除后该任务拒绝启动，不会回落到默认账号。「恢复默认设置」不会清除账号。
-   - 顶栏额度跟随任务的账号：Codex 与 Kimi Code 读取该账号目录；Claude Code 的非默认账号只显示模型与推理等级，额度显示「--」（额度来自共用的 statusLine 快照，无法区分账号）。
-
-7. **工作时长提醒**：
-   - OneAI 打开满设定时长（默认 1 小时，可设 1 到 12 小时）后显示需要手动关闭的休息提醒弹框，并默认语音播报一次，内容为「主人您已经工作 N 小时了，该休息一下了。」（N 为设定的小时数）；可在「设置 → 提醒」中调整时长或关闭语音，弹框仍会出现。关闭应用后计时清零。
+OneAI is a desktop workbench for running several local AI coding CLIs (Codex, Claude Code, Kimi Code, OpenCode and more) side by side. Every task runs in its own real terminal, and sessions stay alive while you switch between tasks and folders.
 
 ---
 
-## 技术栈
+## Features
 
-- **桌面运行时**：Electron 31 + Node.js
-- **系统伪终端底层**：`node-pty`（调用 Windows ConPTY API）
-- **前端与终端引擎**：React 18 + TypeScript + Tailwind CSS + Lucide React + `@xterm/xterm`
-- **构建管道**：Vite 5 + `vite-plugin-electron`
+1. **Folder tree and multiple tasks (left sidebar)**
+   - Each task row shows the official brand logo of its CLI (Codex, Kimi Code, OpenCode and others).
+   - The first level is the working folder (Git branch badge, task count, collapse state). The second level is the tasks running concurrently in that folder, each with its own status light and close button. Terminals in several folders run at the same time, and switching tasks or folders never ends a terminal.
+   - `Tab` moves focus across folders, tasks and close buttons, and `Enter` or `Space` activates them. The close button appears when a task row has focus. Running and waiting status dots stay static.
+   - The "+" on a folder row opens a CLI menu. Choosing a CLI starts a task in that folder immediately with the default name (`Task N`) and the CLI's default command, with no dialog. CLIs that have accounts also get a "New with <account>" entry. "Custom command and directory..." in the menu, or `Ctrl + Shift + N`, opens a dialog to set the CLI, name, command and directory. `Ctrl + Shift + T` creates a task in the current folder with the current task's CLI.
+   - The second line of a task row shows the latest user message in that task's session (Claude Code, Codex, Kimi Code). A session with no message yet shows "New session · creation time", using the same offset as the top bar clock (Settings → Time). Other CLIs have no readable session file and stay single-line. It refreshes every 5 seconds, stopped tasks included. Tasks with an account read sessions from that account's config directory.
+   - The task-to-session mapping is heuristic. A task restored from history is matched by session id. Other tasks are matched by "session start time is not earlier than the task creation time", assigning the session to the most recently created task with the same folder and CLI (and the same account directory). With several tasks of the same kind running concurrently in one folder the match can be wrong, and sessions you start by hand outside OneAI in the same folder can be misattributed.
+   - Right-click a folder to create a task, open it in File Explorer, copy its path, or remove it from the sidebar. Removing ends its terminals and removes its tasks, and the CLIs' history sessions are not affected.
+   - The "Recent tasks" section groups local Claude Code, Codex and Kimi Code history sessions by folder. Folders already under "Current tasks" are not repeated, with at most 8 folders and 5 sessions each. It is collapsed by default, and clicking a session restores it as a current task. CLIs without readable history do not appear here.
+   - The Git branch badge only reads `.git/HEAD`. It searches upward for the repository, supports worktrees, shows a 7-character commit for a detached HEAD, runs no git command and shows no change status. It refreshes when the folder list changes, when the window gains focus, and every 30 seconds.
+   - When a background task stops producing output (turns idle) or its process exits, its sidebar row shows "Needs review". On the collapsed rail the mark is a solid highlight, and the count of a collapsed folder changes color with it. The mark disappears once you switch to the task. It is based on output silence only, so it does not distinguish "finished" from "waiting for confirmation", and it is not kept after restarting the app.
+   - Right-click a task to rename, restart (start, when stopped), copy the working directory, open the directory in File Explorer, or close the task. Middle-click a task, or press `Ctrl + Shift + W`, to close the current task. A task whose process is still running asks for confirmation first.
+   - Tasks can be reordered by dragging within their folder (not across folders), or with `Alt + ↑/↓` when a task has focus. The numbers of `Ctrl + digit` follow the order.
+   - Double-click a task or press `F2` to rename it. `Ctrl + Tab` / `Ctrl + Shift + Tab` switch tasks, `Ctrl + 1…9` jumps to the Nth task, and `Ctrl + Shift + B` collapses the sidebar. The full list is in Settings → Shortcuts.
+   - When the music directory contains audio files, a mini player appears at the bottom of the sidebar. The directory is chosen in Settings → Reminders.
+   - Drag the handle left of a folder name to reorder folders, or focus the handle and press `Alt + ↑/↓`.
+   - The top of the sidebar shows the logo, the `All agents in one.` tagline, the version (taken from `package.json`) and a greeting.
+   - The sidebar button at the left end of the top bar collapses or expands the navigation. The state is saved and the current terminals keep running. A collapsed sidebar keeps a narrow rail: one button per folder (click to open the CLI menu and create a task), task number buttons below it (click to switch), and Add folder and Settings at the bottom.
+
+2. **Single-line live quota in the top bar (top right)**
+   - Flat, single-line plain text, for example `Tokens: 8.2M • Cost: $4.29 • 5h: 82% (2h 45m) • 7d: 65% (Resets Sun) • Model: Sonnet 5.5 medium ↻`.
+   - No popups, no floating cards, no overlays. It includes a countdown and a minimal refresh control.
+   - Search, clear screen, restart and log export sit right next to the session status, and restart is disabled while a task is starting. When space runs out, the bar collapses the clock, network speed, memory, CPU, Tokens / Cost, quota reset time and model name in that order, and truncates the task title. Collapsed quota details remain available in the hover tooltip.
+   - Quota and the refresh button are hidden when there is no active terminal session. For Claude Code, the model and reasoning level come from the statusLine snapshot. For Codex they come from the latest turn in the session log (or from `config.toml` if it was changed afterwards), and they update right after you switch inside the session.
+   - The top bar clock shows system time by default. Settings → Time lets you add an offset of -24 to 24 hours.
+   - Tokens and Cost are cumulative values of the most recently active session. Claude Code Tokens are accumulated from the session log (input + output + cache read and write, excluding separate subagent records), and Cost comes from the statusLine snapshot. Codex has Tokens only (the cumulative tokens of the latest session) and no Cost. Other CLIs show neither. When several sessions of the same CLI run in parallel, they cannot be told apart.
+   - The right side of the top bar also shows machine-wide `CPU / Mem / Net`, refreshed every 2 seconds regardless of whether a terminal is open, and paused while the window is minimized. Network speed counts only physical adapters in the Up state (no VPN or proxy virtual adapters, no loopback) and needs the Windows PowerShell that ships with the system.
+
+   - The native title bar is hidden. The top bar and the sidebar brand header drag the window, and the minimize / maximize / close buttons are at the top right, with color and height following the theme and UI scale.
+   - With no active task, the left of the top bar shows the folder and Git branch where a new task will start. The middle area lists the 3 most recent history sessions (click to restore) and a new-task button for each CLI.
+   - The history button at the right of the top bar (or `Ctrl + Shift + H`) opens the history drawer. Sessions are grouped into Today / Yesterday / Earlier with folder name, Git branch and relative time. Sessions already open in the sidebar are marked "Open". You can filter by CLI, search, and delete (deleting also removes the local session file).
+   - The usage button left of the history button (or `Ctrl + Shift + U`) opens the "Weekly usage" panel. It reads local session records of Claude Code, Codex, Antigravity and Pi, including the directories of configured accounts. Codex is read from both `sessions` and `archived_sessions`, including compressed `.jsonl.zst` files, and Codex auto-review child sessions are listed at the end of the Codex group, marked "Child session". Rows are grouped CLI → account → model, each group with request and Token subtotals. A CLI that has only the default account does not show the account level. Account names come from Settings → Accounts, and the default account is shown as "Default account". Antigravity and Pi cannot tell accounts apart, so they all count under the default account. For this week (starting Monday) it lists requests, sessions and input / output / cache Tokens per model under each CLI, plus a green square chart of daily requests over the last 26 weeks, similar to the GitHub contribution graph (darker means more requests that day, and hovering shows the requests per CLI and account). A request is one model reply. Antigravity records have no model field, so the model name is inferred from switch records inside the session. Kimi Code and OpenCode are not counted yet, for lack of verifiable local session samples. Conversations that exist only in Codex's SQLite thread store (`thread_history_1.sqlite`) without a session file are not counted either. The first open has to decompress history sessions and can take a few seconds, after which results come from a cache. The machine keeps session records for a limited time, so earlier dates show as empty.
+
+3. **High-performance keep-alive terminal viewport**
+   - Built on `@xterm/xterm` and the native Windows ConPTY driver (`node-pty`).
+   - Paths in terminal output that point to real files inside the task's working directory (absolute or relative, optionally with `:line`) are rendered as links. `Ctrl` + click opens a read-only preview panel on the right of the terminal, and URLs also open with `Ctrl` + click. The panel supports text and images, and its width is draggable. Text previews carry a VS Code style code minimap on the right that shows the visible range, and clicking or dragging it scrolls quickly. It can be toggled in Settings → Terminal → File preview (on by default). With a line number the preview jumps to and highlights that line. Preview text can be selected and copied, and clicking the path again or the refresh button re-reads the file. Text over 1 MB, images over 5 MB, binary files and files outside the working directory are not previewed.
+   - In AI CLI tasks, `Shift + Enter` inserts a newline in the input box (system terminal tasks keep the normal Enter). `Ctrl + Shift + F` searches terminal content, highlights all matches and shows the match count.
+   - Exported and copied session text is taken from what the terminal actually renders, scrollback included (up to 5000 lines).
+   - Closing the window while terminal processes are still running asks for confirmation first.
+   - When you switch sessions and subtasks in the sidebar, the DOM is shown and hidden rather than destroyed, so processes keep running and output and context are never interrupted or lost.
+   - It adapts to window resizing and recalculates character rows and columns automatically.
+
+4. **Working folders**
+   - "Add folder" at the bottom of the sidebar adds a local folder. It only adds, and never ends terminals that are already running. With no active task, new tasks start in the most recently used folder by default.
+   - The folder list, the tasks of each folder and the current selection are saved together and restored after a restart (tasks come back as stopped and start when selected).
+   - When upgrading from an older version, the first launch merges the old per-folder task stores by directory (empty workspaces are not imported). The old data is kept as is and not deleted.
+   - The "Working directory" in the new task dialog can be changed to another folder, and the task then appears under that folder.
+
+5. **Themes**
+   - The settings button at the bottom left offers "System", "Light" and "Dark". The choice takes effect immediately and is saved locally, and "System" follows the system appearance.
+   - Settings → Appearance also has eye-care palettes (Bean Green, Parchment, Warm Night, Arctic Gray Blue) and editor palettes: Darcula, Sublime Material, the built-in Sublime Text themes Monokai, Mariana, Breakers, Solarized Dark, Solarized Light and Cobalt, the bundled IntelliJ IDEA themes IntelliJ Light, IDEA Light, IDEA Dark (new UI) and IDEA High Contrast, and Kiro IDE's Kiro Dark and Kiro Light. Terminal colors switch along with them.
+   - Interface colors are all driven by semantic color variables. Task names and main quota text use 13px, and secondary text is at least 12px (at the default UI scale).
+
+6. **Multiple accounts (Codex, Claude Code, Kimi Code)**
+   - Settings → Accounts lets you add several accounts for each of these three CLIs. An account is an independent config directory (credentials and session records both live in it). When a task starts, `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and `KIMI_CODE_HOME` are injected respectively, and a missing directory is created automatically. Optional extra environment variables (such as a proxy) are stored as plain text in the local app settings, so do not put secrets there.
+   - "Log in" on an account opens a new terminal task in that account's environment running `codex login` / `claude auth login` / `kimi login`. The login state in the list comes from `codex login status` / `claude auth status`. Kimi Code has no status command, so OneAI only checks whether the credentials file exists. OneAI never copies or reads credentials.
+   - The new task dialog lets you pick an account, and in the folder "+" menu every CLI with accounts gets a "New with <account>" entry. The task row and the top bar breadcrumb show the account name. A restart keeps the account the task is bound to. If the account configuration is deleted, the task refuses to start and does not fall back to the default account. "Restore defaults" does not clear accounts.
+   - Top bar quota follows the task's account. Codex and Kimi Code read from that account's directory. For a non-default Claude Code account, only the model and reasoning level are shown and quota reads "--", because quota comes from a shared statusLine snapshot that cannot tell accounts apart.
+
+7. **Work-time reminder**
+   - After OneAI has been open for the set time (1 hour by default, adjustable from 1 to 12 hours), a break reminder dialog appears that must be closed manually, and by default a voice message is read out once. Settings → Reminders adjusts the duration or turns off the voice, and the dialog still appears. Closing the app resets the timer.
 
 ---
 
-## 快速上手
+## Tech stack
 
-### 1. 安装依赖
+- **Desktop runtime**: Electron 31 + Node.js
+- **System pseudo terminal**: `node-pty` (Windows ConPTY API)
+- **Frontend and terminal engine**: React 18 + TypeScript + Tailwind CSS + Lucide React + `@xterm/xterm`
+- **Build pipeline**: Vite 5 + `vite-plugin-electron`
+
+---
+
+## Quick start
+
+### 1. Install dependencies
 ```bash
 npm install
 ```
 
-### 2. 启动开发工作台
+### 2. Start the dev workbench
 ```bash
 npm run dev
 ```
 
-### 3. 构建打包
+### 3. Build and package
 ```bash
 npm run build
-npm run build:win        # 安装版：release/OneAI-Setup-<version>.exe
-npm run build:portable   # 便携版（可选）：release/OneAI-Portable-<version>.exe
+npm run build:win        # Installer: release/OneAI-Setup-<version>.exe
+npm run build:portable   # Portable (optional): release/OneAI-Portable-<version>.exe
 ```
 
-旧产物被占用、无法覆盖时，可将新产物写入独立目录：
+If an old artifact is locked and cannot be overwritten, write the new one to a separate directory:
 
 ```bash
 npm run build:win -- --config.directories.output=release/ui-polish
 ```
 
-### 4. 界面回归检查
+### 4. UI regression check
 
 ```bash
 npm run check:ui
 ```
 
-使用隐藏 Electron 窗口检查主题配色、状态文案、字号、键盘操作、不同宽度下的顶栏布局、侧栏的待查看标记、右键菜单与任务排序，以及终端粘贴、搜索、链接定位和文件预览；检查产物写入 `.tmp/ui-polish/`。
+It uses a hidden Electron window to check theme colors, status text, font sizes, keyboard operation, the top bar layout at different widths, the sidebar "Needs review" mark, context menus and task ordering, plus terminal paste, search, link targeting and file preview. Check artifacts are written to `.tmp/ui-polish/`.
