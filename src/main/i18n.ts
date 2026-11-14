@@ -2,6 +2,10 @@ import { isLanguage, Language, translate } from '../shared/i18n';
 
 let current: Language = 'zh-CN';
 
+export function getLanguage(): Language {
+  return current;
+}
+
 export function setLanguage(language: unknown): void {
   if (isLanguage(language)) current = language;
 }

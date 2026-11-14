@@ -95,7 +95,7 @@ export const UsageModal: React.FC<UsageModalProps> = ({ isOpen, onClose, account
       const cli = key.slice(0, split) as UsageCli;
       const account = stats.accounts.find((item) => item.cliId === cli && item.accountId === key.slice(split + 1));
       const showAccount = account && ((accountCount.get(cli) ?? 0) > 1 || account.accountId !== 'default');
-      return `${CLI_LABELS[cli] ?? cli}${showAccount ? `（${account.name}）` : ''}`;
+      return showAccount ? t('{cli}（{account}）', { cli: CLI_LABELS[cli] ?? cli, account: account.name }) : (CLI_LABELS[cli] ?? cli);
     };
     return {
       weeks,

@@ -14,7 +14,7 @@ import { detectInstalledClis, listKnownClis } from './cli-detect';
 import { setupWorkspaceStore } from './workspace-store';
 import { setupMusicLibrary } from './music-library';
 import { setupFilePreview } from './file-preview';
-import { setLanguage, t } from './i18n';
+import { getLanguage, setLanguage, t } from './i18n';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -117,7 +117,12 @@ function setupIPC() {
   ipcMain.handle('history:list', () => listSessionHistory());
   ipcMain.handle('history:delete', (_event, items) => deleteSessionHistory(Array.isArray(items) ? items : []));
   ipcMain.handle('usage:stats', (_event, accounts) => getUsageStats(accounts));
-  ipcMain.handle('app:set-language', (_event, language) => { setLanguage(language); });
+  ipcMain.handle('app:set-language', (_event, language) => {
+    const before = getLanguage();
+    setLanguage(language);
+    // 额度提示等文案已按旧语言缓存，语言变化后立即重新读取一次
+    if (getLanguage() !== before) void quotaService.refreshAllQuotas();
+  });
   ipcMain.on('app:home-dir', (event) => { event.returnValue = app.getPath('home'); });
   ipcMain.handle('cli:known', () => listKnownClis());
   ipcMain.handle('cli:detect', (_event, custom) => detectInstalledClis(Array.isArray(custom) ? custom : []));

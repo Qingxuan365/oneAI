@@ -495,4 +495,8 @@ export const EN: Record<string, string> = {
   '请填写启动命令。': 'Enter a start command.',
   '启动命令只能是一行。': 'The start command must be a single line.',
   '提醒': 'Reminders',
+  '（{text}）': ' ({text})',
+  '{label}（{status}）': '{label} ({status})',
+  '{label}，{status}': '{label}, {status}',
+  '{cli}（{account}）': '{cli} ({account})',
 };

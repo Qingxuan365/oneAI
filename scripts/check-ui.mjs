@@ -22,7 +22,7 @@ await build({
     import { UsageModal } from './src/renderer/src/components/UsageModal';
     import { SettingsModal } from './src/renderer/src/components/SettingsModal';
     import { OnboardingModal } from './src/renderer/src/components/OnboardingModal';
-    import { setLanguage } from './src/renderer/src/i18n';
+    import { setLanguage, t } from './src/renderer/src/i18n';
     import { Terminal } from '@xterm/xterm';
     window.electronAPI = { getHomeDir: () => 'C:/Users/tester', onWindowMaximizedChange: callback => { window.setMaximized = callback; return () => {}; }, isWindowMaximized: async () => false,
       onSystemStats: callback => { window.pushStats = callback; return () => {}; },
@@ -54,16 +54,16 @@ await build({
       // 带账号的夹具：Codex 有默认账号和 alt 账号，Claude 与 Antigravity 只有默认账号
       if (!empty) days[100] = { date: days[100].date, requests: 9, by: { 'claude:default': 2, 'codex:default': 3, 'codex:alt-id': 4 } };
       const accounts = empty ? [] : [
-        { cliId: 'claude', accountId: 'default', name: '默认账号' },
-        { cliId: 'codex', accountId: 'default', name: '默认账号' },
+        { cliId: 'claude', accountId: 'default', name: t('默认账号') },
+        { cliId: 'codex', accountId: 'default', name: t('默认账号') },
         { cliId: 'codex', accountId: 'alt-id', name: 'alt' },
-        { cliId: 'agy', accountId: 'default', name: '默认账号' },
-        { cliId: 'pi', accountId: 'default', name: '默认账号' },
+        { cliId: 'agy', accountId: 'default', name: t('默认账号') },
+        { cliId: 'pi', accountId: 'default', name: t('默认账号') },
       ];
-      const D = { accountId: 'default', accountName: '默认账号' };
+      const D = { accountId: 'default', get accountName() { return t('默认账号'); } };
       const rows = empty ? [] : [
         { cliId: 'claude', ...D, model: 'Sonnet 5.5', requests: 246, sessions: 3, input: 546, output: 560666, cacheRead: 104684416, cacheWrite: 1044518 },
-        { cliId: 'codex', ...D, model: '自动审查 (codex-auto-review)', subagent: true, requests: 21, sessions: 1, input: 93118, output: 1569, cacheRead: 1235456, cacheWrite: 0 },
+        { cliId: 'codex', ...D, model: t('自动审查 (codex-auto-review)'), subagent: true, requests: 21, sessions: 1, input: 93118, output: 1569, cacheRead: 1235456, cacheWrite: 0 },
         { cliId: 'codex', accountId: 'alt-id', accountName: 'alt', model: 'gpt-5.5', requests: 12, sessions: 1, input: 50000, output: 4000, cacheRead: 600000, cacheWrite: 0 },
         { cliId: 'codex', ...D, model: 'gpt-5.5', requests: 30, sessions: 2, input: 193118, output: 11569, cacheRead: 2235456, cacheWrite: 0 },
         { cliId: 'agy', ...D, model: 'Gemini 4 Hydrogen', requests: 103, sessions: 9, input: 1160400, output: 111017, cacheRead: 11419012, cacheWrite: 0 },
@@ -80,7 +80,7 @@ await build({
     const CLIS = [
       { id: 'codex', name: 'Codex', icon: 'codex', defaultCommand: 'codex' },
       { id: 'claude', name: 'Claude Code', icon: 'claude', defaultCommand: 'claude' },
-      { id: 'terminal', name: '系统终端', icon: 'terminal', defaultCommand: 'powershell.exe' },
+      { id: 'terminal', get name() { return t('系统终端'); }, icon: 'terminal', defaultCommand: 'powershell.exe' },
     ];
     window.draw = (status = 'running', accountName) => {
       const task = { id: 'task', groupId: 'codex', title: 'Task 1: UI regression', status, cwd: 'D:/GitHub/OneAI', createdAt: 1 };
@@ -677,6 +677,14 @@ app.whenReady().then(async () => {
       check('choosing English stores the language setting', window.currentSettings().language === 'en');
       check('settings tabs switch to English at once', tabLabels() === 'Appearance|Time|Terminal|Account|CLI|Reminders|Shortcuts');
       check('theme names follow the language', [...document.querySelectorAll('[aria-label="Eye-care theme colors"] button')].map(b => b.textContent.trim()).join('|') === 'Bean Green|Parchment|Warm Night|Arctic Gray Blue');
+      const hasCjkS = (txt) => [...txt].some(c => c.charCodeAt(0) >= 0x2e80);
+      for (const tabName of ['Time', 'Terminal', 'Account', 'CLI', 'Reminders', 'Shortcuts']) {
+        [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.trim() === tabName).click(); await tick(250);
+        const dlg = document.querySelector('[role="dialog"]');
+        const parts = [dlg.textContent, ...[...dlg.querySelectorAll('[title],[aria-label],[placeholder]')].flatMap(e => ['title', 'aria-label', 'placeholder'].map(a => e.getAttribute(a) || ''))];
+        const bad = parts.find(hasCjkS) || '';
+        check('English settings page ' + tabName + ' has no Chinese' + (bad ? ': ' + bad : ''), !bad);
+      }
       [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.trim() === 'Time').click(); await tick();
       const dateSwitch = () => document.querySelector('button[role="switch"][aria-label="Show date"]');
       check('time page has the top bar date switch, on by default', dateSwitch()?.getAttribute('aria-checked') === 'true');
@@ -715,6 +723,21 @@ app.whenReady().then(async () => {
       check('get started finishes the onboarding', window.events.includes('onboarding-finish'));
       window.drawOnboarding([]); await tick();
       check('with no CLI found the welcome step explains what to do', dialog().querySelector('[data-onboarding-no-cli]') && !dialog().querySelector('[data-onboarding-clis]'));
+      // 英文界面里不应残留中文：扫描文本与 title / aria-label / placeholder 属性
+      const hasCjk = (txt) => [...txt].some(c => c.charCodeAt(0) >= 0x2e80);
+      const findCjk = (root) => {
+        const parts = [root.textContent, ...[...root.querySelectorAll('[title],[aria-label],[placeholder]')].flatMap(e => ['title', 'aria-label', 'placeholder'].map(a => e.getAttribute(a) || ''))];
+        const hit = parts.find(hasCjk);
+        if (!hit) return '';
+        const at = [...hit].findIndex(c => c.charCodeAt(0) >= 0x2e80);
+        return '...' + [...hit].slice(Math.max(0, at - 25), at + 25).join('');
+      };
+      window.setUiLanguage('en');
+      for (const [name, fn] of [['main layout', () => window.draw()], ['sidebar', () => window.drawSidebar()], ['collapsed sidebar', () => window.drawSidebar(true)], ['account sidebar', () => window.drawAccountSidebar()], ['usage', () => window.drawUsage()], ['history', () => window.drawHistory([])]]) {
+        fn(); await tick(300);
+        const bad = findCjk(document.body);
+        check('English ' + name + ' has no Chinese' + (bad ? ': ' + bad : ''), !bad);
+      }
       window.setUiLanguage('zh-CN');
       // 顶栏日期：最大化时显示年月日与星期，设置里关闭后只显示时间
       window.hideDate = false; window.draw(); await tick();

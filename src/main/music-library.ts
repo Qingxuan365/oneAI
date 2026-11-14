@@ -25,7 +25,7 @@ function listTracks(dir?: string): { directory: string; tracks: MusicTrack[] } {
     const tracks = fs.readdirSync(directory, { withFileTypes: true })
       .filter((entry) => entry.isFile() && AUDIO_EXTENSIONS.has(path.extname(entry.name).toLowerCase()))
       .map((entry) => ({ name: path.parse(entry.name).name, path: path.join(directory, entry.name) }))
-      .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true }));
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
     return { directory, tracks };
   } catch {
     return { directory, tracks: [] };

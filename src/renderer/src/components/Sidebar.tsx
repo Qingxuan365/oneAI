@@ -8,7 +8,7 @@ import { BrandIcon } from './BrandIcon';
 import { AppLogo } from './AppLogo';
 import { MusicPlayer } from './MusicPlayer';
 import { version } from '../../../../package.json';
-import { t } from '../i18n';
+import { T, t } from '../i18n';
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -53,11 +53,11 @@ interface SidebarProps {
 
 function getGreeting(): { text: string; period: 'day' | 'evening' | 'midnight' } {
   const hour = new Date().getHours();
-  if (hour < 5) return { text: t('午夜好，早休息。'), period: 'midnight' };
-  if (hour < 11) return { text: t('早上好，你最棒。'), period: 'day' };
-  if (hour < 13) return { text: t('中午好，你最棒。'), period: 'day' };
-  if (hour < 18) return { text: t('下午好，你最棒。'), period: 'day' };
-  return { text: t('晚上好，你最棒。'), period: 'evening' };
+  if (hour < 5) return { text: T('午夜好，早休息。'), period: 'midnight' };
+  if (hour < 11) return { text: T('早上好，你最棒。'), period: 'day' };
+  if (hour < 13) return { text: T('中午好，你最棒。'), period: 'day' };
+  if (hour < 18) return { text: T('下午好，你最棒。'), period: 'day' };
+  return { text: T('晚上好，你最棒。'), period: 'evening' };
 }
 
 const BranchBadge: React.FC<{ branch?: string | null }> = ({ branch }) => (branch ? (
@@ -223,7 +223,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   data-folder-strip
                   onClick={(e) => openNewMenu(e, folder.path)}
                   onContextMenu={(e) => { e.preventDefault(); openNewMenu(e, folder.path); }}
-                  title={t('{name}{branch} -- 点击在此文件夹新建任务', { name, branch: branch ? `（${branch}）` : '' })}
+                  title={t('{name}{branch} -- 点击在此文件夹新建任务', { name, branch: branch ? t('（{text}）', { text: branch }) : '' })}
                   aria-label={t('在 {name} 中新建任务', { name })}
                   className="group relative flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-hover [&:not(:first-child)]:mt-2"
                 >
@@ -236,7 +236,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   const statusMeta = TASK_STATUS_META[task.status];
                   const isUnread = !isActive && Boolean(unreadTaskIds?.has(task.id));
                   const account = accountOf(task);
-                  const label = t('{cli}{account}：{title}', { cli: cliOf(task)?.name ?? task.groupId, account: task.accountId ? `（${account?.name ?? t('账号已删除')}）` : '', title: task.title });
+                  const label = t('{cli}{account}：{title}', { cli: cliOf(task)?.name ?? task.groupId, account: task.accountId ? t('（{text}）', { text: account?.name ?? t('账号已删除') }) : '', title: task.title });
                   return (
                     <button
                       key={task.id}
@@ -244,8 +244,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       data-task-id={task.id}
                       onClick={() => onSelectTask(task.id)}
                       aria-current={isActive ? 'true' : undefined}
-                      title={`${label}（${statusMeta.label}${isUnread ? t('，待查看') : ''}）${order <= 9 ? ` Ctrl+${order}` : ''}`}
-                      aria-label={`${label}，${statusMeta.label}${isUnread ? t('，待查看') : ''}`}
+                      title={`${t('{label}（{status}）', { label, status: `${statusMeta.label}${isUnread ? t('，待查看') : ''}` })}${order <= 9 ? ` Ctrl+${order}` : ''}`}
+                      aria-label={t('{label}，{status}', { label, status: `${statusMeta.label}${isUnread ? t('，待查看') : ''}` })}
                       className={`relative flex h-7 w-9 shrink-0 items-center justify-center rounded-md font-mono text-xs tabular-nums transition-colors ${isActive ? 'bg-selected font-medium text-fg' : isUnread ? 'bg-accent font-semibold text-canvas hover:bg-accent/85' : 'text-fg-subtle hover:bg-hover hover:text-fg'}`}
                     >
                       {order}
@@ -295,7 +295,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {greeting.period === 'day' ? <Sun size={12} className="text-warning shrink-0" aria-hidden="true" />
             : greeting.period === 'evening' ? <Moon size={12} className="text-fg-muted shrink-0" aria-hidden="true" />
               : <BedDouble size={12} className="text-accent shrink-0" aria-hidden="true" />}
-          {greeting.text}
+          {t(greeting.text)}
         </p>
       </div>
 
@@ -523,7 +523,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusMeta.dot}`} title={statusMeta.hint} aria-hidden="true" />
                             <BrandIcon icon={cli?.icon ?? task.groupId} size={14} />
                             <span className="truncate">{task.title}</span>
-                            <span className="sr-only">，{cli?.name ?? task.groupId}，{statusMeta.label}</span>
+                            <span className="sr-only">{t('，')}{cli?.name ?? task.groupId}{t('，')}{statusMeta.label}</span>
                             {task.status === 'error' && <span className="text-2xs text-danger shrink-0" aria-hidden="true">{t('启动失败')}</span>}
                             <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-1">
                               {task.accountId && (
