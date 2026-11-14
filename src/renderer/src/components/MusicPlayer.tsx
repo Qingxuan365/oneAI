@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Music, Pause, Play, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-react';
 import { t } from '../i18n';
 import { MusicStream } from '../types';
@@ -15,7 +15,11 @@ interface MusicPlayerProps {
   streams: MusicStream[];
 }
 
-const BAR_COUNT = 5;
+// 声波：BAR_COUNT 根竖条以中间为轴左右对称，高度从中心向两侧衰减；BAR_HEIGHT 为竖条最大高度（px）
+const BAR_COUNT = 11;
+const BAR_HEIGHT = 16;
+const BAR_MIN = 2.5;
+const BAR_MID = (BAR_COUNT - 1) / 2;
 
 export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams }) => {
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -31,6 +35,9 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams }) 
   const analyserRef = useRef<AnalyserNode | null>(null);
   const barsRef = useRef<Array<HTMLSpanElement | null>>([]);
   const rafRef = useRef(0);
+  const titleBoxRef = useRef<HTMLSpanElement | null>(null);
+  const titleTextRef = useRef<HTMLSpanElement | null>(null);
+  const [overflow, setOverflow] = useState(0);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const seekingRef = useRef(false);
@@ -82,7 +89,7 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams }) 
 
   const stopBars = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
-    barsRef.current.forEach((bar) => { if (bar) bar.style.transform = 'scaleY(0.2)'; });
+    barsRef.current.forEach((bar) => { if (bar) bar.style.height = `${BAR_MIN}px`; });
   }, []);
 
   const drawBars = useCallback(() => {
@@ -90,19 +97,21 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams }) 
     const data = new Uint8Array(analyser ? analyser.frequencyBinCount : 0);
     const step = () => {
       if (analyser) analyser.getByteFrequencyData(data);
-      const bucket = Math.floor(data.length * 0.6 / BAR_COUNT);
+      const bucket = Math.max(1, Math.floor(data.length * 0.6 / (BAR_MID + 1)));
       barsRef.current.forEach((bar, i) => {
         if (!bar) return;
+        const dist = Math.abs(i - BAR_MID); // 距中心的格数：低频在中间，高频在两侧
         let level: number;
         if (analyser) {
           let sum = 0;
-          for (let j = 0; j < bucket; j++) sum += data[i * bucket + j];
+          for (let j = 0; j < bucket; j++) sum += data[dist * bucket + j];
           level = Math.min(1, sum / bucket / 200);
         } else {
           // 在线音乐没有频谱数据，用平缓的装饰动画表示正在播放
-          level = 0.3 + 0.4 * Math.abs(Math.sin(performance.now() / 280 + i * 1.3));
+          level = 0.3 + 0.4 * Math.abs(Math.sin(performance.now() / 280 + i * 0.9));
         }
-        bar.style.transform = `scaleY(${Math.max(0.2, level)})`;
+        const envelope = 1 - 0.55 * (dist / BAR_MID);
+        bar.style.height = `${Math.max(BAR_MIN, BAR_HEIGHT * level * envelope)}px`;
       });
       rafRef.current = requestAnimationFrame(step);
     };
@@ -209,30 +218,49 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams }) 
 
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
+  const title = error || tracks[index]?.name || '';
+  const percent = duration > 0 ? Math.min(100, (time / duration) * 100) : 0;
+
+  // 曲名比可用宽度长时，记下溢出距离，交给 CSS 来回滚动；侧栏宽度变化时重新计算
+  useLayoutEffect(() => {
+    const box = titleBoxRef.current;
+    const text = titleTextRef.current;
+    if (!box || !text) { setOverflow(0); return; }
+    const measure = () => setOverflow(Math.max(0, Math.ceil(text.scrollWidth - box.clientWidth)));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [title, tracks.length]);
+
   // 没有本地音乐也没有在线音乐时不占用侧栏空间；播放目录和在线音乐在设置中配置
   if (tracks.length === 0) return null;
-
-  const title = error || tracks[index]?.name || '';
 
   return (
     <div role="group" aria-label={t('音乐播放器')} className="space-y-1.5 border-t border-line px-3 py-2 text-xs text-fg-muted">
       {/* 第一行：曲名与播放控制 */}
       <div className="flex items-center gap-1.5">
         {playing ? (
-          <span className="flex h-3.5 w-[18px] shrink-0 items-end gap-[2px]" aria-hidden="true">
+          <span className="flex h-4 w-[34px] shrink-0 items-center justify-center gap-[1px]" aria-hidden="true">
             {Array.from({ length: BAR_COUNT }, (_, i) => (
               <span
                 key={i}
                 ref={(el) => { barsRef.current[i] = el; }}
-                className="h-full flex-1 origin-bottom rounded-sm bg-accent"
-                style={{ transform: 'scaleY(0.2)' }}
+                className="w-[2px] rounded-full bg-accent"
+                style={{ height: BAR_MIN, opacity: 1 - 0.5 * (Math.abs(i - BAR_MID) / BAR_MID) }}
               />
             ))}
           </span>
         ) : (
-          <Music size={14} className="w-[18px] shrink-0 text-fg-subtle" aria-hidden="true" />
+          <Music size={14} className="mx-[10px] shrink-0 text-fg-subtle" aria-hidden="true" />
         )}
-        <span className={`min-w-0 flex-1 truncate ${error ? 'text-danger' : ''}`} title={title}>{title}</span>
+        <span ref={titleBoxRef} className={`min-w-0 flex-1 overflow-hidden whitespace-nowrap ${error ? 'text-danger' : ''}`} title={title}>
+          <span
+            ref={titleTextRef}
+            className={`marquee-text inline-block ${overflow > 0 ? 'is-overflow' : ''}`}
+            style={{ '--marquee-dist': `${overflow}px`, '--marquee-duration': `${Math.max(4, overflow / 20 + 3)}s` } as React.CSSProperties}
+          >{title}</span>
+        </span>
         <button type="button" className="icon-btn" onClick={() => step(-1)} title={t('上一首')} aria-label={t('上一首')}><SkipBack size={14} /></button>
         <button type="button" className="icon-btn text-fg" onClick={toggle} title={playing ? t('暂停') : t('播放')} aria-label={playing ? t('暂停') : t('播放')}>
           {playing ? <Pause size={15} /> : <Play size={15} />}
@@ -242,20 +270,24 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams }) 
       {/* 第二行：进度与音量 */}
       <div className="flex items-center gap-1.5">
         <span className="w-8 shrink-0 text-2xs tabular-nums text-fg-subtle">{fmt(time)}</span>
-        <input
-          type="range"
-          aria-label={t('播放进度')}
-          className="slim min-w-0 flex-1"
-          min={0}
-          max={duration || 0}
-          step={0.1}
-          value={Math.min(time, duration || 0)}
-          disabled={duration === 0}
-          onPointerDown={() => { seekingRef.current = true; }}
-          onChange={(e) => setTime(Number(e.target.value))}
-          onPointerUp={commitSeek}
-          onKeyUp={commitSeek}
-        />
+        <div className={`seekbar min-w-0 flex-1 ${duration === 0 ? 'is-disabled' : ''} ${playing ? 'is-playing' : ''}`}>
+          {duration > 0 && <div className="seekbar-fill" style={{ width: `${percent}%` }} />}
+          {duration > 0 && <span className="seekbar-text" aria-hidden="true">{Math.floor(percent)}%</span>}
+          <input
+            type="range"
+            aria-label={t('播放进度')}
+            className="seek-input"
+            min={0}
+            max={duration || 0}
+            step={0.1}
+            value={Math.min(time, duration || 0)}
+            disabled={duration === 0}
+            onPointerDown={() => { seekingRef.current = true; }}
+            onChange={(e) => setTime(Number(e.target.value))}
+            onPointerUp={commitSeek}
+            onKeyUp={commitSeek}
+          />
+        </div>
         <span className="w-8 shrink-0 text-right text-2xs tabular-nums text-fg-subtle">{fmt(duration)}</span>
         <button type="button" className="icon-btn" onClick={() => changeVolume(volume === 0 ? 1 : 0)} title={volume === 0 ? t('取消静音') : t('静音')} aria-label={volume === 0 ? t('取消静音') : t('静音')}>
           {volume === 0 ? <VolumeX size={14} /> : <Volume2 size={14} />}

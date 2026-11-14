@@ -601,7 +601,13 @@ html, body, #root {
 @keyframes drawer-in {
   from { transform: translateX(24px); opacity: 0; }
 }
+/* 播放器曲名过长时来回滚动：--marquee-dist 为溢出宽度，--marquee-duration 由组件按距离计算 */
+@keyframes marquee-slide {
+  0%, 15% { transform: translateX(0); }
+  85%, 100% { transform: translateX(calc(var(--marquee-dist) * -1)); }
+}
 @media (prefers-reduced-motion: no-preference) {
+  .marquee-text.is-overflow { animation: marquee-slide var(--marquee-duration) linear infinite alternate; }
   .drawer-panel { animation: drawer-in 180ms ease-out; }
   .modal-overlay { animation: overlay-in 120ms ease-out; }
   .modal-panel { animation: dialog-in 160ms ease-out; }
@@ -676,6 +682,73 @@ input[type='range'].slim::-webkit-slider-thumb {
 input[type='range'].slim:disabled {
   cursor: not-allowed;
   opacity: 0.4;
+}
+
+/* 播放器进度条：自绘轨道与填充，原生 range 透明覆盖在上面负责拖动与键盘操作；颜色全部取自主题变量 */
+.seekbar {
+  position: relative;
+  height: 14px;
+  border-radius: 7px;
+  border: 1px solid rgb(var(--color-accent) / 0.55);
+  background: rgb(var(--color-line-strong) / 0.35);
+  box-shadow: 0 0 6px rgb(var(--color-accent) / 0.25);
+  overflow: hidden;
+}
+.seekbar.is-disabled { opacity: 0.45; box-shadow: none; }
+.seekbar:focus-within { outline: 2px solid rgb(var(--color-accent) / 0.7); outline-offset: 1px; }
+.seekbar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background:
+    radial-gradient(ellipse 40px 10px at 20% 30%, rgb(255 255 255 / 0.28), transparent 70%),
+    radial-gradient(ellipse 30px 8px at 70% 70%, rgb(255 255 255 / 0.22), transparent 70%),
+    linear-gradient(90deg, rgb(var(--color-accent) / 0.55), rgb(var(--color-accent) / 0.9));
+  background-size: 64px 100%, 48px 100%, 100% 100%;
+}
+.seekbar-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgb(255 255 255 / 0.95);
+  box-shadow: 0 0 6px 1px rgb(var(--color-accent)), 0 0 2px rgb(255 255 255);
+}
+.seekbar-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: rgb(var(--color-fg));
+  text-shadow: 0 0 3px rgb(var(--color-surface)), 0 0 3px rgb(var(--color-surface));
+  pointer-events: none;
+}
+input[type='range'].seek-input {
+  -webkit-appearance: none;
+  appearance: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+input[type='range'].seek-input:disabled { cursor: not-allowed; }
+@keyframes seekbar-flow {
+  to { background-position: 64px 0, -48px 0, 0 0; }
+}
+@keyframes seekbar-glow {
+  50% { box-shadow: 0 0 10px 2px rgb(var(--color-accent)), 0 0 2px rgb(255 255 255); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .seekbar.is-playing .seekbar-fill { animation: seekbar-flow 3s linear infinite; }
+  .seekbar.is-playing .seekbar-fill::after { animation: seekbar-glow 1.6s ease-in-out infinite; }
 }
 
 /* 极细滚动条，颜色随主题 */
