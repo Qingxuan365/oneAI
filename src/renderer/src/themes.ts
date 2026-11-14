@@ -16,6 +16,12 @@ export const THEME_MODE: Record<ThemeId, 'light' | 'dark'> = {
   'solarized-dark': 'dark',
   'solarized-light': 'light',
   cobalt: 'dark',
+  'idea-classic-light': 'light',
+  'idea-light': 'light',
+  'idea-dark': 'dark',
+  'idea-contrast': 'dark',
+  'kiro-dark': 'dark',
+  'kiro-light': 'light',
 };
 
 export type ThemeGroup = 'basic' | 'eyecare' | 'editor';
@@ -36,4 +42,10 @@ export const THEME_OPTIONS: ReadonlyArray<{ id: ThemeId; label: string; group: T
   { id: 'solarized-dark', label: 'Solarized Dark', group: 'editor', swatch: ['#042029', '#268bd2'] },
   { id: 'solarized-light', label: 'Solarized Light', group: 'editor', swatch: ['#fdf6e3', '#1e76b4'] },
   { id: 'cobalt', label: 'Cobalt', group: 'editor', swatch: ['#002240', '#ff9d00'] },
+  { id: 'idea-classic-light', label: 'IntelliJ Light', group: 'editor', swatch: ['#ffffff', '#2470b3'] },
+  { id: 'idea-light', label: 'IDEA Light', group: 'editor', swatch: ['#ffffff', '#3574f0'] },
+  { id: 'idea-dark', label: 'IDEA Dark', group: 'editor', swatch: ['#1e1f22', '#3574f0'] },
+  { id: 'idea-contrast', label: 'IDEA 高对比度', group: 'editor', swatch: ['#000000', '#1aebff'] },
+  { id: 'kiro-dark', label: 'Kiro Dark', group: 'editor', swatch: ['#211d25', '#b080ff'] },
+  { id: 'kiro-light', label: 'Kiro Light', group: 'editor', swatch: ['#f2f1f4', '#7138cc'] },
 ];

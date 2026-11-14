@@ -1,17 +1,21 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import readline from 'node:readline';
+import { StringDecoder } from 'node:string_decoder';
+import { Decompress as ZstdDecompress } from 'fzstd';
 import { formatClaudeModel, quotaService } from './quota-service';
 import { isAccountCli, resolveConfigDir } from './account-env';
 
-export type UsageCli = 'claude' | 'codex' | 'agy';
+export type UsageCli = 'claude' | 'codex' | 'agy' | 'pi';
 
 export interface UsageRow {
   cliId: UsageCli;
+  accountId: string;   // OneAI 账号 id；默认账号为 'default'
+  accountName: string; // 账号名，默认账号为「默认账号」
   model: string;
   requests: number;   // 请求数：一次模型回复算一次
   sessions: number;   // 本周内出现过该模型回复的会话数
+  subagent?: boolean; // CLI 自动发起的子会话（如 Codex 自动审查），不是用户选用的模型
   input: number;      // 未命中缓存的输入 tokens
   output: number;
   cacheRead: number;
@@ -21,17 +25,20 @@ export interface UsageRow {
 export interface UsageDay {
   date: string;       // 本地日期 YYYY-MM-DD
   requests: number;
-  byCli: Partial<Record<UsageCli, number>>;
+  by: Record<string, number>; // 键为 `${cliId}:${accountId}`，值为当天该 CLI 账号的请求数
 }
+
+export interface UsageAccountInfo { cliId: UsageCli; accountId: string; name: string }
 
 export interface UsageStats {
   generatedAt: number;
   weekStart: number;  // 本周周一 00:00（本地时间）的毫秒时间戳
-  rows: UsageRow[];   // 本周各 CLI × 模型，按 tokens 降序
+  accounts: UsageAccountInfo[]; // 统计范围内出现过用量的 CLI 账号
+  rows: UsageRow[];   // 本周各 CLI × 账号 × 模型，按 tokens 降序
   days: UsageDay[];   // 周一对齐、连续的每日请求数，到本周周日为止
 }
 
-export interface UsageAccountRef { cliId: string; configDir: string }
+export interface UsageAccountRef { id: string; name: string; cliId: string; configDir: string }
 
 /** 方块图覆盖的周数（含本周）；本机会话日志只保留一段时间，更早的天数记为 0 */
 export const HEATMAP_WEEKS = 26;
@@ -48,6 +55,8 @@ interface Entry {
 
 interface FileSource {
   cliId: UsageCli;
+  accountId: string;
+  accountName: string;
   file: string;
   /** 取不到模型名时的兜底 */
   fallbackModel: () => string;
@@ -55,19 +64,37 @@ interface FileSource {
 
 const home = os.homedir();
 const AGY_ROOT = path.join(home, '.gemini', 'antigravity-cli');
+const PI_SESSIONS = path.join(home, '.pi', 'agent', 'sessions');
 
 // 单个会话文件的解析结果，按 mtime + 大小判断是否过期；会话文件只追加，未变化的文件不再重读
 const fileCache = new Map<string, { mtimeMs: number; size: number; entries: Entry[] }>();
 
 const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
 
+/** 逐行读取会话文件；Codex 会把较旧的会话压缩成 .jsonl.zst，边解压边按行回调，不整体读入内存 */
 async function readLines(file: string, onLine: (line: string) => void): Promise<void> {
-  const stream = fs.createReadStream(file, { encoding: 'utf8' });
-  const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  const decoder = new StringDecoder('utf8');
+  let pending = '';
+  const feed = (chunk: Uint8Array) => {
+    pending += decoder.write(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+    let newline: number;
+    while ((newline = pending.indexOf('\n')) >= 0) {
+      onLine(pending.slice(0, newline));
+      pending = pending.slice(newline + 1);
+    }
+  };
+  const stream = fs.createReadStream(file);
   try {
-    for await (const line of lines) onLine(line);
+    if (file.endsWith('.zst')) {
+      const zstd = new ZstdDecompress((chunk) => feed(chunk));
+      for await (const chunk of stream) zstd.push(chunk as Buffer);
+      zstd.push(new Uint8Array(0), true);
+    } else {
+      for await (const chunk of stream) feed(chunk as Buffer);
+    }
+    pending += decoder.end();
+    if (pending) onLine(pending);
   } finally {
-    lines.close();
     stream.destroy();
   }
 }
@@ -75,10 +102,13 @@ async function readLines(file: string, onLine: (line: string) => void): Promise<
 async function listJsonl(dir: string): Promise<string[]> {
   let entries: fs.Dirent[];
   try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return []; }
+  const plain = new Set(entries.filter((entry) => entry.isFile() && entry.name.endsWith('.jsonl')).map((entry) => entry.name));
   const files: string[] = [];
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isFile() && entry.name.endsWith('.jsonl')) files.push(full);
+    // 同名的明文文件优先，避免同一会话被明文与压缩两份重复计数
+    else if (entry.isFile() && entry.name.endsWith('.jsonl.zst') && !plain.has(entry.name.slice(0, -4))) files.push(full);
     else if (entry.isDirectory()) files.push(...await listJsonl(full));
   }
   return files;
@@ -110,6 +140,10 @@ async function parseClaude(file: string): Promise<Entry[]> {
   return [...byKey.values()];
 }
 
+/** codex-auto-review 是 Codex 自动审查（guardian）子会话使用的内部模型 id，加上中文说明避免被误认为主模型 */
+const AUTO_REVIEW_LABEL = '自动审查 (codex-auto-review)';
+const codexModelLabel = (model: string) => (model === 'codex-auto-review' ? AUTO_REVIEW_LABEL : model);
+
 // Codex：turn_context 给出模型，token_count 给出每次请求的用量；总量没有增长的重复事件不计
 async function parseCodex(file: string, fallbackModel: () => string): Promise<Entry[]> {
   const entries: Entry[] = [];
@@ -135,7 +169,7 @@ async function parseCodex(file: string, fallbackModel: () => string): Promise<En
       const cached = num(last.cached_input_tokens);
       entries.push({
         ts,
-        model: model || fallbackModel(),
+        model: codexModelLabel(model || fallbackModel()),
         input: Math.max(0, num(last.input_tokens) - cached),
         output: num(last.output_tokens),
         cacheRead: cached,
@@ -179,36 +213,82 @@ async function parseAgy(file: string, fallbackModel: () => string): Promise<Entr
   return entries;
 }
 
-async function collectSources(accounts: UsageAccountRef[]): Promise<FileSource[]> {
-  // 默认账号 + 各账号的独立配置目录，按目录去重
-  const claudeDirs = new Set([path.join(home, '.claude')]);
-  const codexDirs = new Set([path.join(home, '.codex')]);
-  for (const account of accounts) {
-    if (!isAccountCli(account?.cliId)) continue;
-    const dir = resolveConfigDir(account.configDir);
-    if (!dir) continue;
-    if (account.cliId === 'claude') claudeDirs.add(dir);
-    else if (account.cliId === 'codex') codexDirs.add(dir);
-  }
+const DEFAULT_ACCOUNT = { id: 'default', name: '默认账号' };
 
-  const sources: FileSource[] = [];
-  for (const dir of claudeDirs) {
-    for (const file of await listJsonl(path.join(dir, 'projects'))) sources.push({ cliId: 'claude', file, fallbackModel: () => '' });
+interface DirAccount { dir: string; id: string; name: string }
+
+/** 默认配置目录 + 各账号的独立配置目录；按目录去重，目录相同时默认账号优先（Windows 路径不区分大小写） */
+function accountDirs(defaultDir: string, cliId: 'claude' | 'codex', accounts: UsageAccountRef[]): DirAccount[] {
+  const keyOf = (dir: string) => (process.platform === 'win32' ? path.resolve(dir).toLowerCase() : path.resolve(dir));
+  const result = new Map<string, DirAccount>([[keyOf(defaultDir), { dir: defaultDir, ...DEFAULT_ACCOUNT }]]);
+  for (const account of accounts) {
+    if (account?.cliId !== cliId || typeof account.id !== 'string' || !account.id) continue;
+    const dir = resolveConfigDir(account.configDir);
+    if (!dir || result.has(keyOf(dir))) continue;
+    result.set(keyOf(dir), { dir, id: account.id, name: typeof account.name === 'string' && account.name.trim() ? account.name.trim() : account.id });
   }
-  for (const dir of codexDirs) {
-    for (const file of await listJsonl(path.join(dir, 'sessions'))) {
-      sources.push({ cliId: 'codex', file, fallbackModel: () => quotaService.getCodexInfo(dir).model });
+  return [...result.values()];
+}
+
+// Pi：每条 assistant 消息自带 provider / model / usage（输入为未命中缓存部分，与缓存读写、输出相加等于 totalTokens）；
+// 出错的请求 usage 全为 0，没有消耗，不计入
+async function parsePi(file: string): Promise<Entry[]> {
+  const entries: Entry[] = [];
+  await readLines(file, (line) => {
+    if (!line.includes('"role":"assistant"') || !line.includes('"usage"')) return;
+    try {
+      const e = JSON.parse(line);
+      const message = e.message;
+      const usage = message?.usage;
+      const ts = Date.parse(e.timestamp);
+      if (e.type !== 'message' || message?.role !== 'assistant' || !usage || typeof message.model !== 'string' || !message.model || !Number.isFinite(ts)) return;
+      const entry = {
+        ts,
+        model: message.model,
+        input: num(usage.input),
+        output: num(usage.output),
+        cacheRead: num(usage.cacheRead),
+        cacheWrite: num(usage.cacheWrite),
+      };
+      if (entry.input + entry.output + entry.cacheRead + entry.cacheWrite === 0) return;
+      entries.push(entry);
+    } catch { /* 忽略坏行 */ }
+  });
+  return entries;
+}
+
+async function collectSources(accounts: UsageAccountRef[]): Promise<FileSource[]> {
+  const valid = accounts.filter((account) => isAccountCli(account?.cliId));
+  const sources: FileSource[] = [];
+  for (const { dir, id, name } of accountDirs(path.join(home, '.claude'), 'claude', valid)) {
+    for (const file of await listJsonl(path.join(dir, 'projects'))) {
+      sources.push({ cliId: 'claude', accountId: id, accountName: name, file, fallbackModel: () => '' });
     }
   }
+  for (const { dir, id, name } of accountDirs(path.join(home, '.codex'), 'codex', valid)) {
+    // Codex 桌面应用的会话在 archived_sessions；sessions 里较新的主要是自动审查子会话，较旧的已压缩为 .zst
+    for (const sub of ['sessions', 'archived_sessions']) {
+      for (const file of await listJsonl(path.join(dir, sub))) {
+        sources.push({ cliId: 'codex', accountId: id, accountName: name, file, fallbackModel: () => quotaService.getCodexInfo(dir).model });
+      }
+    }
+  }
+  // Antigravity 的登录在系统凭据库，无法按目录区分，统一归默认账号
   let conversations: fs.Dirent[] = [];
   try { conversations = await fs.promises.readdir(path.join(AGY_ROOT, 'brain'), { withFileTypes: true }); } catch { /* 未安装 agy */ }
   for (const entry of conversations) {
     if (!entry.isDirectory()) continue;
     sources.push({
       cliId: 'agy',
+      accountId: DEFAULT_ACCOUNT.id,
+      accountName: DEFAULT_ACCOUNT.name,
       file: path.join(AGY_ROOT, 'brain', entry.name, '.system_generated', 'logs', 'transcript_full.jsonl'),
       fallbackModel: () => stripEffort(quotaService.getAgyInfo().model),
     });
+  }
+  // Pi 没有多账号，统一归默认账号
+  for (const file of await listJsonl(PI_SESSIONS)) {
+    sources.push({ cliId: 'pi', accountId: DEFAULT_ACCOUNT.id, accountName: DEFAULT_ACCOUNT.name, file, fallbackModel: () => '' });
   }
   return sources;
 }
@@ -223,7 +303,8 @@ async function loadEntries(source: FileSource, rangeStart: number): Promise<Entr
   try {
     entries = source.cliId === 'claude' ? await parseClaude(source.file)
       : source.cliId === 'codex' ? await parseCodex(source.file, source.fallbackModel)
-        : await parseAgy(source.file, source.fallbackModel);
+        : source.cliId === 'pi' ? await parsePi(source.file)
+          : await parseAgy(source.file, source.fallbackModel);
   } catch { return []; }
   fileCache.set(source.file, { mtimeMs: stat.mtimeMs, size: stat.size, entries });
   return entries;
@@ -251,11 +332,12 @@ export async function getUsageStats(accounts: unknown): Promise<UsageStats> {
 
   const days = new Map<string, UsageDay>();
   for (const day = new Date(rangeStartDate); day < rangeEnd; day.setDate(day.getDate() + 1)) {
-    days.set(dateKey(day), { date: dateKey(day), requests: 0, byCli: {} });
+    days.set(dateKey(day), { date: dateKey(day), requests: 0, by: {} });
   }
 
   const sources = await collectSources(Array.isArray(accounts) ? accounts as UsageAccountRef[] : []);
   const rows = new Map<string, UsageRow>();
+  const accountsSeen = new Map<string, UsageAccountInfo>();
   const seen = new Set<string>();
   // 只在会话文件的 mtime 落在统计范围内才读取；已读过且未变化的文件走缓存
   const liveFiles = new Set(sources.map((source) => source.file));
@@ -269,16 +351,18 @@ export async function getUsageStats(accounts: unknown): Promise<UsageStats> {
         if (seen.has(entry.key)) continue;
         seen.add(entry.key);
       }
+      const accountKey = `${source.cliId}:${source.accountId}`;
+      if (!accountsSeen.has(accountKey)) accountsSeen.set(accountKey, { cliId: source.cliId, accountId: source.accountId, name: source.accountName });
       const day = days.get(dateKey(new Date(entry.ts)));
       if (day) {
         day.requests += 1;
-        day.byCli[source.cliId] = (day.byCli[source.cliId] ?? 0) + 1;
+        day.by[accountKey] = (day.by[accountKey] ?? 0) + 1;
       }
       if (entry.ts < weekStart) continue;
-      const rowKey = `${source.cliId}\t${entry.model}`;
+      const rowKey = `${accountKey}\t${entry.model}`;
       let row = rows.get(rowKey);
       if (!row) {
-        row = { cliId: source.cliId, model: entry.model, requests: 0, sessions: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+        row = { cliId: source.cliId, accountId: source.accountId, accountName: source.accountName, model: entry.model, ...(entry.model === AUTO_REVIEW_LABEL ? { subagent: true } : {}), requests: 0, sessions: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
         rows.set(rowKey, row);
       }
       row.requests += 1;
@@ -295,6 +379,7 @@ export async function getUsageStats(accounts: unknown): Promise<UsageStats> {
   return {
     generatedAt: Date.now(),
     weekStart,
+    accounts: [...accountsSeen.values()],
     rows: [...rows.values()].sort((a, b) => total(b) - total(a) || b.requests - a.requests),
     days: [...days.values()],
   };

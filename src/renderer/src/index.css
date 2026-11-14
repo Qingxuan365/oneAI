@@ -377,6 +377,170 @@
   --color-violet: 200 150 255;
 }
 
+/*
+ * IntelliJ IDEA 自带主题：IntelliJ Light（经典浅色）、IDEA Light / IDEA Dark（新版界面）、IDEA 高对比度。
+ * 色值取自 JetBrains/intellij-community 的 intellijlaf / expUI / HighContrast 主题文件与配色方案，层级与文字梯度按本应用 token 推导。
+ */
+:root[data-theme='idea-classic-light'] {
+  color-scheme: light;
+  --color-canvas: 255 255 255;
+  --color-surface: 247 247 247;
+  --color-panel: 242 242 242;
+  --color-elevated: 255 255 255;
+  --color-muted: 247 247 247;
+  --color-control: 235 235 235;
+  --color-control-hover: 223 223 223;
+  --color-hover: 237 245 252;
+  --color-selected: 166 210 255;
+  --color-line: 209 209 209;
+  --color-line-strong: 176 176 176;
+  --color-fg: 8 8 8;
+  --color-fg-muted: 64 64 64;
+  --color-fg-subtle: 110 110 110;
+  --color-fg-faint: 128 128 128;
+  --color-accent: 36 112 179;
+  --color-primary: 73 137 204;
+  --color-primary-hover: 52 109 173;
+  --color-success: 74 146 73;
+  --color-warning: 164 103 4;
+  --color-danger: 199 34 45;
+  --color-violet: 116 68 212;
+}
+
+:root[data-theme='idea-light'] {
+  color-scheme: light;
+  --color-canvas: 255 255 255;
+  --color-surface: 250 251 252;
+  --color-panel: 247 248 250;
+  --color-elevated: 255 255 255;
+  --color-muted: 247 248 250;
+  --color-control: 235 236 240;
+  --color-control-hover: 223 225 229;
+  --color-hover: 237 243 255;
+  --color-selected: 212 226 255;
+  --color-line: 235 236 240;
+  --color-line-strong: 201 204 214;
+  --color-fg: 8 8 8;
+  --color-fg-muted: 56 58 66;
+  --color-fg-subtle: 108 112 126;
+  --color-fg-faint: 120 124 139;
+  --color-accent: 53 116 240;
+  --color-primary: 53 116 240;
+  --color-primary-hover: 51 105 214;
+  --color-success: 32 138 60;
+  --color-warning: 164 103 4;
+  --color-danger: 219 59 75;
+  --color-violet: 116 68 212;
+}
+
+:root[data-theme='idea-dark'] {
+  color-scheme: dark;
+  --color-canvas: 30 31 34;
+  --color-surface: 37 39 42;
+  --color-panel: 43 45 48;
+  --color-elevated: 47 49 53;
+  --color-muted: 43 45 48;
+  --color-control: 67 69 74;
+  --color-control-hover: 78 81 87;
+  --color-hover: 57 59 64;
+  --color-selected: 46 67 110;
+  --color-line: 57 59 64;
+  --color-line-strong: 78 81 87;
+  --color-fg: 223 225 229;
+  --color-fg-muted: 188 190 196;
+  --color-fg-subtle: 157 160 168;
+  --color-fg-faint: 134 138 145;
+  --color-accent: 107 155 250;
+  --color-primary: 53 116 240;
+  --color-primary-hover: 70 127 242;
+  --color-success: 95 173 101;
+  --color-warning: 242 197 92;
+  --color-danger: 219 92 92;
+  --color-violet: 165 113 230;
+}
+
+:root[data-theme='idea-contrast'] {
+  color-scheme: dark;
+  --color-canvas: 19 19 20;
+  --color-surface: 10 10 11;
+  --color-panel: 0 0 0;
+  --color-elevated: 24 24 26;
+  --color-muted: 10 10 11;
+  --color-control: 40 40 44;
+  --color-control-hover: 64 64 70;
+  --color-hover: 28 28 64;
+  --color-selected: 51 51 255;
+  --color-line: 128 128 128;
+  --color-line-strong: 179 179 179;
+  --color-fg: 255 255 255;
+  --color-fg-muted: 230 230 230;
+  --color-fg-subtle: 204 204 204;
+  --color-fg-faint: 175 175 175;
+  --color-accent: 26 235 255;
+  --color-primary: 0 122 144;
+  --color-primary-hover: 0 150 170;
+  --color-success: 0 230 31;
+  --color-warning: 245 130 49;
+  --color-danger: 250 50 50;
+  --color-violet: 168 128 255;
+}
+
+/*
+ * Kiro IDE：Kiro Dark / Kiro Light。色值取自还原 Kiro IDE 配色的开源 VS Code 主题 BioHazard786/kiro-theme-vscode（MIT，2025-09 更新），
+ * 并非 Kiro 官方发布；层级与文字梯度按本应用 token 推导。Kiro Light 的警告色与终端黄 / 青为保证对比度比原值更深。
+ */
+:root[data-theme='kiro-dark'] {
+  color-scheme: dark;
+  --color-canvas: 33 29 37;
+  --color-surface: 36 32 42;
+  --color-panel: 40 36 46;
+  --color-elevated: 45 40 52;
+  --color-muted: 40 36 46;
+  --color-control: 53 47 61;
+  --color-control-hover: 74 70 79;
+  --color-hover: 48 44 54;
+  --color-selected: 58 48 80;
+  --color-line: 74 70 79;
+  --color-line-strong: 106 101 113;
+  --color-fg: 242 241 244;
+  --color-fg-muted: 208 205 214;
+  --color-fg-subtle: 169 165 177;
+  --color-fg-faint: 147 143 155;
+  --color-accent: 176 128 255;
+  --color-primary: 113 56 204;
+  --color-primary-hover: 142 71 255;
+  --color-success: 128 255 181;
+  --color-warning: 255 207 153;
+  --color-danger: 255 128 128;
+  --color-violet: 142 71 255;
+}
+
+:root[data-theme='kiro-light'] {
+  color-scheme: light;
+  --color-canvas: 242 241 244;
+  --color-surface: 246 245 248;
+  --color-panel: 234 232 237;
+  --color-elevated: 255 255 255;
+  --color-muted: 234 232 237;
+  --color-control: 224 222 229;
+  --color-control-hover: 209 206 215;
+  --color-hover: 232 230 236;
+  --color-selected: 226 219 239;
+  --color-line: 193 190 198;
+  --color-line-strong: 147 143 155;
+  --color-fg: 53 47 61;
+  --color-fg-muted: 84 78 93;
+  --color-fg-subtle: 112 106 122;
+  --color-fg-faint: 122 116 132;
+  --color-accent: 113 56 204;
+  --color-primary: 113 56 204;
+  --color-primary-hover: 100 50 179;
+  --color-success: 54 124 83;
+  --color-warning: 168 98 16;
+  --color-danger: 153 51 51;
+  --color-violet: 142 71 255;
+}
+
 html, body, #root {
   height: 100%;
   width: 100%;

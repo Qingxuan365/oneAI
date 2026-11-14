@@ -32,7 +32,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
   listSessionHistory: () => ipcRenderer.invoke('history:list'),
   deleteSessionHistory: (items: Array<{ cliId: string; id: string }>) => ipcRenderer.invoke('history:delete', items),
-  getUsageStats: (accounts: Array<{ cliId: string; configDir: string }>) => ipcRenderer.invoke('usage:stats', accounts),
+  getUsageStats: (accounts: Array<{ id: string; name: string; cliId: string; configDir: string }>) => ipcRenderer.invoke('usage:stats', accounts),
   detectClis: () => ipcRenderer.invoke('cli:detect'),
 
   // PTY 终端管理

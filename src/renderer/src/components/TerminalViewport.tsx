@@ -300,6 +300,54 @@ const COBALT_TERMINAL_THEME = {
   brightMagenta: '#e0b0ff', brightCyan: '#8cf0f3', brightWhite: '#ffffff',
 };
 
+const IDEA_CLASSIC_LIGHT_TERMINAL_THEME = {
+  background: '#ffffff', foreground: '#080808', cursor: '#000000', selectionBackground: '#a6d2ff',
+  black: '#000000', red: '#c7222d', green: '#4a9249', yellow: '#a46704', blue: '#2470b3',
+  magenta: '#7444d4', cyan: '#077a7f', white: '#6e6e6e', brightBlack: '#808080',
+  brightRed: '#db3b4b', brightGreen: '#369650', brightYellow: '#c27d04', brightBlue: '#3574f0',
+  brightMagenta: '#834df0', brightCyan: '#039ba1', brightWhite: '#080808',
+};
+
+const IDEA_LIGHT_TERMINAL_THEME = {
+  background: '#ffffff', foreground: '#080808', cursor: '#080808', selectionBackground: '#a6d2ff',
+  black: '#27282e', red: '#db3b4b', green: '#208a3c', yellow: '#a46704', blue: '#3369d6',
+  magenta: '#7444d4', cyan: '#077a7f', white: '#6c707e', brightBlack: '#818594',
+  brightRed: '#ad2b38', brightGreen: '#1f7536', brightYellow: '#8a5600', brightBlue: '#315fbd',
+  brightMagenta: '#643cb8', brightCyan: '#096a6e', brightWhite: '#080808',
+};
+
+const IDEA_DARK_TERMINAL_THEME = {
+  background: '#1e1f22', foreground: '#bcbec4', cursor: '#ced0d6', selectionBackground: '#2e436e',
+  black: '#4e5157', red: '#db5c5c', green: '#5fad65', yellow: '#f2c55c', blue: '#548af7',
+  magenta: '#a571e6', cyan: '#42b1a4', white: '#bcbec4', brightBlack: '#6f737a',
+  brightRed: '#e37774', brightGreen: '#73bd79', brightYellow: '#f5d273', brightBlue: '#6b9bfa',
+  brightMagenta: '#b589ec', brightCyan: '#60c0b5', brightWhite: '#dfe1e5',
+};
+
+const IDEA_CONTRAST_TERMINAL_THEME = {
+  background: '#131314', foreground: '#ffffff', cursor: '#ffffff', selectionBackground: '#3333ff',
+  black: '#808080', red: '#fa3232', green: '#54b33e', yellow: '#ffbf66', blue: '#33ccff',
+  magenta: '#ff96ff', cyan: '#37cccc', white: '#ffffff', brightBlack: '#b3b3b3',
+  brightRed: '#ff5a5a', brightGreen: '#6fd458', brightYellow: '#ffd08a', brightBlue: '#66d9ff',
+  brightMagenta: '#ffb3ff', brightCyan: '#5fe0e0', brightWhite: '#ffffff',
+};
+
+const KIRO_DARK_TERMINAL_THEME = {
+  background: '#211d25', foreground: '#f2f1f4', cursor: '#b080ff', selectionBackground: '#b080ff40',
+  black: '#4a464f', red: '#ff8080', green: '#80ffb5', yellow: '#fff2b3', blue: '#8dc8fb',
+  magenta: '#8e47ff', cyan: '#80f4ff', white: '#d0cdd6', brightBlack: '#938f9b',
+  brightRed: '#ffa3a3', brightGreen: '#a3ffc9', brightYellow: '#fff7cc', brightBlue: '#a9d9fc',
+  brightMagenta: '#b080ff', brightCyan: '#a3f8ff', brightWhite: '#ffffff',
+};
+
+const KIRO_LIGHT_TERMINAL_THEME = {
+  background: '#f2f1f4', foreground: '#352f3d', cursor: '#7138cc', selectionBackground: '#7138cc33',
+  black: '#352f3d', red: '#993333', green: '#367c53', yellow: '#a38400', blue: '#2d6a9f',
+  magenta: '#8e47ff', cyan: '#0a7f8a', white: '#6b6573', brightBlack: '#938f9b',
+  brightRed: '#7a2626', brightGreen: '#2a6342', brightYellow: '#806800', brightBlue: '#235480',
+  brightMagenta: '#7138cc', brightCyan: '#086772', brightWhite: '#352f3d',
+};
+
 const TERMINAL_THEMES: Record<ThemeId, typeof DARK_TERMINAL_THEME> = {
   light: LIGHT_TERMINAL_THEME,
   dark: DARK_TERMINAL_THEME,
@@ -315,6 +363,12 @@ const TERMINAL_THEMES: Record<ThemeId, typeof DARK_TERMINAL_THEME> = {
   'solarized-dark': SOLARIZED_DARK_TERMINAL_THEME,
   'solarized-light': SOLARIZED_LIGHT_TERMINAL_THEME,
   cobalt: COBALT_TERMINAL_THEME,
+  'idea-classic-light': IDEA_CLASSIC_LIGHT_TERMINAL_THEME,
+  'idea-light': IDEA_LIGHT_TERMINAL_THEME,
+  'idea-dark': IDEA_DARK_TERMINAL_THEME,
+  'idea-contrast': IDEA_CONTRAST_TERMINAL_THEME,
+  'kiro-dark': KIRO_DARK_TERMINAL_THEME,
+  'kiro-light': KIRO_LIGHT_TERMINAL_THEME,
 };
 
 /**

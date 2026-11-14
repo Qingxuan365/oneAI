@@ -311,6 +311,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <Switch label="光标闪烁" checked={settings.terminalCursorBlink} onChange={(checked) => update({ terminalCursorBlink: checked })} />
                 </div>
               </Section>
+
+              <Section title="文件预览" hint="Ctrl + 单击终端里的文件路径打开">
+                <div className={row}>
+                  <span>
+                    <span className="block">显示代码缩略图（minimap）</span>
+                    <span className="block text-xs text-fg-faint">预览文本文件时，在右侧显示类似 VS Code 的缩略图，点击或拖动即可快速滚动</span>
+                  </span>
+                  <Switch label="显示文件预览小地图" checked={settings.previewMinimap !== false} onChange={(checked) => update({ previewMinimap: checked })} />
+                </div>
+              </Section>
             </>
           )}
 

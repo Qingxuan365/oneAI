@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   uiScale: 'comfortable',
   terminalCursorStyle: 'bar',
   terminalCursorBlink: true,
+  previewMinimap: true,
   musicDirectory: '',
   musicPlayerVisible: true,
   clockOffsetHours: 0,
@@ -911,6 +912,7 @@ ${entry.cwd}`}
               filePath={filePreview.path}
               line={filePreview.line}
               openedAt={filePreview.openedAt}
+              minimap={settings.previewMinimap}
               width={previewWidth}
               onResize={setPreviewWidth}
               onClose={() => setFilePreview(null)}

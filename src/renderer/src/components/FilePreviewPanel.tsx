@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw, X } from 'lucide-react';
 import { FilePreviewResult } from '../types';
+import { PreviewMinimap } from './PreviewMinimap';
 
 interface FilePreviewPanelProps {
   cwd: string;
@@ -9,6 +10,8 @@ interface FilePreviewPanelProps {
   line?: number;
   /** 每次从终端点击都会变化，用来重新读取同一个文件 */
   openedAt?: number;
+  /** 是否在右侧显示代码缩略图，由「设置 → 终端 → 文件预览」控制，默认显示 */
+  minimap?: boolean;
   width: number;
   onResize: (width: number) => void;
   onClose: () => void;
@@ -22,10 +25,12 @@ function formatSize(size?: number): string {
 }
 
 /** 终端右侧的只读文件预览面板：文本、图片，其他类型给出提示。 */
-export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ cwd, filePath, line, openedAt, width, onResize, onClose }) => {
+export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ cwd, filePath, line, openedAt, minimap = true, width, onResize, onClose }) => {
   const [result, setResult] = useState<FilePreviewResult | null>(null);
   const [reloadCount, setReloadCount] = useState(0);
   const targetLineRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const lines = useMemo(() => (result?.kind === 'text' ? result.content.split('\n') : []), [result]);
 
   // 内容加载完成或目标行变化后，把目标行滚动到视野中央
   useEffect(() => {
@@ -60,7 +65,7 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ cwd, filePat
   if (result?.kind === 'text') {
     body = (
       <pre className="m-0 min-h-full select-text whitespace-pre-wrap break-all p-3 font-mono text-xs leading-relaxed text-fg">
-        {result.content.split('\n').map((text, index) => {
+        {lines.map((text, index) => {
           const isTarget = index + 1 === line;
           return (
             <div key={index} ref={isTarget ? targetLineRef : undefined} className={isTarget ? 'bg-accent/20' : undefined}>{text || ' '}</div>
@@ -96,7 +101,10 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ cwd, filePat
           <X size={14} />
         </button>
       </header>
-      <div className="min-h-0 flex-1 overflow-auto">{body}</div>
+      <div className="flex min-h-0 flex-1">
+        <div ref={scrollRef} className="min-h-0 min-w-0 flex-1 overflow-auto">{body}</div>
+        {minimap && result?.kind === 'text' && <PreviewMinimap lines={lines} scrollRef={scrollRef} targetLine={line} />}
+      </div>
     </aside>
   );
 };

@@ -9,7 +9,7 @@
       // 首帧前按已保存主题写入 data-theme，避免浅色主题启动时先闪一帧深色。
       try {
         var theme = (JSON.parse(localStorage.getItem('onedesktop_settings') || '{}') || {}).theme;
-        if (['light', 'dark', 'bean', 'parchment', 'dusk', 'nord', 'darcula', 'material', 'monokai', 'mariana', 'breakers', 'solarized-dark', 'solarized-light', 'cobalt'].indexOf(theme) < 0) theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        if (['light', 'dark', 'bean', 'parchment', 'dusk', 'nord', 'darcula', 'material', 'monokai', 'mariana', 'breakers', 'solarized-dark', 'solarized-light', 'cobalt', 'idea-classic-light', 'idea-light', 'idea-dark', 'idea-contrast', 'kiro-dark', 'kiro-light'].indexOf(theme) < 0) theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         document.documentElement.dataset.theme = theme;
       } catch (e) {}
     </script>

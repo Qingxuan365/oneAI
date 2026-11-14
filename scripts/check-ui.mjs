@@ -33,6 +33,7 @@ await build({
       deleteSessionHistory: async () => ({ deleted: 0, failed: 0 }) };
     // 用量面板夹具：近 26 周的每日请求数（每 3 天一个非零值，最大 39），以及三个 CLI 的模型行
     window.usageEmpty = false;
+    window.usageMany = false;
     window.usageFixture = (empty) => {
       const pad = n => String(n).padStart(2, '0');
       const key = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -46,14 +47,29 @@ await build({
         const d = new Date(start);
         d.setDate(d.getDate() + i);
         const requests = empty ? 0 : (i % 3 === 0 ? i % 40 : 0);
-        days.push({ date: key(d), requests, byCli: requests ? { claude: requests } : {} });
+        days.push({ date: key(d), requests, by: requests ? { 'claude:default': requests } : {} });
       }
-      const rows = empty ? [] : [
-        { cliId: 'claude', model: 'Sonnet 5.5', requests: 246, sessions: 3, input: 546, output: 560666, cacheRead: 104684416, cacheWrite: 1044518 },
-        { cliId: 'codex', model: 'gpt-5.5', requests: 21, sessions: 1, input: 93118, output: 1569, cacheRead: 1235456, cacheWrite: 0 },
-        { cliId: 'agy', model: 'Gemini 4 Hydrogen', requests: 103, sessions: 9, input: 1160400, output: 111017, cacheRead: 11419012, cacheWrite: 0 },
+      // 带账号的夹具：Codex 有默认账号和 alt 账号，Claude 与 Antigravity 只有默认账号
+      if (!empty) days[100] = { date: days[100].date, requests: 9, by: { 'claude:default': 2, 'codex:default': 3, 'codex:alt-id': 4 } };
+      const accounts = empty ? [] : [
+        { cliId: 'claude', accountId: 'default', name: '默认账号' },
+        { cliId: 'codex', accountId: 'default', name: '默认账号' },
+        { cliId: 'codex', accountId: 'alt-id', name: 'alt' },
+        { cliId: 'agy', accountId: 'default', name: '默认账号' },
+        { cliId: 'pi', accountId: 'default', name: '默认账号' },
       ];
-      return { generatedAt: Date.now(), weekStart: monday.getTime(), rows, days };
+      const D = { accountId: 'default', accountName: '默认账号' };
+      const rows = empty ? [] : [
+        { cliId: 'claude', ...D, model: 'Sonnet 5.5', requests: 246, sessions: 3, input: 546, output: 560666, cacheRead: 104684416, cacheWrite: 1044518 },
+        { cliId: 'codex', ...D, model: '自动审查 (codex-auto-review)', subagent: true, requests: 21, sessions: 1, input: 93118, output: 1569, cacheRead: 1235456, cacheWrite: 0 },
+        { cliId: 'codex', accountId: 'alt-id', accountName: 'alt', model: 'gpt-5.5', requests: 12, sessions: 1, input: 50000, output: 4000, cacheRead: 600000, cacheWrite: 0 },
+        { cliId: 'codex', ...D, model: 'gpt-5.5', requests: 30, sessions: 2, input: 193118, output: 11569, cacheRead: 2235456, cacheWrite: 0 },
+        { cliId: 'agy', ...D, model: 'Gemini 4 Hydrogen', requests: 103, sessions: 9, input: 1160400, output: 111017, cacheRead: 11419012, cacheWrite: 0 },
+        { cliId: 'pi', ...D, model: 'deepseek-chat', requests: 35, sessions: 4, input: 20000, output: 9000, cacheRead: 300000, cacheWrite: 0 },
+      ];
+      // 模型很多的情形：再补 17 行，验证弹窗内容超出高度时出现滚动
+      if (!empty && window.usageMany) for (let i = 0; i < 17; i++) rows.push({ cliId: 'claude', ...D, model: 'Model ' + i, requests: 5, sessions: 1, input: 1000, output: 2000, cacheRead: 3000, cacheWrite: 0 });
+      return { generatedAt: Date.now(), weekStart: monday.getTime(), accounts, rows, days };
     };
     // 顶栏系统资源的最宽取值：CPU 100%、内存 31.9 GB、上行 999K/s、下行 99.9M/s
     window.fakeStats = { cpuPercent: 100, memUsedBytes: 31.9 * 1024 ** 3, memTotalBytes: 32 * 1024 ** 3, netUpBytesPerSec: 999 * 1024, netDownBytesPerSec: 99.9 * 1024 ** 2 };
@@ -137,12 +153,13 @@ await build({
         onCreate={async (cli, title, command, cwd, accountId) => { window.events.push('create:' + cli + ':' + (accountId || 'default') + ':' + title + ':' + command + ':' + cwd); return { success: true }; }} /></div>));
     };
     function SettingsHarness() {
-      const [settings, setSettings] = React.useState({ theme: 'dark', voiceReminderEnabled: true, workReminderHours: 1, terminalFontSize: 15, terminalLineHeight: 1.3, uiScale: 'comfortable', terminalCursorStyle: 'bar', terminalCursorBlink: true, musicDirectory: '', musicPlayerVisible: true, clockOffsetHours: 0, accounts: [] });
+      const [settings, setSettings] = React.useState({ theme: 'dark', voiceReminderEnabled: true, workReminderHours: 1, terminalFontSize: 15, terminalLineHeight: 1.3, uiScale: 'comfortable', terminalCursorStyle: 'bar', terminalCursorBlink: true, previewMinimap: true, musicDirectory: '', musicPlayerVisible: true, clockOffsetHours: 0, accounts: [] });
+      window.currentSettings = () => settings;
       window.currentAccounts = () => settings.accounts;
       return <SettingsModal isOpen onClose={() => {}} settings={settings} onUpdateSettings={setSettings} onResetDefault={() => {}} onLoginAccount={(a) => window.events.push('login:' + a.name)} />;
     }
     window.drawSettings = () => flushSync(() => root.render(<div className="workbench-ui h-screen"><SettingsHarness /></div>));
-    window.drawUsage = () => flushSync(() => root.render(<div className="workbench-ui h-screen"><UsageModal key={String(window.usageEmpty)} isOpen onClose={() => {}} accounts={[]} /></div>));
+    window.drawUsage = () => flushSync(() => root.render(<div className="workbench-ui h-screen"><UsageModal key={String(window.usageEmpty) + String(window.usageMany)} isOpen onClose={() => {}} accounts={[]} /></div>));
     window.drawHistory = (open) => flushSync(() => root.render(<div className="workbench-ui h-screen"><HistoryModal isOpen onClose={() => {}} onResume={(e) => window.events.push('resume:' + e.id)} openHistoryIds={new Set(open)} /></div>));
     window.drawTermMany = (count, active) => {
       const tasks = Array.from({ length: count }, (_, i) => ({ id: 'many-' + i, groupId: 'terminal', title: 'm' + i, status: 'running', cwd: 'D:/GitHub/OneAI', createdAt: 1 }));
@@ -156,9 +173,9 @@ await build({
         <TerminalViewport ref={window.termRef} theme="dark" tasks={tasks} activeTaskId={id} />
       </div>));
     };
-    window.drawPreview = (line, openedAt) => {
+    window.drawPreview = (line, openedAt, minimap = true) => {
       flushSync(() => root.render(<div className="workbench-ui flex h-screen">
-        <FilePreviewPanel cwd="D:/x" filePath="a.ts" line={line} openedAt={openedAt} width={400} onResize={() => {}} onClose={() => {}} />
+        <FilePreviewPanel cwd="D:/x" filePath="a.ts" line={line} openedAt={openedAt} minimap={minimap} width={400} onResize={() => {}} onClose={() => {}} />
       </div>));
     };
     // 链接定位：返回 text 中 needle 对应的链接范围
@@ -202,7 +219,7 @@ app.whenReady().then(async () => {
       check('close visible when task focused', getComputedStyle(document.querySelector('button[aria-label="关闭 Task 1: UI regression"]')).opacity === '1');
       const colors = [];
       // 新增编辑器配色：正文、次要文字与点缀色在面板 / 画布上的对比度（WCAG 相对亮度）须达到下限
-      const NEW_THEMES = ['darcula', 'material', 'monokai', 'mariana', 'breakers', 'solarized-dark', 'solarized-light', 'cobalt'];
+      const NEW_THEMES = ['darcula', 'material', 'monokai', 'mariana', 'breakers', 'solarized-dark', 'solarized-light', 'cobalt', 'idea-classic-light', 'idea-light', 'idea-dark', 'idea-contrast', 'kiro-dark', 'kiro-light'];
       const rgbOf = name => getComputedStyle(document.documentElement).getPropertyValue('--color-' + name).trim().split(' ').map(Number);
       const lum = ([r, g, b]) => { const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
       const ratio = (a, b) => { const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
@@ -253,10 +270,18 @@ app.whenReady().then(async () => {
     result.push({ name: 'Enter toggles folder', ok: await win.webContents.executeJavaScript("window.events.includes('toggle')") });
     // 顶栏带账号徽标时再扫一遍各宽度，确认徽标不会把任务名挤没
     await win.webContents.executeJavaScript("window.draw('running', '工作账号')");
+    // 窗口尺寸异步生效：先等页面的 innerWidth 追上窗口内容宽度，再留一点时间给容器查询重新布局，避免固定等待造成偶发失败
+    const settleSize = async () => {
+      for (let i = 0; i < 100; i++) {
+        if (await win.webContents.executeJavaScript('window.innerWidth') === win.getContentSize()[0]) break;
+        await new Promise(r => setTimeout(r, 30));
+      }
+      await new Promise(r => setTimeout(r, 200));
+    };
     for (const width of [900, 1100, 1280, 1440, 1920, 2400, 2800]) {
       win.setSize(width, 900);
       await win.webContents.executeJavaScript('window.setMaximized(' + (width >= 1920) + ')');
-      await new Promise(r => setTimeout(r, 150));
+      await settleSize();
       // 工具、时钟、额度、系统资源、历史按钮中仍然可见的块必须依次排开且不超出顶栏；任务名至少保留 48px（最窄 900 的窗口除外）
       result.push({ name: width + ' topbar blocks do not overlap', ok: await win.webContents.executeJavaScript(\`(() => {
         const header = document.querySelector('header').getBoundingClientRect();
@@ -275,7 +300,7 @@ app.whenReady().then(async () => {
       ['#oneai-topbar-clock', '.quota-usage', '.topbar-sys-cpu', '.topbar-sys-mem', '.topbar-sys-net'].every(sel => document.querySelector(sel).getClientRects().length > 0)\`) });
     win.setSize(1920, 900);
     await win.webContents.executeJavaScript('window.setMaximized(true)');
-    await new Promise(r => setTimeout(r, 150));
+    await settleSize();
     result.push({ name: 'maximized 1920 topbar keeps usage, system stats and reset time', ok: await win.webContents.executeJavaScript(\`
       ['#oneai-topbar-sys', '.quota-usage', '.quota-detail', '.topbar-account'].every(sel => document.querySelector(sel).getClientRects().length > 0)\`) });
     result.push({ name: 'topbar usage and system text content', ok: await win.webContents.executeJavaScript(\`(() => {
@@ -454,9 +479,19 @@ app.whenReady().then(async () => {
       window.usageEmpty = false;
       window.drawUsage(); await tick(400);
       const text = document.body.textContent;
-      check('usage panel lists each model with its CLI', document.querySelectorAll('[data-usage-row]').length === 3 && text.includes('Sonnet 5.5') && text.includes('Gemini 4 Hydrogen') && text.includes('Antigravity') && text.includes('Codex'));
+      check('usage panel lists each model with its CLI', document.querySelectorAll('[data-usage-row]').length === 6 && text.includes('Sonnet 5.5') && text.includes('deepseek-chat') && text.includes('Gemini 4 Hydrogen') && text.includes('Antigravity') && text.includes('Codex'));
       const fixture = window.usageFixture(false);
       const requests = fixture.rows.reduce((sum, r) => sum + r.requests, 0);
+      const groupNames = [...document.querySelectorAll('[data-usage-cli]')].map(g => g.textContent.trim());
+      check('usage models are grouped under one header per CLI, ordered by tokens', groupNames.length === 4 && groupNames[0].startsWith('Claude Code') && groupNames.some(n => n.startsWith('Codex')) && groupNames.some(n => n.startsWith('Antigravity')) && groupNames.some(n => n.startsWith('Pi')));
+      const codexRows = [...document.querySelectorAll('[data-usage-group="codex"] [data-usage-row]')];
+      const defaultRows = [...document.querySelectorAll('[data-usage-group="codex"] tr')].reduce((acc, tr) => { if (tr.hasAttribute('data-usage-account')) acc.current = tr.getAttribute('data-usage-account'); else if (tr.hasAttribute('data-usage-row')) (acc[acc.current] = acc[acc.current] || []).push(tr); return acc; }, {});
+      check('codex splits into default and alt account sections, each listing its own models', document.querySelectorAll('[data-usage-group="codex"] [data-usage-account]').length === 2 && (defaultRows['default'] || []).length === 2 && (defaultRows['alt-id'] || []).length === 1 && defaultRows['alt-id'][0].textContent.includes('gpt-5.5'));
+      check('within the default account the real model comes first and the auto-review sub-session last, tagged', codexRows.length === 3 && defaultRows['default'][0].textContent.includes('gpt-5.5') && defaultRows['default'][1].textContent.includes('codex-auto-review') && defaultRows['default'][1].textContent.includes('子会话') && !defaultRows['default'][0].textContent.includes('子会话'));
+      const alt = document.querySelector('[data-usage-account="alt-id"]');
+      check('an account section header shows its name and request subtotal', alt.textContent.includes('alt') && alt.textContent.includes('12'));
+      check('CLIs with only the default account show no account sections', document.querySelectorAll('[data-usage-group="claude"] [data-usage-account], [data-usage-group="agy"] [data-usage-account], [data-usage-group="pi"] [data-usage-account]').length === 0);
+      check('a CLI header shows that CLI request subtotal', document.querySelector('[data-usage-group="codex"] [data-usage-cli]').textContent.includes('63'));
       check('usage summary shows the weekly request total', document.querySelector('[data-usage-summary]').textContent.includes(String(requests)));
       check('usage tokens are shown in compact units', text.includes('105.7M'));
       const cells = [...document.querySelectorAll('[data-usage-cell]')];
@@ -472,8 +507,19 @@ app.whenReady().then(async () => {
       check('days after today are marked as future and have no tooltip', cells.filter(c => c.dataset.date > todayKey).every(c => c.dataset.level === 'future' && !c.title) && cells.filter(c => c.dataset.date <= todayKey).every(c => c.dataset.level !== 'future'));
       check('today is outlined', cells.filter(c => c.className.includes('ring-1')).map(c => c.dataset.date).join() === todayKey);
       check('a cell tooltip gives the date and request count', level4.title.includes(level4.dataset.date) && level4.title.includes('次请求'));
+      const multi = [...document.querySelectorAll('[data-usage-cell]')].find(c => c.dataset.date === window.usageFixture(false).days[100].date);
+      check('a day tooltip lists each CLI account (account name only where a CLI has several)', multi.title.includes('Codex（alt） 4') && multi.title.includes('Codex（默认账号） 3') && multi.title.includes('Claude Code 2') && !multi.title.includes('Claude Code（'));
       const grid = document.querySelector('[data-usage-heatmap]');
       check('heatmap fits inside the modal without horizontal scrolling', grid.parentElement.scrollWidth <= grid.parentElement.clientWidth);
+      const panel = document.querySelector('[role="dialog"]');
+      check('usage modal is wide enough for the table and the heatmap (at least 700px)', panel.getBoundingClientRect().width >= 700);
+      window.usageMany = true;
+      window.drawUsage(); await tick(400);
+      const scroller = document.querySelector('[role="dialog"] .overflow-y-auto');
+      check('with many models the modal stays within the window and its content scrolls vertically', document.querySelectorAll('[data-usage-row]').length === 23 && getComputedStyle(scroller).overflowY === 'auto' && scroller.scrollHeight > scroller.clientHeight && document.querySelector('[role="dialog"]').getBoundingClientRect().height <= window.innerHeight);
+      scroller.scrollTop = scroller.scrollHeight; await tick(50);
+      check('the heatmap and footnote are reachable by scrolling', scroller.scrollTop > 0 && document.body.textContent.includes('暂不含 Kimi Code'));
+      window.usageMany = false;
       window.usageEmpty = true;
       window.drawUsage(); await tick(400);
       check('empty week shows a hint and an all-empty heatmap', Boolean(document.querySelector('[data-usage-empty]')) && [...document.querySelectorAll('[data-usage-cell]')].every(c => c.dataset.level === '0' || c.dataset.level === 'future'));
@@ -515,9 +561,18 @@ app.whenReady().then(async () => {
       check('new task modal submits the chosen CLI with its default command', window.events.includes('create:claude:default:Task 5:claude:D:/GitHub/OneAI'));
 
       window.drawSettings(); await tick();
+      const terminalTab = [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.includes('终端'));
+      terminalTab.click(); await tick(200);
+      const minimapSwitch = () => document.querySelector('[role="switch"][aria-label="显示文件预览小地图"]');
+      check('settings has a file-preview minimap switch on the terminal page, on by default', Boolean(minimapSwitch()) && minimapSwitch().getAttribute('aria-checked') === 'true' && document.body.textContent.includes('显示代码缩略图'));
+      minimapSwitch().click(); await tick(100);
+      check('the minimap switch turns the setting off and on again', window.currentSettings().previewMinimap === false && minimapSwitch().getAttribute('aria-checked') === 'false');
+      minimapSwitch().click(); await tick(100);
+      check('turning the minimap switch back on restores the setting', window.currentSettings().previewMinimap === true);
+      [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.includes('外观')).click(); await tick(200);
       const names = label => [...document.querySelectorAll('[aria-label="' + label + '"] button')].map(b => b.textContent.trim()).join('|');
       check('settings lists the eye-care themes', names('护眼主题色') === '豆沙绿|羊皮纸|暖夜|北极灰蓝');
-      check('settings lists the editor themes (Darcula, Sublime Material and the Sublime Text built-ins)', names('编辑器配色主题') === 'Darcula|Sublime Material|Monokai|Mariana|Breakers|Solarized Dark|Solarized Light|Cobalt');
+      check('settings lists the editor themes (Darcula, Sublime Material, the Sublime Text built-ins, the IDEA themes and Kiro)', names('编辑器配色主题') === 'Darcula|Sublime Material|Monokai|Mariana|Breakers|Solarized Dark|Solarized Light|Cobalt|IntelliJ Light|IDEA Light|IDEA Dark|IDEA 高对比度|Kiro Dark|Kiro Light');
       const tab =[...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.includes('账号'));
       check('settings has an accounts tab', Boolean(tab));
       tab.click(); await tick(300);
@@ -656,6 +711,40 @@ app.whenReady().then(async () => {
       check('preview re-reads the file when clicked again', reads === 2);
       document.querySelector('button[aria-label="重新读取文件"]').click(); await wait();
       check('preview refresh button re-reads the file', reads === 3 && highlighted()?.textContent === 'two');
+      // 代码缩略图（minimap）
+      const longText = Array.from({ length: 300 }, (_, i) => '  const value' + i + ' = ' + i + ';').join(String.fromCharCode(10));
+      window.electronAPI.readPreviewFile = async () => ({ kind: 'text', path: 'long.ts', size: 9000, content: longText });
+      window.drawPreview(150, 10); await wait(300);
+      const mini = () => document.querySelector('[data-preview-minimap]');
+      const slider = () => document.querySelector('[data-preview-minimap-slider]');
+      const scroller = () => document.querySelector('aside[aria-label="文件预览"] .overflow-auto');
+      check('long preview shows a minimap on the right with a canvas', Boolean(mini()) && mini().querySelector('canvas').height > 0 && mini().getBoundingClientRect().right <= document.querySelector('aside[aria-label="文件预览"]').getBoundingClientRect().right + 1);
+      check('the minimap slider covers only the visible part of a scrollable file', Boolean(slider()) && slider().getBoundingClientRect().height < mini().querySelector('canvas').getBoundingClientRect().height && slider().getBoundingClientRect().height >= 10);
+      // 检查窗口是隐藏的、不渲染帧，浏览器不会自己派发 scroll 事件，所以设置 scrollTop 后手动派发一次
+      const scrollTo = async (top) => { scroller().scrollTop = top; scroller().dispatchEvent(new Event('scroll')); await wait(100); };
+      await scrollTo(0);
+      const atTop = slider().getBoundingClientRect().top;
+      await scrollTo(scroller().scrollHeight);
+      const atBottom = slider().getBoundingClientRect().top;
+      check('the slider follows the preview scroll position', atBottom > atTop + 5 && atTop <= mini().getBoundingClientRect().top + 2);
+      scroller().scrollTop = 0; await wait(100);
+      const canvasRect = mini().querySelector('canvas').getBoundingClientRect();
+      mini().dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: canvasRect.left + 20, clientY: canvasRect.top + canvasRect.height / 2 }));
+      window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      await wait(150);
+      const ratio = scroller().scrollTop / Math.max(1, scroller().scrollHeight - scroller().clientHeight);
+      check('clicking the middle of the minimap scrolls the preview to about the middle', ratio > 0.35 && ratio < 0.65);
+      const wheelBefore = scroller().scrollTop;
+      mini().dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 120 })); await wait(100);
+      check('wheeling over the minimap scrolls the preview', scroller().scrollTop > wheelBefore);
+      window.drawPreview(150, 11, false); await wait(200);
+      check('the minimap is not rendered when it is turned off', !mini() && Boolean(document.querySelector('pre')));
+      window.electronAPI.readPreviewFile = async () => ({ kind: 'text', path: 'short.ts', size: 13, content: ['one', 'two', 'three'].join(String.fromCharCode(10)) });
+      window.drawPreview(undefined, 12, true); await wait(300);
+      check('a short file that needs no scrolling shows the minimap without a slider', Boolean(mini()) && !slider());
+      window.electronAPI.readPreviewFile = async () => ({ kind: 'binary', path: 'x.bin', size: 5 });
+      window.drawPreview(undefined, 13, true); await wait(200);
+      check('no minimap for non-text previews', !mini());
       return checks;
     })()\`));
     console.log(JSON.stringify(result, null, 2));

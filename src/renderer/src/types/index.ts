@@ -58,10 +58,12 @@ export interface FolderEntry {
 }
 
 // 具体主题 id；bean 豆沙绿、parchment 羊皮纸、dusk 暖夜、nord 北极灰蓝为护眼主题；
-// 其余为编辑器配色：darcula、material（Sublime Material），以及 Sublime Text 内置的 monokai、mariana、breakers、solarized-dark、solarized-light、cobalt
+// 其余为编辑器配色：darcula、material（Sublime Material），以及 Sublime Text 内置的 monokai、mariana、breakers、solarized-dark、solarized-light、cobalt，以及 IntelliJ IDEA 自带的 idea-classic-light、idea-light、idea-dark、idea-contrast，以及 Kiro IDE 的 kiro-dark、kiro-light
 export type ThemeId =
   | 'light' | 'dark' | 'bean' | 'parchment' | 'dusk' | 'nord'
-  | 'darcula' | 'material' | 'monokai' | 'mariana' | 'breakers' | 'solarized-dark' | 'solarized-light' | 'cobalt';
+  | 'darcula' | 'material' | 'monokai' | 'mariana' | 'breakers' | 'solarized-dark' | 'solarized-light' | 'cobalt'
+  | 'idea-classic-light' | 'idea-light' | 'idea-dark' | 'idea-contrast'
+  | 'kiro-dark' | 'kiro-light';
 
 export interface AppSettings {
   theme: 'system' | ThemeId; // 应用主题，默认跟随系统（仅在 light / dark 间切换）
@@ -72,6 +74,7 @@ export interface AppSettings {
   uiScale: 'compact' | 'standard' | 'comfortable' | 'large'; // 界面全局字体缩放
   terminalCursorStyle: 'bar' | 'block' | 'underline'; // 终端光标样式 (默认 'bar')
   terminalCursorBlink: boolean; // 终端光标闪烁 (默认 true)
+  previewMinimap: boolean; // 文件预览面板右侧是否显示代码缩略图（minimap），默认 true
   musicDirectory: string; // 顶栏音乐播放目录，空字符串表示系统「音乐」目录
   musicPlayerVisible: boolean; // 侧栏底部是否显示音乐播放器，默认 true
   clockOffsetHours: number; // 顶栏时钟相对系统时间增加的小时数，默认 0（-24 ~ 24 的整数）
@@ -95,14 +98,17 @@ export interface QuotaData {
   message?: string;
 }
 
-export type UsageCli = 'claude' | 'codex' | 'agy';
+export type UsageCli = 'claude' | 'codex' | 'agy' | 'pi';
 
 /** 本周某个 CLI 下某个模型的用量 */
 export interface UsageRow {
   cliId: UsageCli;
+  accountId: string;   // OneAI 账号 id；默认账号为 'default'
+  accountName: string; // 账号名，默认账号为「默认账号」
   model: string;
   requests: number;   // 请求数：一次模型回复算一次
   sessions: number;   // 本周内出现过该模型回复的会话数
+  subagent?: boolean; // CLI 自动发起的子会话（如 Codex 自动审查），不是用户选用的模型
   input: number;      // 未命中缓存的输入 tokens
   output: number;
   cacheRead: number;
@@ -112,12 +118,15 @@ export interface UsageRow {
 export interface UsageDay {
   date: string;       // 本地日期 YYYY-MM-DD
   requests: number;
-  byCli: Partial<Record<UsageCli, number>>;
+  by: Record<string, number>; // 键为 `${cliId}:${accountId}`，值为当天该 CLI 账号的请求数
 }
+
+export interface UsageAccountInfo { cliId: UsageCli; accountId: string; name: string }
 
 export interface UsageStats {
   generatedAt: number;
   weekStart: number;  // 本周周一 00:00（本地时间）
+  accounts: UsageAccountInfo[]; // 统计范围内出现过用量的 CLI 账号
   rows: UsageRow[];
   days: UsageDay[];   // 周一对齐、连续，到本周周日为止
 }
@@ -149,7 +158,7 @@ export interface ElectronTerminalAPI {
   listSessionHistory: () => Promise<HistoryEntry[]>;
   deleteSessionHistory: (items: Array<{ cliId: HistoryEntry['cliId']; id: string }>) => Promise<{ deleted: number; failed: number }>;
   /** 本周各 CLI × 模型的用量与每日请求数（Claude Code / Codex / Antigravity）；accounts 为需要一并统计的账号配置目录 */
-  getUsageStats?: (accounts: Array<{ cliId: string; configDir: string }>) => Promise<UsageStats>;
+  getUsageStats?: (accounts: Array<{ id: string; name: string; cliId: string; configDir: string }>) => Promise<UsageStats>;
   detectClis: () => Promise<Array<{ id: string; name: string; command: string }>>;
   createSession: (options: { id: string; command?: string; cwd?: string; account?: SessionAccount }) => Promise<{ success: boolean; buffer?: string; error?: string }>;
   getSessionBuffer: (id: string) => Promise<string>;

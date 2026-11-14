@@ -8,6 +8,13 @@
 
 ### 已完成
 - [x] 2026-11-14 10:03 本周用量面板：顶栏用量按钮 / `Ctrl+Shift+U` 打开弹窗，统计本机 Claude Code、Codex、Antigravity 会话记录（含账号配置目录）中本周各 CLI × 模型的请求数、会话数与输入 / 输出 / 缓存 Tokens，并显示近 26 周每日请求数的 GitHub 风格绿色方块图（`usage-stats.ts`、`UsageModal.tsx`、IPC `usage:stats`）。
+- [x] 2026-11-14 10:47 文件预览面板新增代码缩略图（minimap）：右侧 canvas 按缩进与长度绘制每行色块，半透明滑块标出可见范围，点击 / 拖动 / 滚轮可滚动预览，目标行高亮，换主题自动重绘，内容无需滚动时不显示滑块；「设置 → 终端 → 文件预览」可开关（`previewMinimap`，默认开启，随「恢复默认设置」重置）。终端输出区的 minimap 按计划作为第二步，默认关闭，尚未开始。
+- [x] 2026-11-14 10:47 新增 Kiro IDE 的 Kiro Dark、Kiro Light 两个主题（色值取自开源还原主题 `BioHazard786/kiro-theme-vscode`），终端配色同步。
+- [x] 2026-11-14 10:35 用量面板新增 Pi：读取 `~/.pi/agent/sessions` 会话记录，每条助手回复自带 provider / model / usage，按 CLI → 模型展示（Pi 无多账号，归默认账号）；出错且 usage 全为 0 的回复不计入。
+- [x] 2026-11-14 10:26 用量面板按账号统计：层级为 CLI → 账号 → 模型，Claude Code 与 Codex 按设置里的账号配置目录归属（默认目录为「默认账号」，同目录的账号以默认账号为准），只有默认账号的 CLI 不多显示账号一层；方块图悬停提示按「CLI（账号）」列出；Antigravity 无法区分账号，统一归默认账号（`UsageRow.accountId / accountName`、`UsageDay.by`、`UsageStats.accounts`）。
+- [x] 2026-11-14 10:26 新增 4 个 IntelliJ IDEA 主题：IntelliJ Light、IDEA Light、IDEA Dark（新版界面）、IDEA 高对比度，色值取自 JetBrains `intellij-community` 的主题与配色文件，终端配色同步。
+- [x] 2026-11-14 10:18 用量面板的模型表改为按 CLI 分组：每个 CLI 一个分组标题（请求数与 Tokens 小计），下面是该 CLI 用过的模型；Codex 自动审查子会话排在组末并标「子会话」（`UsageRow.subagent`）。
+- [x] 2026-11-14 10:14 修复用量面板漏统计 Codex：Codex 把旧会话压缩成 `.jsonl.zst`（引入 `fzstd` 解压），桌面应用的会话在 `archived_sessions`（此前未扫描），`sessions` 里只剩自动审查（guardian）子会话；现在本机 Codex 显示 gpt-6.1-terra / gpt-6-astra / gpt-6.1-sol，自动审查标为「自动审查 (codex-auto-review)」。弹窗加宽到 `max-w-3xl`、方块放大，模型很多时内容区纵向滚动（已加检查）。
 - [x] 2026-11-14 10:03 新增 8 个编辑器配色主题：Darcula、Sublime Material，以及 Sublime Text 内置的 Monokai、Mariana、Breakers、Solarized Dark、Solarized Light、Cobalt；设置页主题分为护眼与编辑器两组，终端配色同步。
 - [x] 2026-11-14 10:03 休息提醒（语音与弹框共用）文案改为「主人您已经工作 N 小时了，该休息一下了。」，N 取自设置的提醒时长。
 - [x] Phase 26 第三步：任务行第二行显示该任务会话里最近一条用户消息（Claude / Codex / Kimi），没有消息时显示「新会话 · 创建时间」，其他 CLI 保持单行。
@@ -71,7 +78,8 @@
 
 ### 待办 / 后续增强
 - [ ] 桌面验收本周用量面板与新主题：弹窗与方块图在各主题下的实际观感与窗口宽度表现（自动检查只核对 DOM、对比度和颜色差异，没有截图查看）；Codex 的模型名在有真实主会话时是否正确（本机只有一个 `codex-auto-review` 子会话，`turn_context.model` 字段位置按该会话验证）；休息提醒语音的实际播报。
-- [ ] 待决定：用量面板暂不含 Kimi Code（本机只有会话索引、没有逐条 token）、Pi（日志有 usage 与 model_change，可低成本接入）与 OpenCode；Claude Code 日志无费用字段，面板只显示 Tokens，不换算美元。
+- [ ] 待确认：用量面板对 Codex CLI（会话来源 `cli`）的模型识别未实测，本机只有 `vscode` 与 `guardian` 来源的会话；较新 Codex 版本把线程投影到 SQLite（`thread_history_1.sqlite`，164 个线程，部分日期如 11-08 ~ 11-10 的会话文件已不在磁盘上），要补全需引入 SQLite 读取依赖。`session-history.ts`（历史会话抽屉）同样只读 `.jsonl`、未覆盖 `archived_sessions` 与 `.zst`。
+- [ ] 待决定：用量面板暂不含 Kimi Code（本机会话目录已空，没有样本；官方文档只说逐条记录在 `agents/main/wire.jsonl`，未说明 token 字段；用户当前没有付费账号，无法生成样本）与 OpenCode（本机未安装，存储方式在 JSON 文件与 `opencode.db` SQLite 之间说法不一，若是 SQLite 需引入读取依赖）；Claude Code 日志无费用字段，面板只显示 Tokens，不换算美元。
 - [ ] 在 Windows 桌面端实际运行满 60 分钟，确认中文语音开关、提醒弹框与关闭后重新计时。
 - [ ] 手工验收主题三档切换、系统外观联动、终端配色及重启恢复，以及真实 CLI 长模型名称和额度消息下的顶栏体验；自动检查使用组件夹具，未启动真实 PTY。
 - [ ] 手工验收 CLI 分组拖拽、键盘排序与重启后的顺序恢复。
@@ -99,6 +107,16 @@
 - 会话日志缓冲保留最近约 2 MiB 输出；更早内容不会出现在复制和导出的日志中。
 
 ## 4. 最近验证
+
+- **2026-11-14 10:47**：文件预览 minimap、设置开关与 Kiro 主题后 `tsc --noEmit` 通过；`npm run check:ui` 连续 3 次 217 项全部通过。新增检查：长文件显示 minimap 且画布有内容、滑块只覆盖可见范围、滑块随滚动位置移动、点击 minimap 中部滚到约中间、滚轮转发到预览、关闭时不渲染、短文件无滑块、非文本预览无 minimap、设置页开关默认开且可关可开、Kiro 与其他新主题的对比度。检查中发现并修正：隐藏的测试窗口不渲染帧，`requestAnimationFrame` 与 `scroll` 事件都不会触发（真实窗口正常），minimap 改为 scroll 事件直接更新、测试里手动派发 scroll；顶栏宽度检查此前约每三次有一次偶发失败，原因是 `setSize` 后固定等待 150 ms 而窗口尺寸异步生效，改为先等 `innerWidth` 追上窗口内容宽度再检查，之后连续 3 次全过。Kiro 色值来自第三方 MIT 主题（2025-09 最后更新），不是 Kiro 官方发布；其终端背景 / 前景 / 黑白两色未定义，按主题色板推导，Kiro Light 的警告色与终端黄 / 青为保证对比度取更深的值。`npm run build:win` 通过，`release/OneAI-Setup-1.0.0.exe` 85163000 字节（北京时间 2026-11-14 10:47）。未验证：minimap 与新主题的截图观感、超长文件（上万行）下的绘制耗时、拖动手感；安装包未安装运行。另：早先用于验证的 3 个 `verify.mjs` 后台 node 进程因 `quota-service` 定时器不会自行退出，已在用户授权后结束（之后的验证脚本都显式 `process.exit`）。
+
+- **2026-11-14 10:35**：用量面板接入 Pi 后 `tsc --noEmit` 通过；`npm run check:ui` 202 项全部通过（Pi 组、Pi 行与无账号分段检查并入原有用例）。对本机真实 Pi 日志与独立重新计数对照：deepseek-chat 29 次 / 372647 Tokens / 9 会话、deepseek-v4-pro 2 次 / 17360 Tokens / 1 会话，两者完全一致；9 条出错且 usage 全为 0 的回复被排除；Pi 的用量全部落在 11-12。`npm run build:win` 通过，`release/OneAI-Setup-1.0.0.exe` 85162094 字节（北京时间 2026-11-14 10:35）。未验证：Pi 面板行的截图观感；Pi 自定义会话目录（环境变量改动存储位置）的情形；安装包未安装运行。
+
+- **2026-11-14 10:26**：用量按账号统计与 4 个 IDEA 主题后 `tsc --noEmit` 通过；`npm run check:ui` 第二次运行 202 项全部通过（第一次运行有 2 项顶栏宽度检查「2800 宽度显示时钟与全部系统资源」「1920 最大化保留用量与系统资源」失败，未改动相关代码，重跑即过，判断为窗口缩放等待时间不足造成的偶发失败，根因未定位）。新增检查：Codex 拆成默认账号与 alt 账号两段且各列自己的模型、账号小计、只有默认账号的 CLI 不显示账号段、日方块提示按「CLI（账号）」列出且只在有多个账号时带账号名、4 个 IDEA 主题的对比度与设置页主题按钮。账号归属用真实日志加合成的第二账号目录验证：alt 账号只得到复制进去的那一个会话（10 次请求，仅出现在该会话所在的 11-12），默认账号不重复计数，指向默认目录（大小写不同）的账号被忽略，空 id、Kimi、null 等无效条目被忽略。IDEA 主题色值来自 `intellijlaf.theme.json`、`HighContrast.theme.json`、`expUI_dark/light.theme.json` 与各配色方案；IDEA 配色方案文件里没有控制台 ANSI 色（高对比度除外），终端 ANSI 色按各主题色板推导。`npm run build:win` 通过，`release/OneAI-Setup-1.0.0.exe` 85161995 字节（北京时间 2026-11-14 10:26）。未验证：弹窗与新主题的截图观感、真实第二账号（真实的 `CODEX_HOME` / `CLAUDE_CONFIG_DIR` 目录）下的统计、安装包未安装运行。
+
+- **2026-11-14 10:18**：用量面板改为按 CLI 分组后 `tsc --noEmit` 通过；`npm run check:ui` 190 项全部通过（新增：每个 CLI 一个分组标题且按 Tokens 排序、Codex 组内真实模型在前且自动审查子会话在末尾并带「子会话」标记、分组标题显示该 CLI 的请求数小计）。`npm run build:win` 通过，`release/OneAI-Setup-1.0.0.exe` 85160497 字节（北京时间 2026-11-14 10:18）。未验证：分组表格的截图观感、安装包未安装运行。
+
+- **2026-11-14 10:14**：用量面板修复 Codex 漏统计与弹窗加宽后 `tsc --noEmit` 通过；`npm run check:ui` 187 项全部通过（新增：弹窗宽度不小于 700px、20 个模型时弹窗不超出窗口且内容区纵向滚动、滚动后能到达底部说明）。对本机真实日志重跑解析（首次约 3.6 s、缓存后约 19 ms）：此前只读到 1 个明文会话，现读入 `sessions` 与 `archived_sessions` 的 119 个会话（含 `.zst`），16 个有数据的日子；本周 Codex 为 gpt-6.1-terra 209 次 / 4 会话、gpt-6-astra 121 次 / 15 会话、gpt-6.1-sol 8 次 / 2 会话、自动审查 21 次；用 Node 24 的 `zlib.zstdDecompressSync` 独立解压核对了模型字段位置。`npm run build:win` 通过，`release/OneAI-Setup-1.0.0.exe` 85159646 字节（北京时间 2026-11-14 10:14）。未验证：弹窗截图观感、Codex CLI 来源（`cli`）会话的模型识别、SQLite 线程库里没有会话文件的对话；`fzstd` 在打包后的应用里解压（构建通过，但安装包未安装运行）。
 
 - **2026-11-14 10:03**：本周用量面板、8 个新主题与休息提醒文案改动后 `tsc --noEmit` 通过；`npm run check:ui` 184 项全部通过（新增：用量面板按模型列行、周请求总数、紧凑单位、方块图 182 格 / 每列 7 格且周一起始、五档颜色、未来日期不着色且无提示、今天描边、悬停提示含日期与请求数、方块图不横向溢出、空周提示；8 个新主题的正文 / 次要文字 / 点缀色对比度下限与各主题底色互不相同；设置页两组主题按钮；顶栏增加用量按钮后 7 种宽度仍不重叠）。检查中发现并修正了 Darcula 次要文字与 Breakers 点缀色对比度不足。对本机真实日志跑解析：182 天、7 个有数据的日子，本周 Claude Code（Sonnet 5.5 / Opus 5.5 / Fable 5.2）、Antigravity（Gemini 4 Hydrogen / Argon / 3.8 Flash）、Codex（`codex-auto-review`）各行合计与日志吻合，首次读取约 131 ms、缓存后约 10 ms。主题色值来源：Sublime Text 官方 `LegacyColorSchemes` 仓库（Monokai Bright、Solarized、Cobalt）与 Sublime Mariana / Breakers 的开源移植；Monokai 取自 Monokai Bright 的底色与语法色，Mariana / Breakers 为第三方移植值，面板层级按本应用 token 推导。`npm run build:win` 通过，`release/OneAI-Setup-1.0.0.exe` 85141797 字节（北京时间 2026-11-14 10:03）。未验证：弹窗与新主题的截图观感、安装包未安装运行。基线（未改动代码）上 `check:ui` 在本地时间 02:00 前会有 1 项「历史会话按今天 / 昨天 / 更早分段」失败，因夹具里的「昨天」条目按当前时刻推算，与本次改动无关，尚未修复。
 
