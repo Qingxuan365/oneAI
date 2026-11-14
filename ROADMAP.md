@@ -95,6 +95,8 @@
 
 ## 4. 最近验证
 
+- **2026-11-14 06:21**：历史会话抽屉筛选改动后 `tsc --noEmit` 通过；`npm run check:ui` 154 项全部通过（新增：搜索框聚焦时无轮廓与高亮边框、CLI 筛选为含全部 / Codex / Claude Code / Antigravity / Pi / Kimi Code 的下拉）；`npm run build:win` 通过，`release/OneAI-Setup-1.0.0.exe` 85135980 字节（北京时间 2026-11-14 06:21）。未验证：Antigravity / Pi 选项在真实桌面里的观感。
+
 - **2026-11-13 12:00**：Phase 26 第三步后 `tsc --noEmit` 通过；`npm run check:ui` 142 项全部通过（新增：有会话的任务显示第二行、新会话显示「新会话 · 时间」、未读到时占位、不支持的 CLI 保持单行、长文本单行截断、两行行高、序号与徽标靠右、新会话时间跟随时钟偏移）。检查中发现并修复了一处我引入的排版问题：任务按钮是 flex 列容器，子元素没有被拉伸到整行宽度（第一行只有 89px），会让摘要无法截断、账号徽标与序号贴着标题而不靠右，已给两个子元素加 `w-full` 并补检查。主进程读取逻辑单元测试 22 项（任务到会话的分配：最近创建的任务优先、闲置的旧任务不抢新任务的会话、早于所有任务的会话视为历史、恢复型任务按 id 直接对应、2 秒容差只在没有候选时才用；Claude 过滤工具结果 / 命令标签 / 中断提示 / meta / 子代理、长文本截到 100 字、尾部很大时扩大读取范围、账号目录隔离；Codex 取 user_message 事件并忽略注入上下文 / 子代理 / 其他目录；Kimi 读 state.json 的 lastPrompt 并忽略已归档；输入校验）。单元测试中途发现一处真实缺陷：原先 10 秒的时钟容差会让后创建的任务抢走前一个任务的会话，已改为先严格按创建时间归属、没有候选时才用 2 秒容差。真实数据耗时：本机 48MB、23 个会话文件的 Claude 目录冷读 72ms、缓存后 4ms。真实应用端到端 14 项（隔离 userData + 合成的账号目录会话文件 + 真实 PowerShell）：Claude / Codex / Kimi 任务各显示自己会话的最近消息，同文件夹先后创建的两个 Claude 任务各得各的会话，新会话显示创建时间，系统终端保持单行，恢复型任务按会话 id 对应，账号已删除的任务不读取摘要（不借用默认账号），追加消息后几秒内更新，原本的新会话产生会话文件后显示消息，选中并启动停止的任务后第二行仍在；截图核对观感。`npm run build:portable` 通过，`release/OneAI-Portable-1.0.0.exe` 74911897 字节（北京时间 2026-11-13 12:00），包内含新代码；安装版仍是 10:42 的旧产物。未验证：用真实 AI CLI 并行工作时的归属准确度。
 
 - **2026-11-13 11:48**：Phase 26 第二步后 `tsc --noEmit` 通过；`npm run check:ui` 132 项全部通过（侧栏检查按新结构重写：文件夹行与任务数、Git 徽标仅出现在仓库、「+」CLI 菜单、文件夹右键菜单、新建 / 自定义 / 打开 / 移除事件、任务只能在文件夹内排序且 Alt+方向键到边界无效、拖到其他文件夹无效、文件夹手柄与拖拽排序、最近任务折叠 / 展开 / 恢复 / 查看全部、添加文件夹、折叠窄条的文件夹按钮；新建任务弹窗的 CLI 切换、命令重置、账号选择与按文件夹生成默认名）。数据层单元测试 34 项（旧格式多工作区合并与去重、空工作区不导入、上次使用的工作区优先并展开、首次启动示例任务、旧单工作区存储、损坏数据忽略、迁移不修改旧数据、状态校验、排序语义、最近任务归类与截断）；Git 读取 10 项（HEAD、子目录、游离 HEAD、worktree、损坏文件、批量上限，本仓库读出 main）。真实应用端到端 28 项（隔离 userData + 旧格式种子状态 + 真实 PowerShell + CDP）：三个有任务的旧工作区合并为三个文件夹且空工作区不导入、OneAI 展开其余折叠、本仓库徽标 main、仓库文件夹 feature/a 且仓库外的普通文件夹无徽标、新格式落盘且旧数据逐字节保留；两个文件夹同时运行真实终端、切换后第一个终端仍存活；「+」菜单列出已安装的 CLI 并在该文件夹新建任务、新任务在该目录运行；Ctrl+Tab 四次按键都符合侧栏顺序（含回绕与反向）；最近任务由本机真实历史归类、已打开的文件夹不重复；重启后文件夹顺序 / 展开状态 / 任务 / 活动任务一致；移除文件夹有应用内确认且持久化。端到端中途出现过 3 项 Ctrl+Tab 失败，改为读取持久化的侧栏顺序作为标准答案并多等 100 毫秒后 4 次按键全部符合，上一轮失败的确切原因没有完全定位（怀疑是读取活动任务早于界面刷新）。截图核对侧栏观感。`npm run build:portable` 通过，`release/OneAI-Portable-1.0.0.exe` 74910621 字节（北京时间 2026-11-13 11:48），包内含新代码；安装版仍是 10:42 的旧产物。未验证：点击「最近任务」恢复真实 CLI 会话、用真实 AI CLI 并行、鼠标拖拽的实际手感。
@@ -133,9 +135,9 @@
 
 - **2026-11-12 16:19**：中优先级交互修复后 `tsc --noEmit` 通过，`npm run check:ui` 52 项通过；`npm run build:win` 通过，`release/OneAI-Setup-1.0.0.exe` 1576281891 字节。拖拽插入线、重命名焦点、滚动到当前任务、启动失败提示均未在桌面实际操作验证，待手工验收。
 
-- **2026-11-12 16:13**：空闲状态改动后 `tsc --noEmit` 通过，`npm run check:ui` 无失败项；`npm run build:win` 通过，`release/OneAI-Setup-1.0.0.exe` 1576281511 字节。真实 CLI 下 10 秒阈值是否合适（如思考期间长时间无输出）未验证，待桌面验收。
-
 ## 5. 最近完成
+
+- **2026-11-14 06:21**：历史会话抽屉：CLI 筛选由按钮组改为搜索框右侧的下拉（全部、Codex、Claude Code、Antigravity、Pi、Kimi Code），搜索框聚焦时不再出现轮廓与高亮边框，「删除列表中全部」单独一行靠右；选中 Antigravity / Pi 时列表为空并提示这些 CLI 暂无可读历史。入口：[HistoryModal.tsx](D:/GitHub/OneAI/src/renderer/src/components/HistoryModal.tsx)、[check-ui.mjs](D:/GitHub/OneAI/scripts/check-ui.mjs)。
 
 - **2026-11-13 13:10**：修复终端 WebGL 上下文溢出：侧栏改为文件夹树并合并旧工作区后，启动时会给每个任务都创建 xterm 实例与 WebGL 上下文，实测 24 个任务时只有 16 个保住 WebGL、控制台报 24 次「Too many active WebGL contexts」，最早创建的（即启动时的当前任务）被丢弃并退回 DOM 渲染。现改为任务第一次被选中时才创建实例（之后照常隐藏保活），WebGL 最多保留最近显示过的 8 个，当前终端一定有。实测：启动 1 个实例；再打开 12 个任务后 13 个实例、8 个 WebGL、当前终端有 WebGL、警告 0 次；`check:ui` 151 项通过（新增按需创建的 2 项回归检查）。入口：[TerminalViewport.tsx](D:/GitHub/OneAI/src/renderer/src/components/TerminalViewport.tsx)。
 
@@ -174,12 +176,4 @@
 - **2026-11-13 00:40**：① 侧栏折叠窄条补齐操作入口：顶部应用 Logo，每个 CLI 一个品牌图标按钮（点击新建该 CLI 任务），其下为该 CLI 的任务序号按钮（带状态点，可直接切换），底部保留切换工作文件夹与设置；此前窄条只渲染任务按钮，没有任务时整条为空。② 没有活动终端的空页面，顶栏不再显示额度（5 小时、7 天）与刷新按钮。入口：[Sidebar.tsx](D:/GitHub/OneAI/src/renderer/src/components/Sidebar.tsx)、[Topbar.tsx](D:/GitHub/OneAI/src/renderer/src/components/Topbar.tsx)。
 
 - **2026-11-13 00:24**：第二批终端区修复：修复搜索高亮未开启 `allowProposedApi` 导致搜索一律显示「正则无效」的回归；仍有终端进程时关闭窗口先确认（系统关机不拦截，界面无响应时再点一次可关）；正式版移除 Electron 默认菜单，消除 Ctrl+W 关窗、Ctrl+R 刷新与 Alt 弹菜单；终端链接改为 Ctrl+单击打开并带悬停提示；预览面板文字可选中、再次点击或点刷新按钮重读文件；焦点在按钮上时打字自动交还终端；语音录音上限由 30 秒改为 2 分钟并显示计时，新增 Ctrl+Shift+M；导出与复制改取终端渲染文本；自定义启动命令支持引号内空格；Shift+Enter 换行不作用于系统终端分组；关闭 Alt+单击移动光标；任务状态变化不再重复同步终端尺寸；Pi 会话记录改为增量读取。入口：[index.ts](D:/GitHub/OneAI/src/main/index.ts)、[TerminalViewport.tsx](D:/GitHub/OneAI/src/renderer/src/components/TerminalViewport.tsx)、[FilePreviewPanel.tsx](D:/GitHub/OneAI/src/renderer/src/components/FilePreviewPanel.tsx)、[check-ui.mjs](D:/GitHub/OneAI/scripts/check-ui.mjs)。
-
-- **2026-11-13 00:07**：终端区交互修复：Shift+Enter 发送 ESC+CR 换行；没有输入框定位的 CLI，语音图标固定右下角，有定位的 CLI 图标放在终端右侧留白里并去掉背景；Pi 语音图标固定在输入框首行；链接识别按单元格列号定位并合并折行，中文行与长网址可正确点击；搜索增加高亮、匹配计数、「无结果」「正则无效」，关闭搜索时清选区；`文件:行号` 在预览面板定位并高亮该行；语音报错随任务切换清除、点击麦克风不抢焦点、空引导页不显示麦克风；清屏不再在终端写提示行；删除永不触发的缓冲补拉逻辑。入口：[TerminalViewport.tsx](D:/GitHub/OneAI/src/renderer/src/components/TerminalViewport.tsx)、[TerminalSearchBar.tsx](D:/GitHub/OneAI/src/renderer/src/components/TerminalSearchBar.tsx)、[FilePreviewPanel.tsx](D:/GitHub/OneAI/src/renderer/src/components/FilePreviewPanel.tsx)。
-
-- **2026-11-13 00:07**：修复 Pi 右上角模型不随 `/model` 更新：Pi 切换模型只写会话记录，不改 `settings.json`；现优先读最近会话里最后一条 `model_change` / `thinking_level_change`，并监听会话目录即时刷新，多个 Pi 任务并存时取最近活跃的会话。入口：[quota-service.ts](D:/GitHub/OneAI/src/main/quota-service.ts)。
-
-- **2026-11-12 22:40**：Antigravity（`agy`）分组顶栏显示当前模型与推理等级（读取 `~/.gemini/antigravity-cli/settings.json`），5h / 7d 显示「--」并提示「无额度接口」。其额度只能通过 `agy` 存在系统 keyring 中的 OAuth token 调用 Google 内部接口 `v1internal:fetchAvailableModels` 获取，响应结构与是否含 5h / 7d 窗口均未核实，暂不读取凭据；如需实现须先确认授权与接口形态。入口：[quota-service.ts](D:/GitHub/OneAI/src/main/quota-service.ts)。
-
-- **2026-11-12 17:38**：修复 Kimi 输入法候选框在输入框下闪现后跳到右侧或右下角：17:22 的做法是改写 textarea 的内联 `left/top`，而 xterm 在重绘、光标移动和每次组合更新后的延时回调里都会把它写回真实光标，输入法在回写之后读到的是真实光标位置。现在定位点写入 `.xterm` 元素的 `--ime-left/--ime-top` 变量，由 `index.css` 的 `.xterm.ime-anchored` 规则以 `!important` 应用到 textarea 和组合视图，xterm 的内联回写不再生效，逐帧修正循环已删除；找不到 Kimi 输入框时移除该类，回到 xterm 默认行为。`check:ui` 新增真实光标停在行尾和状态栏两种情况的回归检查，夹具页面补上 UTF-8 声明。入口：[TerminalViewport.tsx](D:/GitHub/OneAI/src/renderer/src/components/TerminalViewport.tsx)、[index.css](D:/GitHub/OneAI/src/renderer/src/index.css)、[check-ui.mjs](D:/GitHub/OneAI/scripts/check-ui.mjs)。
 

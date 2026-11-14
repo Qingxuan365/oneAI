@@ -12,6 +12,18 @@ const CLI_LABELS: Record<HistoryEntry['cliId'], string> = {
   kimi: 'Kimi Code',
 };
 
+type HistoryFilter = 'all' | 'codex' | 'claude' | 'agy' | 'pi' | 'kimi';
+
+/** 下拉筛选项；Antigravity 与 Pi 暂无可读取的本机历史，选中后列表为空并给出说明 */
+const FILTER_OPTIONS: { id: HistoryFilter; label: string }[] = [
+  { id: 'all', label: '全部' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'claude', label: 'Claude Code' },
+  { id: 'agy', label: 'Antigravity' },
+  { id: 'pi', label: 'Pi' },
+  { id: 'kimi', label: 'Kimi Code' },
+];
+
 const entryKey = (entry: HistoryEntry) => `${entry.cliId}-${entry.id}`;
 
 function formatTime(timestamp: number): string {
@@ -40,7 +52,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [filter, setFilter] = useState<HistoryEntry['cliId'] | 'all'>('all');
+  const [filter, setFilter] = useState<HistoryFilter>('all');
   const [query, setQuery] = useState('');
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
@@ -112,40 +124,41 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
       bare
     >
       <div className="space-y-2.5 border-b border-line px-4 py-3">
-        <label className="flex items-center gap-2 rounded-md border border-line-strong bg-canvas px-3 py-2 text-fg-subtle focus-within:border-accent">
-          <Search size={14} className="shrink-0" />
-          <input
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索标题或目录"
-            className="min-w-0 flex-1 bg-transparent text-ui text-fg outline-none placeholder:text-fg-faint select-text"
-          />
-          {!loading && <span className="shrink-0 text-xs tabular-nums text-fg-faint">{visible.length} 条</span>}
-        </label>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {(['all', 'claude', 'codex', 'kimi'] as const).map((id) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setFilter(id)}
-              aria-pressed={filter === id}
-              className={`px-2.5 py-1 ${filter === id ? 'option-active' : 'option'}`}
-            >
-              {id === 'all' ? '全部' : CLI_LABELS[id]}
-            </button>
-          ))}
-          {visible.length > 0 && (confirmAll ? (
-            <span className="ml-auto flex items-center gap-1.5">
-              <button type="button" disabled={deleting} onClick={() => removeEntries(visible)} className={`${small} border-danger/60 bg-danger/10 text-danger hover:bg-danger/20`}>确认删除 {visible.length} 条（同时删除本机会话文件）</button>
-              <button type="button" onClick={() => setConfirmAll(false)} className={`${small} border-line text-fg-muted hover:bg-hover`}>取消</button>
-            </span>
-          ) : (
-            <button type="button" onClick={() => { setPendingKey(null); setConfirmAll(true); }} className={`${small} ml-auto flex items-center gap-1 border-line text-fg-subtle hover:bg-hover hover:text-danger`}>
-              <Trash2 size={12} />删除列表中全部
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <label className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-line-strong bg-canvas px-3 py-2 text-fg-subtle">
+            <Search size={14} className="shrink-0" />
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="搜索标题或目录"
+              className="min-w-0 flex-1 bg-transparent text-ui text-fg !outline-none placeholder:text-fg-faint select-text"
+            />
+            {!loading && <span className="shrink-0 text-xs tabular-nums text-fg-faint">{visible.length} 条</span>}
+          </label>
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value as HistoryFilter)}
+            aria-label="按 CLI 筛选"
+            className="input !w-auto shrink-0"
+          >
+            {FILTER_OPTIONS.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+          </select>
         </div>
+        {visible.length > 0 && (
+          <div className="flex justify-end">
+            {confirmAll ? (
+              <span className="flex items-center gap-1.5">
+                <button type="button" disabled={deleting} onClick={() => removeEntries(visible)} className={`${small} border-danger/60 bg-danger/10 text-danger hover:bg-danger/20`}>确认删除 {visible.length} 条（同时删除本机会话文件）</button>
+                <button type="button" onClick={() => setConfirmAll(false)} className={`${small} border-line text-fg-muted hover:bg-hover`}>取消</button>
+              </span>
+            ) : (
+              <button type="button" onClick={() => { setPendingKey(null); setConfirmAll(true); }} className={`${small} flex items-center gap-1 border-line text-fg-subtle hover:bg-hover hover:text-danger`}>
+                <Trash2 size={12} />删除列表中全部
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="min-h-[12rem] flex-1 overflow-y-auto p-2">
@@ -154,7 +167,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
         {!loading && !error && visible.length === 0 && (
           <div className="p-8 text-center text-sm text-fg-subtle">
             <p>{entries.length === 0 ? '还没有历史会话' : '没有符合条件的会话'}</p>
-            {entries.length === 0 && <p className="mt-1.5 text-xs text-fg-faint">只读取 Claude Code、Codex、Kimi Code 的本机会话；其他 CLI 没有可读的历史。</p>}
+            {(entries.length === 0 || filter === 'agy' || filter === 'pi') && <p className="mt-1.5 text-xs text-fg-faint">只读取 Claude Code、Codex、Kimi Code 的本机会话；Antigravity、Pi 等其他 CLI 暂无可读的历史。</p>}
           </div>
         )}
         {visible.map((entry, index) => {
