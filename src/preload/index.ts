@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listMusic: (dir?: string) => ipcRenderer.invoke('music:list', dir),
   readMusic: (filePath: string) => ipcRenderer.invoke('music:read', filePath),
   selectMusicDirectory: (currentPath?: string) => ipcRenderer.invoke('music:select-directory', currentPath),
+  resolveMusicStream: (url: string) => ipcRenderer.invoke('music:resolve-stream', url),
   loadWorkspaceState: () => ipcRenderer.sendSync('state:load') as string | null,
   saveWorkspaceState: (json: string) => ipcRenderer.send('state:save', json),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),

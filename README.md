@@ -86,7 +86,7 @@ Electron 31, React 18, TypeScript, Tailwind CSS, Lucide React, `@xterm/xterm`, `
 
 ## Privacy
 
-OneAI runs locally. It has no telemetry or analytics and no update checker. It reads the local session files of the CLIs you use to show history, summaries and usage, and it never reads or copies login credentials. The only network request OneAI makes itself is the Kimi Code quota lookup (`api.kimi.com`), which uses your own Kimi Code login and only happens while you use Kimi Code. The CLIs you start in the terminals talk to their own services as usual.
+OneAI runs locally. It has no telemetry or analytics and no update checker. It reads the local session files of the CLIs you use to show history, summaries and usage, and it never reads or copies login credentials. The only network request OneAI makes itself is the Kimi Code quota lookup (`api.kimi.com`), which uses your own Kimi Code login and only happens while you use Kimi Code. If you add online music in Settings, the player also contacts exactly those addresses (and the built-in radio stations only if you click them), and only to play them. The CLIs you start in the terminals talk to their own services as usual.
 
 ## Contributing
 

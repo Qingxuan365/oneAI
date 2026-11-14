@@ -18,6 +18,7 @@ import { SUMMARY_CLIS, formatAgo } from './taskSummary';
 import { ensureFolder, folderKey, folderName, groupRecent, loadAppState, moveBefore, nextTaskTitle, orderedTasks, saveAppState, tasksInFolder } from './workspaceState';
 import { accountCli, quotaKey, sanitizeAccounts, toSessionAccount } from './accounts';
 import { sanitizeCustomClis, toCliDef } from './customClis';
+import { sanitizeMusicStreams } from './musicStreams';
 import { getLanguage, isLanguage, setLanguage, systemLanguage, t } from './i18n';
 import { THEME_MODE } from './themes';
 import { isTaskAlive } from './taskStatus';
@@ -36,6 +37,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   previewMinimap: true,
   musicDirectory: '',
   musicPlayerVisible: true,
+  musicStreams: [],
   clockOffsetHours: 0,
   topbarDateVisible: true,
   accounts: [],
@@ -56,7 +58,7 @@ function loadSavedSettings(): AppSettings {
     const raw = localStorage.getItem('onedesktop_settings');
     if (raw) {
       const saved = JSON.parse(raw);
-      return { ...DEFAULT_SETTINGS, ...saved, accounts: sanitizeAccounts(saved?.accounts), customClis: sanitizeCustomClis(saved?.customClis), language: isLanguage(saved?.language) ? saved.language : systemLanguage(), onboardingDone: saved?.onboardingDone === true };
+      return { ...DEFAULT_SETTINGS, ...saved, accounts: sanitizeAccounts(saved?.accounts), customClis: sanitizeCustomClis(saved?.customClis), musicStreams: sanitizeMusicStreams(saved?.musicStreams), language: isLanguage(saved?.language) ? saved.language : systemLanguage(), onboardingDone: saved?.onboardingDone === true };
     }
   } catch {}
   return DEFAULT_SETTINGS;
@@ -913,6 +915,7 @@ ${entry.cwd}`}
         unreadTaskIds={unreadTaskIds}
         onOpenSettings={() => setIsSettingsOpen(true)}
         musicDirectory={settings.musicDirectory}
+        musicStreams={settings.musicStreams}
         showMusicPlayer={settings.musicPlayerVisible}
       />
 
@@ -1004,7 +1007,7 @@ ${entry.cwd}`}
         onClose={() => setIsSettingsOpen(false)}
         settings={settings}
         onUpdateSettings={setSettings}
-        onResetDefault={() => setSettings((prev) => ({ ...DEFAULT_SETTINGS, accounts: prev.accounts, customClis: prev.customClis, language: prev.language, onboardingDone: prev.onboardingDone }))}
+        onResetDefault={() => setSettings((prev) => ({ ...DEFAULT_SETTINGS, accounts: prev.accounts, customClis: prev.customClis, musicStreams: prev.musicStreams, language: prev.language, onboardingDone: prev.onboardingDone }))}
         onLoginAccount={(account) => void handleLoginAccount(account)}
         fallbackKnownClis={[...BUILTIN_CLIS, ...extraClis].filter((cli) => cli.id !== 'terminal').map((cli) => ({ id: cli.id, name: cli.name, command: cli.defaultCommand }))}
         installed={installed}

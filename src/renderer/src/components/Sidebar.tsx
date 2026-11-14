@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { BedDouble, ChevronRight, Copy, Folder, FolderOpen, FolderPlus, GitBranch, GripVertical, History, Moon, Pencil, Plus, RotateCcw, Settings, SlidersHorizontal, Sun, User, X } from 'lucide-react';
-import { Account, CliDef, FolderEntry, HistoryEntry, TaskSession } from '../types';
+import { Account, CliDef, FolderEntry, HistoryEntry, MusicStream, TaskSession } from '../types';
+
+const NO_STREAMS: MusicStream[] = [];
 import { TASK_STATUS_META, isTaskAlive } from '../taskStatus';
 import { folderKey, folderName, orderedTasks, RecentFolder } from '../workspaceState';
 import { SUMMARY_CLIS, formatAgo, formatClock } from '../taskSummary';
@@ -48,6 +50,7 @@ interface SidebarProps {
   onOpenHistory?: () => void;
   onOpenSettings?: () => void;
   musicDirectory?: string;
+  musicStreams?: MusicStream[];
   showMusicPlayer?: boolean;
 }
 
@@ -101,6 +104,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenHistory,
   onOpenSettings,
   musicDirectory = '',
+  musicStreams = NO_STREAMS,
   showMusicPlayer = true,
 }) => {
   const [greeting, setGreeting] = useState(getGreeting);
@@ -631,7 +635,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      {showMusicPlayer && <MusicPlayer directory={musicDirectory} />}
+      {showMusicPlayer && <MusicPlayer directory={musicDirectory} streams={musicStreams} />}
 
       {/* 侧边栏底部：添加文件夹与设置 */}
       <div className="flex shrink-0 items-center gap-1 border-t border-line bg-panel p-2">

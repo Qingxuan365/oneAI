@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listMusic: (dir) => ipcRenderer.invoke('music:list', dir),
   readMusic: (filePath) => ipcRenderer.invoke('music:read', filePath),
   selectMusicDirectory: (currentPath) => ipcRenderer.invoke('music:select-directory', currentPath),
+  resolveMusicStream: (url) => ipcRenderer.invoke('music:resolve-stream', url),
   getPathForFile: (file) => webUtils.getPathForFile(file),
   readPasteContent: () => ipcRenderer.invoke('clipboard:read-paste-content'),
   writeClipboardText: (text) => ipcRenderer.invoke('clipboard:write-text', text),

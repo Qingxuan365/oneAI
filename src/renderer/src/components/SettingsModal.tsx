@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Clock, Keyboard, LucideIcon, Minus, Monitor, Moon, Palette, Plus, RotateCcw, Settings, SlidersHorizontal, SquareTerminal, Sun, TerminalSquare, Users } from 'lucide-react';
 import { Account, AppSettings, CustomCli } from '../types';
 import { THEME_OPTIONS } from '../themes';
@@ -6,6 +6,7 @@ import { Modal } from './Modal';
 import { LANGUAGES, T, dateLocale, t } from '../i18n';
 import { AccountsSettings } from './AccountsSettings';
 import { CliSettings } from './CliSettings';
+import { MusicStreamsSettings } from './MusicStreamsSettings';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -113,6 +114,51 @@ const Switch: React.FC<{ checked: boolean; onChange: (checked: boolean) => void;
   </button>
 );
 
+/** 整数输入框：输入过程中允许暂时为空或只有负号，合法且在范围内时即时生效，失焦时补齐为范围内的值 */
+const IntField: React.FC<{ value: number; min: number; max: number; label: string; onCommit: (value: number) => void }> = ({ value, min, max, label, onCommit }) => {
+  const [text, setText] = useState(String(value));
+  const [focused, setFocused] = useState(false);
+  // ± 按钮、恢复默认等外部改动后，没在输入时同步显示
+  useEffect(() => { if (!focused) setText(String(value)); }, [value, focused]);
+  const parse = (raw: string) => (/^-?\d+$/.test(raw.trim()) ? Number(raw.trim()) : null);
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      aria-label={label}
+      value={text}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => {
+        setText(e.target.value);
+        const parsed = parse(e.target.value);
+        if (parsed !== null && parsed >= min && parsed <= max) onCommit(parsed);
+      }}
+      onBlur={() => {
+        setFocused(false);
+        const parsed = parse(text);
+        if (parsed !== null) onCommit(Math.max(min, Math.min(max, parsed)));
+        else setText(String(value));
+      }}
+      className="input w-16 select-text text-center font-mono"
+    />
+  );
+};
+
+/** 时间页的「当前顶栏显示」预览：每秒刷新，不用重新打开页面 */
+const ClockPreview: React.FC<{ offsetHours: number }> = ({ offsetHours }) => {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return (
+    <p className="text-xs text-fg-faint">
+      {t('当前顶栏显示：{time}', { time: new Date(now + offsetHours * 3600_000).toLocaleString(dateLocale(), { hour12: false }) })}
+      {offsetHours !== 0 && t('（系统时间 {sign}{n} 小时）', { sign: offsetHours > 0 ? '+' : '', n: offsetHours })}
+    </p>
+  );
+};
+
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
@@ -150,7 +196,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             type="button"
             onClick={onResetDefault}
             className="mr-auto flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-fg-subtle transition-colors hover:bg-hover hover:text-fg"
-            title={t('还原为：主题随系统、终端 15px、竖线光标、舒适缩放；账号与自定义 CLI 保留')}
+            title={t('还原为：主题随系统、终端 15px、竖线光标、舒适缩放；账号、自定义 CLI 与在线音乐保留')}
           >
             <RotateCcw size={12} />
             <span>{t('恢复默认设置')}</span>
@@ -360,16 +406,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <button type="button" onClick={() => setReminderHours(reminderHours - 1)} disabled={reminderHours <= 1} className="icon-btn border border-line-strong bg-canvas" title={t('减少 1 小时')} aria-label={t('提醒时长减少 1 小时')}>
                       <Minus size={13} />
                     </button>
-                    <input
-                      type="number"
-                      min={1}
-                      max={12}
-                      step={1}
-                      aria-label={t('工作时长提醒的小时数')}
-                      value={reminderHours}
-                      onChange={(e) => setReminderHours(e.target.value === '' ? 1 : Number(e.target.value))}
-                      className="input w-16 select-text text-center font-mono"
-                    />
+                    <IntField label={t('工作时长提醒的小时数')} value={reminderHours} min={1} max={12} onCommit={setReminderHours} />
                     <button type="button" onClick={() => setReminderHours(reminderHours + 1)} disabled={reminderHours >= 12} className="icon-btn border border-line-strong bg-canvas" title={t('增加 1 小时')} aria-label={t('提醒时长增加 1 小时')}>
                       <Plus size={13} />
                     </button>
@@ -414,6 +451,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   )}
                 </div>
                 <p className="text-xs text-fg-faint">{t('扫描所选目录下的 mp3 / wav / ogg / m4a / flac / aac / opus 文件，不含子目录；找到音乐后播放器显示在侧栏底部。')}</p>
+                <MusicStreamsSettings streams={settings.musicStreams} onChange={(musicStreams) => update({ musicStreams })} />
               </Section>
             </>
           )}
@@ -448,16 +486,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button type="button" onClick={() => setClockOffset(clockOffset - 1)} disabled={clockOffset <= -24} className="icon-btn border border-line-strong bg-canvas" title={t('减少 1 小时')} aria-label={t('减少 1 小时')}>
                     <Minus size={13} />
                   </button>
-                  <input
-                    type="number"
-                    min={-24}
-                    max={24}
-                    step={1}
-                    aria-label={t('顶栏时钟增加的小时数')}
-                    value={clockOffset}
-                    onChange={(e) => setClockOffset(e.target.value === '' ? 0 : Number(e.target.value))}
-                    className="input w-16 select-text text-center font-mono"
-                  />
+                  <IntField label={t('顶栏时钟增加的小时数')} value={clockOffset} min={-24} max={24} onCommit={setClockOffset} />
                   <button type="button" onClick={() => setClockOffset(clockOffset + 1)} disabled={clockOffset >= 24} className="icon-btn border border-line-strong bg-canvas" title={t('增加 1 小时')} aria-label={t('增加 1 小时')}>
                     <Plus size={13} />
                   </button>
@@ -471,10 +500,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </span>
                 <Switch label={t('显示年月日')} checked={settings.topbarDateVisible !== false} onChange={(checked) => update({ topbarDateVisible: checked })} />
               </div>
-              <p className="text-xs text-fg-faint">
-                {t('当前顶栏显示：{time}', { time: new Date(Date.now() + clockOffset * 3600_000).toLocaleString(dateLocale(), { hour12: false }) })}
-                {clockOffset !== 0 && t('（系统时间 {sign}{n} 小时）', { sign: clockOffset > 0 ? '+' : '', n: clockOffset })}
-              </p>
+              <ClockPreview offsetHours={clockOffset} />
             </Section>
           )}
 

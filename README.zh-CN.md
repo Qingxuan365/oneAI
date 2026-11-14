@@ -86,7 +86,7 @@ Electron 31、React 18、TypeScript、Tailwind CSS、Lucide React、`@xterm/xter
 
 ## 隐私
 
-OneAI 在本机运行，没有遥测和统计，也没有更新检查。它读取你所用 CLI 的本机会话文件来显示历史、摘要和用量，不读取、不复制登录凭据。OneAI 自己发起的网络请求只有 Kimi Code 的额度查询（`api.kimi.com`），使用你自己的 Kimi Code 登录，并且只在使用 Kimi Code 时发生。你在终端里启动的各 CLI 照常访问它们自己的服务。
+OneAI 在本机运行，没有遥测和统计，也没有更新检查。它读取你所用 CLI 的本机会话文件来显示历史、摘要和用量，不读取、不复制登录凭据。OneAI 自己发起的网络请求只有 Kimi Code 的额度查询（`api.kimi.com`），使用你自己的 Kimi Code 登录，并且只在使用 Kimi Code 时发生。如果你在设置里添加了在线音乐，播放器还会访问你添加的这些地址（内置电台只有你点了才会添加），且只用于播放。你在终端里启动的各 CLI 照常访问它们自己的服务。
 
 ## 参与贡献
 

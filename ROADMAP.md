@@ -121,6 +121,9 @@
 
 ## 4. 最近验证
 
+- **2026-11-14 22:22**：版本号升为 2.1.3 后 `npm run build:win` 通过，`release/OneAI-Setup-2.1.3.exe` 85179080 字节；沿用上一条验证的 `tsc`、`check:i18n`、`check:ui`，升版本本身未改代码。
+- **2026-11-14 22:19**：设置面板问题修复后 `tsc --noEmit` 通过，`npm run check:i18n` 500 条无缺失，`npm run check:ui` 282 项全部通过（新增 11 项：提醒时长 / 时钟增加小时数输入框的清空、负数与失焦补齐，默认账号目录拦截）；`npm run build:win` 通过，`release/OneAI-Setup-1.0.1.exe` 85179651 字节。输入框问题按代码推断并由新增检查覆盖，未在桌面实机复现原问题。
+- **2026-11-14 22:15**：在线音乐功能后 `tsc --noEmit` 通过，`npm run check:i18n` 499 条无缺失，`npm run check:ui` 273 项全部通过（含新增 7 项在线音乐设置检查）；`parsePlaylist` 用 .m3u / .pls 样例手测通过（过滤 file:// 与 .m3u8、补全相对地址、按序号排序）；`npm run build:win` 通过，`release/OneAI-Setup-1.0.1.exe` 85178902 字节。内置电台只用 curl 核对了 HTTP 可达（Radio Paradise 四个频道、KEXP 返回 200 / 206 音频类型），尚未在应用里实际播放；AAC 流能否被 Electron 解码待手工验收。
 - **2026-11-14 22:03**：「重新检测」按钮反馈修复后 `tsc --noEmit` 通过，`npm run check:i18n` 485 条无缺失，`npm run check:ui` 全部通过（含新增 2 项按钮反馈检查）；`npm run build:win` 通过，`release/OneAI-Setup-1.0.1.exe` 85176631 字节。未在桌面实际点击验证，待手工验收。
 - **2026-11-14 12:30**：升版本到 1.0.1 后 `tsc --noEmit` 通过，`npm run check:i18n` 484 条无缺失，`npm run check:ui` 264 项全部通过，`npm run build:win` 通过（`release/OneAI-Setup-1.0.1.exe` 约 81 MB）。
 
@@ -184,6 +187,9 @@
 
 ## 5. 最近完成
 
+- **2026-11-14 22:22** 应用版本升为 2.1.3（`package.json` 与 `package-lock.json`），安装包名为 `OneAI-Setup-2.1.3.exe`；已合并到并推送 `main`，未创建 tag 与 GitHub Release。
+- **2026-11-14 22:19** 修复设置面板 4 处问题：提醒时长输入框清空即被重置为 1、时钟「增加小时数」无法用键盘输入负数（两处改为整数输入框：输入中允许暂时为空或只有负号，合法值即时生效，失焦补齐到范围内）；时间页「当前顶栏显示」改为每秒刷新；账号配置目录不能与默认账号目录相同（含 `~` 写法）。入口：[SettingsModal.tsx](D:/GitHub/OneAI/src/renderer/src/components/SettingsModal.tsx)、[accounts.ts](D:/GitHub/OneAI/src/renderer/src/accounts.ts)、[check-ui.mjs](D:/GitHub/OneAI/scripts/check-ui.mjs)。
+- **2026-11-14 22:15** 音乐播放器新增在线音乐：「设置 → 提醒 → 音乐播放器」可添加音频直链、电台流、.m3u / .pls 歌单地址，并内置 5 个免费电台（Radio Paradise 四个频道、KEXP）点击即加入；在线曲目排在本地音乐之后，用独立 audio 元素播放（跨域音频接入频谱分析器会被静音，在线曲目的跳动条为装饰动画）；不支持 .m3u8（HLS）；「恢复默认设置」保留在线音乐；README 隐私说明、features、AGENTS 同步更新。SomaFM 的流地址在本机返回 403，未内置（待确认是否网络原因）。入口：[music-library.ts](D:/GitHub/OneAI/src/main/music-library.ts)、[MusicPlayer.tsx](D:/GitHub/OneAI/src/renderer/src/components/MusicPlayer.tsx)、[MusicStreamsSettings.tsx](D:/GitHub/OneAI/src/renderer/src/components/MusicStreamsSettings.tsx)。
 - **2026-11-14 22:03** 修复设置 → CLI 的「重新检测」点击后看起来没反应：检测是瞬间完成的同步 PATH 查找，结果不变时界面毫无变化；按钮现在检测期间显示旋转图标、文字变「检测中…」并禁用，完成后旁边显示「已重新检测」3 秒。未改检测逻辑；主进程沿用启动时的 PATH，新增 PATH 目录后可能仍需重启应用（待确认）。入口：[CliSettings.tsx](D:/GitHub/OneAI/src/renderer/src/components/CliSettings.tsx)、[check-ui.mjs](D:/GitHub/OneAI/scripts/check-ui.mjs)。
 - **2026-11-14 21:55** 提交规范改为：由 Claude 参与完成的提交，信息末尾加 `Co-Authored-By: Claude <noreply@anthropic.com>`（覆盖原「不添加 Co-Authored-By」）；本次提交即按此署名。Claude 是否出现在 GitHub 仓库 Contributors 列表，待推送后到仓库页确认（待确认）；Codex 无可关联的 GitHub 邮箱，仅在 README 署名。入口：[AGENTS.md](D:/GitHub/OneAI/AGENTS.md)。
 - **2026-11-14 21:51** 两份 README 新增「贡献者 / Contributors」小节，列入 Claude（Anthropic）与 Codex（OpenAI）；仅文档改动，未执行构建。GitHub 仓库页右侧的 Contributors 列表由提交作者或 `Co-authored-by` 决定，历史提交未改写，尚未生效，待确认是否在后续提交中加 trailer（需先改 AGENTS.md「不添加 Co-Authored-By」规则）。入口：[README.md](D:/GitHub/OneAI/README.md)、[README.zh-CN.md](D:/GitHub/OneAI/README.zh-CN.md)。

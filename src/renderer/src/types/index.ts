@@ -59,6 +59,13 @@ export interface CustomCli {
   command: string;         // 完整启动命令，可带参数，如 `mycli --model x`
 }
 
+// 在线音乐：一个音频直链、电台流或 .m3u / .pls 歌单地址；name 为空时播放器用网址主机名代替
+export interface MusicStream {
+  id: string;
+  name: string;
+  url: string;
+}
+
 /** 侧栏中的一个工作文件夹；任务按 cwd 归属到文件夹，文件夹按此数组顺序显示 */
 export interface FolderEntry {
   path: string;            // 首次出现时的原始路径（保留大小写），比较时用 folderKey 归一化
@@ -87,6 +94,7 @@ export interface AppSettings {
   previewMinimap: boolean; // 文件预览面板右侧是否显示代码缩略图（minimap），默认 true
   musicDirectory: string; // 顶栏音乐播放目录，空字符串表示系统「音乐」目录
   musicPlayerVisible: boolean; // 侧栏底部是否显示音乐播放器，默认 true
+  musicStreams: MusicStream[]; // 用户添加的在线音乐（音频直链、电台流、.m3u / .pls 歌单），默认空；「恢复默认设置」不会清空
   clockOffsetHours: number; // 顶栏时钟相对系统时间增加的小时数，默认 0（-24 ~ 24 的整数）
   topbarDateVisible: boolean; // 窗口最大化时顶栏时钟是否显示年月日（含农历）与星期，默认 true
   accounts: Account[]; // 多账号配置（Codex / Claude Code / Kimi Code），默认空；「恢复默认设置」不会清空
@@ -162,6 +170,7 @@ export interface ElectronTerminalAPI {
   listMusic?: (dir?: string) => Promise<{ directory: string; tracks: Array<{ name: string; path: string }> }>;
   readMusic?: (filePath: string) => Promise<Uint8Array | null>;
   selectMusicDirectory?: (currentPath?: string) => Promise<string | null>;
+  resolveMusicStream?: (url: string) => Promise<Array<{ name: string; url: string }>>;
   getPathForFile?: (file: File) => string;
   readPasteContent?: () => Promise<{ type: 'text' | 'file-path' | 'image-path' | 'none'; content: string }>;
   writeClipboardText?: (text: string) => Promise<boolean>;
