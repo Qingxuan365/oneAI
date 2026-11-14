@@ -162,6 +162,6 @@ interface Account {
 ## 5. Git 提交规范
 
 - 本项目面向全球用户并已开源，**commit 信息一律使用英文**；此规则覆盖全局规则里「Commit 信息使用中文」的默认约定，其余提交规则（仅在明确要求时才 `add` / `commit` / `push`、提交前更新文档并完成必要验证）不变。
-- 前缀沿用 `init:`、`feat:`、`fix:`、`refactor:`、`docs:`、`chore:`；描述写清改了什么、原因和影响，禁止使用 "fix bug"、"update code"、"tweaks" 等泛化表述；不添加 `Co-Authored-By`。
+- 前缀沿用 `init:`、`feat:`、`fix:`、`refactor:`、`docs:`、`chore:`；描述写清改了什么、原因和影响，禁止使用 "fix bug"、"update code"、"tweaks" 等泛化表述；由 Claude 参与完成的提交，信息末尾加一行 `Co-Authored-By: Claude <noreply@anthropic.com>`，让 Claude 计入 GitHub 贡献者；此规则覆盖全局规则里「不添加 `Co-Authored-By`」，其他署名不添加。
 - 示例：`feat: add custom CLI support in Settings so any command can be launched as a task`。
 - 本规则生效前的历史提交保持原样，不改写历史。
