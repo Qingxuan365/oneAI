@@ -17,7 +17,8 @@ d:/GitHub/OneAI/
 ├── .gitignore
 ├── AGENTS.md                  # 项目规范
 ├── ROADMAP.md                 # 进度与状态源
-├── README.md                  # 项目说明与启动指引
+├── README.md                  # 项目说明与启动指引（简体中文）
+├── README.en.md               # README.md 的英文版；两份内容须同步更新
 ├── package.json
 ├── tsconfig.json
 ├── vite.config.ts             # 渲染进程、主进程构建及 preload 复制
