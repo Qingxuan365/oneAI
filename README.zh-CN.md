@@ -92,6 +92,11 @@ OneAI 在本机运行，没有遥测和统计，也没有更新检查。它读�
 
 欢迎提交 Issue 和 Pull Request。项目约定、目录结构和检查方式见 [AGENTS.md](AGENTS.md)。要点：commit 信息使用英文，所有界面文案都要经过 `t()` 并在 `src/shared/en.ts` 里登记英文，`npm run check:ui` 与 `npm run check:i18n` 应通过。
 
+## 贡献者
+
+- [Claude](https://claude.com/claude-code)（Anthropic）-- AI 结对编程伙伴；项目中大量代码、测试和文档由 Claude Code 协助完成。
+- [Codex](https://openai.com/codex)（OpenAI）-- AI 结对编程伙伴；同样参与了代码与文档的编写和审查。
+
 ## 许可证
 
 [MIT](LICENSE)

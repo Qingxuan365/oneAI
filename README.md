@@ -92,6 +92,11 @@ OneAI runs locally. It has no telemetry or analytics and no update checker. It r
 
 Issues and pull requests are welcome. Project conventions, directory layout and checks are described in [AGENTS.md](AGENTS.md) (written in Chinese). In short: commit messages are written in English, every user-facing string goes through `t()` with an entry in `src/shared/en.ts`, and `npm run check:ui` and `npm run check:i18n` should pass.
 
+## Contributors
+
+- [Claude](https://claude.com/claude-code) (Anthropic) -- AI pair programmer; much of the code, tests and documentation was written with Claude Code.
+- [Codex](https://openai.com/codex) (OpenAI) -- AI pair programmer; also used to write and review code and documentation.
+
 ## License
 
 [MIT](LICENSE)

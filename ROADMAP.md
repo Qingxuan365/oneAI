@@ -183,6 +183,7 @@
 
 ## 5. 最近完成
 
+- **2026-11-14 21:51** 两份 README 新增「贡献者 / Contributors」小节，列入 Claude（Anthropic）与 Codex（OpenAI）；仅文档改动，未执行构建。GitHub 仓库页右侧的 Contributors 列表由提交作者或 `Co-authored-by` 决定，历史提交未改写，尚未生效，待确认是否在后续提交中加 trailer（需先改 AGENTS.md「不添加 Co-Authored-By」规则）。入口：[README.md](D:/GitHub/OneAI/README.md)、[README.zh-CN.md](D:/GitHub/OneAI/README.zh-CN.md)。
 - **2026-11-14 11:12** 修复历史会话抽屉的关闭按钮与窗口右上角关闭按钮重叠、点击后整个应用退出：抽屉型弹窗的遮罩与面板改为从顶栏下沿（44px）开始，不再覆盖顶部窗口控件；居中弹窗不变。入口：[Modal.tsx](D:/GitHub/OneAI/src/renderer/src/components/Modal.tsx)、[check-ui.mjs](D:/GitHub/OneAI/scripts/check-ui.mjs)。
 - **2026-11-14 11:08** 历史会话抽屉 CLI 筛选下拉改为由已读取的历史记录生成：只列出实际出现过的 CLI（按显示名排序，未知 CLI 显示其 id），选中的 CLI 没有历史时回到「全部」；去掉写死的 Antigravity / Pi 选项。入口：[HistoryModal.tsx](D:/GitHub/OneAI/src/renderer/src/components/HistoryModal.tsx)、[check-ui.mjs](D:/GitHub/OneAI/scripts/check-ui.mjs)。
 - **2026-11-14 06:21**：历史会话抽屉：CLI 筛选由按钮组改为搜索框右侧的下拉（全部、Codex、Claude Code、Antigravity、Pi、Kimi Code），搜索框聚焦时不再出现轮廓与高亮边框，「删除列表中全部」单独一行靠右；选中 Antigravity / Pi 时列表为空并提示这些 CLI 暂无可读历史（下拉项已于 2026-11-14 11:08 改为由实际历史数据生成，不再含这两项）。入口：[HistoryModal.tsx](D:/GitHub/OneAI/src/renderer/src/components/HistoryModal.tsx)、[check-ui.mjs](D:/GitHub/OneAI/scripts/check-ui.mjs)。
