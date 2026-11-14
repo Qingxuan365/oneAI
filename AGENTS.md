@@ -19,6 +19,8 @@ d:/GitHub/OneAI/
 ├── ROADMAP.md                 # 进度与状态源
 ├── README.md                  # 项目说明与启动指引（英文，GitHub 默认展示）
 ├── README.zh-CN.md            # README.md 的简体中文版；两份内容须同步更新
+├── docs/                      # features.md / features.zh-CN.md：每项功能的详细行为（README 只放概览），两份须同步更新；另有 user-research-self-use.md
+├── LICENSE                    # MIT 许可证
 ├── package.json
 ├── tsconfig.json
 ├── vite.config.ts             # 渲染进程、主进程构建及 preload 复制
@@ -28,7 +30,7 @@ d:/GitHub/OneAI/
 ├── index.html                 # 渲染进程 HTML 入口
 ├── public/                    # 静态资源（favicon 等）
 ├── resources/                 # 应用图标等打包资源
-├── scripts/                   # 界面回归检查脚本 check-ui.mjs
+├── scripts/                   # 界面回归检查脚本 check-ui.mjs；多语言完整性检查 check-i18n.mjs（npm run check:i18n）
 ├── src/
 │   ├── main/                  # Electron 主进程代码
 │   │   ├── index.ts           # 窗口创建、应用生命周期与 IPC 注册
@@ -40,12 +42,17 @@ d:/GitHub/OneAI/
 │   │   ├── git-branch.ts      # 读取文件夹所在 Git 仓库的当前分支（只读 .git/HEAD，不执行 git）
 │   │   ├── account-env.ts     # 多账号：各 CLI 的配置目录环境变量、路径校验与目录创建，只创建目录不读凭据
 │   │   ├── account-login.ts   # 多账号：调用 CLI 自带状态命令判断登录状态（Kimi Code 只检查凭据文件是否存在）
-│   │   ├── cli-detect.ts      # 按 PATH 检测各 CLI 是否已安装，决定「+」菜单里可新建的 CLI
+│   │   ├── cli-detect.ts      # 按 PATH 检测已知 CLI（清单取自 known-clis.json）与用户自定义 CLI 是否已安装，决定「+」菜单里可新建的 CLI
+│   │   ├── known-clis.json    # 已知 AI 编程 CLI 清单（id / 名称 / 命令），新增支持的 CLI 只改这里
+│   │   ├── i18n.ts            # 主进程文案翻译（t()），语言由渲染进程通过 IPC 同步
 │   │   ├── file-preview.ts    # 文件预览：路径解析与只读读取，限制在任务 cwd 内
 │   │   └── session-history.ts # 读取 Claude / Codex / Kimi 本机历史会话及恢复命令
 │   ├── preload/               # 预加载脚本
 │   │   ├── index.cjs          # 运行时实际加载的 preload，由 vite.config.ts 复制到 dist-electron/preload/
 │   │   └── index.ts           # 同一组接口的 TS 版本，不参与构建；修改接口时须与 index.cjs 同步
+│   ├── shared/                # 主进程与渲染进程共用
+│   │   ├── i18n.ts            # 语言类型、系统语言判断与 translate()
+│   │   └── en.ts              # 英文对照表：键是代码里的中文原文，值是英文
 │   └── renderer/              # React 前端渲染进程
 │       └── src/
 │           ├── main.tsx
@@ -53,7 +60,9 @@ d:/GitHub/OneAI/
 │           ├── index.css                 # 语义颜色 token、各主题配色变量、通用控件类（icon-btn / btn-* / input / option）与顶栏容器查询断点
 │           ├── themes.ts                 # 主题明暗基调与设置页主题选项（浅 / 深、护眼、编辑器三组）；新增主题须同步 index.css、index.html 首帧脚本的主题白名单与 TerminalViewport 终端配色
 │           ├── taskSummary.ts            # 任务行第二行支持的 CLI 与「新会话 · 时间」的格式化
-│           ├── clis.ts                   # 内置 CLI 定义（CliDef）、默认文件夹与首次启动的示例任务
+│           ├── clis.ts                   # 内置 CLI 定义（CliDef）与默认文件夹（本机用户主目录，由主进程提供）；全新安装不再预置示例任务
+│           ├── i18n.ts                   # 渲染进程多语言：t() / T() / setLanguage，文案以中文原文为键
+│           ├── customClis.ts             # 自定义 CLI：id 生成、转 CliDef、读取过滤与保存前校验
 │           ├── workspaceState.ts         # 文件夹树的状态：folderKey、排序、旧数据迁移、状态校验、最近任务归类与读写
 │           ├── accounts.ts               # 多账号：支持的 CLI 与登录命令、环境变量文本解析、账号校验
 │           ├── components/
@@ -70,6 +79,8 @@ d:/GitHub/OneAI/
 │           │   ├── UsageModal.tsx        # 本周用量弹窗（顶栏用量按钮 / Ctrl+Shift+U）：按 CLI → 账号 → 模型分组的用量表与近 26 周每日请求数方块图
 │           │   ├── SettingsModal.tsx     # 分页设置：外观、时间、终端、账号、提醒、快捷键列表
 │           │   ├── AccountsSettings.tsx  # 设置 → 账号：添加 / 编辑 / 删除账号、登录入口与登录状态
+│           │   ├── CliSettings.tsx       # 设置 → CLI：已知 CLI 的检测状态（清单取自主进程）、重新检测、添加 / 编辑 / 删除自定义 CLI
+│           │   ├── OnboardingModal.tsx   # 首次启动引导：选择界面语言，再显示检测到的 CLI、默认文件夹与小提示；完成后不再弹出
 │           │   ├── Modal.tsx             # 所有弹窗共用的外壳（遮罩、标题栏、Esc 关闭、焦点归还）
 │           │   ├── ConfirmDialog.tsx     # 应用内确认与通知弹窗，替代原生 confirm / alert
 │           │   ├── MusicPlayer.tsx       # 侧栏底部迷你音乐播放器，无音乐文件时不显示
@@ -119,6 +130,10 @@ interface Account {
 
 文件夹与任务约定：任务是一个全局有序数组（数组顺序即侧栏顺序，也是 Ctrl+Tab / Ctrl+数字 的顺序），与 `folders`（有序）、`activeTaskId`、`lastFolder`、`extraClis` 一起作为 `v2` 状态持久化；任务只能在所属文件夹内调整顺序、不能跨文件夹；多个文件夹的终端同时运行，切换任务或文件夹不得结束终端；旧的按工作区存储的数据只在首次启动时迁移，之后原样保留、不再更新、不得删除。
 
+自定义 CLI 约定：`AppSettings.customClis`（`{ id: 'custom-xxxx', name, command }`）由用户在「设置 → CLI」维护，运行时转成 `CliDef`（`custom: true`，通用终端图标），启动时整条命令交给 PowerShell 解析（`createSession` 的 `shell` 选项）；检测与内置 CLI 一样按 `PATH` 进行，命令不存在时隐藏；删除时必须关闭并移除其任务；额度、任务摘要、历史会话、用量统计和多账号不对自定义 CLI 提供；「恢复默认设置」不清除自定义 CLI、账号、语言和首次引导状态。
+
+多语言约定：`AppSettings.language`（`zh-CN` | `en`）与 `onboardingDone` 决定界面语言和首次引导；首次启动按系统语言预选；全新安装不预置任务与文件夹。
+
 多账号约定：账号只是「配置目录 + 环境变量」，OneAI 不复制、不读取登录凭据；额度、模型等按账号 id 单独缓存；账号配置被删除后其任务拒绝启动，不得回落到默认账号；Antigravity（`agy`）的登录在系统凭据库、无法按目录隔离，不纳入多账号。
 
 ## 4. 编码与设计红线
@@ -134,5 +149,19 @@ interface Account {
    - 新弹窗统一使用 `Modal.tsx` 外壳，确认与通知使用 `ConfirmDialog.tsx`，不调用原生 `window.confirm` / `window.alert`。
    - 全局快捷键在 `App.tsx` 捕获阶段统一处理，只使用 `Ctrl+Tab`、`Ctrl+数字`、`Ctrl+Shift+字母`、`Ctrl+,` 这类终端程序不用的组合，不占用 `Ctrl+字母`；新增后同步更新设置页的快捷键列表。
    - 顶栏新增内容前先确认各宽度下不重叠，次要信息通过 `index.css` 的 `topbar` 容器查询收起；断点按各块自然宽度估算，改动后须在 `npm run check:ui` 的宽度检查中确认无重叠且任务名不被挤没。
-5. **修改后交付**：
+5. **多语言**：
+   - 所有会显示给用户的文案必须经过 `t()`（渲染进程见 `i18n.ts`，主进程见 `main/i18n.ts`），代码里写中文原文，并在 `src/shared/en.ts` 登记英文译文；模块级常量先用 `T()` 登记原文、渲染时再 `t()`，需要随语言变化的对象属性用 getter。占位符写成 `{name}`，中英文必须一致。
+   - 新增或修改文案后执行 `npm run check:i18n`，必须无缺失译文；不使用「已被某语言占用」的拼接句式，整句翻译。
+   - 切换语言必须即时生效，无需重启；日期、星期等不得写死中文格式。
+6. **不写死本机信息**：
+   - 路径、CLI 清单、语言等一律取自本机：默认文件夹与各 CLI 默认配置目录取用户主目录（主进程 IPC），CLI 是否可用按 `PATH` 检测，界面语言按系统语言预选；示例文案不得出现个人用户名、固定盘符路径或个人称呼。
+   - 新增支持的 CLI 只改 `src/main/known-clis.json`，不在界面里再写一份清单。
+7. **修改后交付**：
    - 每次修改项目文件并完成必要验证后，自动执行 `npm run build:win`，生成 Windows 安装版 `release/OneAI-Setup-<version>.exe`（不再默认生成便携版，需要时用 `npm run build:portable`）；核对产物的生成时间和大小，失败时明确报告。
+
+## 5. Git 提交规范
+
+- 本项目面向全球用户并已开源，**commit 信息一律使用英文**；此规则覆盖全局规则里「Commit 信息使用中文」的默认约定，其余提交规则（仅在明确要求时才 `add` / `commit` / `push`、提交前更新文档并完成必要验证）不变。
+- 前缀沿用 `init:`、`feat:`、`fix:`、`refactor:`、`docs:`、`chore:`；描述写清改了什么、原因和影响，禁止使用 "fix bug"、"update code"、"tweaks" 等泛化表述；不添加 `Co-Authored-By`。
+- 示例：`feat: add custom CLI support in Settings so any command can be launched as a task`。
+- 本规则生效前的历史提交保持原样，不改写历史。

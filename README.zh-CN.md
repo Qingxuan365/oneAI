@@ -1,101 +1,66 @@
 [English](README.md) | **简体中文**
 
-# OneAI 全栈工作台
+# OneAI
 
-OneAI 是专为本地运行多个 AI 编程 CLI 工具（如 Codex、Kimi Code、OpenCode 等）打造的桌面集成工作台。
+**一个桌面工作台，管理所有 AI 编程 CLI。**
 
----
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4)
+![Electron 31](https://img.shields.io/badge/Electron-31-47848f)
 
-## 核心特性
+OneAI 把 Codex、Claude Code、Kimi Code、OpenCode 等 AI 编程 CLI 放进同一个窗口并排运行，每个任务都是独立的真实终端。切换任务和文件夹时会话不会中断，额度、用量和账号一目了然。
 
-1. **左侧文件夹树与多任务**：
-   - 任务行用各大模型官方品牌矢量 Logo（Codex、Kimi Code、OpenCode 等）区分 CLI。
-   - 一级是工作文件夹（Git 分支徽标、任务数、折叠状态），二级是该文件夹里并发运行的任务（独立状态指示灯与关闭入口）。多个文件夹的终端可以同时运行，切换任务或文件夹不会结束任何终端。
-   - 可通过 `Tab` 聚焦文件夹、任务和关闭按钮，使用 `Enter` 或空格操作；聚焦任务行时显示关闭入口。运行中和等待输入的状态点保持静态。
-   - 点击文件夹行右侧的「+」，在弹出的菜单里选 CLI（有账号的 CLI 下方另有「用 <账号> 新建」），直接用默认名称（`Task N`）、该 CLI 的默认命令在该文件夹启动，不经过弹窗；菜单里的「自定义命令与目录…」或 `Ctrl + Shift + N` 打开弹窗自定义 CLI、名称、命令与目录。`Ctrl + Shift + T` 沿用当前任务的 CLI，在当前文件夹一键新建。
-   - 任务行第二行显示该任务会话里最近一条用户消息（Claude Code、Codex、Kimi Code），还没有消息时显示「新会话 · 创建时间」（时间与顶栏时钟共用「设置 → 时间」的偏移）；其他 CLI 没有可读的会话文件，保持单行。每 5 秒刷新，停止的任务也显示。使用账号的任务读取该账号配置目录里的会话。
-   - 任务与会话的对应是启发式的：从历史恢复的任务按会话 id 对应；其余任务按「会话开始时间不早于任务创建时间」，把会话分给同文件夹、同 CLI（同账号目录）里最近创建的任务。同一文件夹里并发多个同类任务时可能对错，在 OneAI 之外手动开的同文件夹会话也可能被误归。
-   - 右键文件夹可新建任务、在资源管理器中打开、复制路径或从侧栏移除（会结束其中的终端并移除这些任务，CLI 的历史会话不受影响）。
-   - 「最近任务」区由 Claude Code、Codex、Kimi Code 的本机历史会话按文件夹归类（已在「当前任务」里的文件夹不重复，最多 8 个文件夹、每个 5 条），默认折叠；展开后点击会话即恢复为当前任务。其他 CLI 没有可读的历史会话，不会出现在这里。
-   - Git 分支徽标只读 `.git/HEAD`（向上查找仓库，兼容 worktree；游离 HEAD 显示 7 位提交号），不执行 git 命令，也不显示改动状态；文件夹列表变化、窗口获得焦点和每 30 秒刷新。
-   - 后台任务的输出停下（转为空闲）或进程退出后，侧栏该任务行显示「待查看」，折叠窄条上以实心高亮显示，收起的文件夹计数同步变色；切换到该任务后标记消失。标记只按输出静默判断，不区分「已完成」与「等待确认」，重启应用后不保留。
-   - 右键任务可重命名、重启（已停止时为启动）、复制工作目录、在资源管理器中打开目录或关闭任务；鼠标中键点击任务、或按 `Ctrl + Shift + W` 关闭当前任务，进程仍在运行时会先确认。
-   - 任务可在所属文件夹内拖拽排序（不能拖到其他文件夹），聚焦任务后也可按 `Alt + ↑/↓` 移动；`Ctrl + 数字` 的序号随顺序变化。
-   - 双击任务或按 `F2` 可重命名；`Ctrl + Tab` / `Ctrl + Shift + Tab` 切换任务，`Ctrl + 1…9` 跳到第 N 个任务，`Ctrl + Shift + B` 折叠侧栏。完整列表见「设置 → 快捷键」。
-   - 音乐目录中有音频文件时，侧栏底部显示迷你播放器；目录在「设置 → 提醒」中选择。
-   - 拖动文件夹名称左侧的排序手柄可调整文件夹顺序；聚焦手柄后也可按 `Alt + ↑/↓` 排序。
-   - 侧栏顶部显示 Logo、`All agents in one.` 标语、版本号（取自 `package.json`）与问候语。
-   - 点击顶栏左端的侧栏按钮可折叠或展开导航栏；折叠状态会保存，当前终端继续运行。折叠后保留窄条：每个文件夹一个按钮（点击弹出 CLI 菜单新建任务），其下是任务序号按钮（点击切换），底部保留添加文件夹与设置。
+## 为什么做 OneAI
 
-2. **右上方顶栏单行横排实时额度**：
-   - 纯扁平单行横向纯文字排版（如 `Tokens: 8.2M • Cost: $4.29 • 5h: 82% (2h 45m) • 7d: 65% (Resets Sun) • Model: Sonnet 5.5 medium ↻`）。
-   - 严格遵循零弹窗、零悬浮窗、零遮挡原则，集成倒计时与极简刷新。
-   - 搜索、清屏、重启和日志导出入口直接显示在会话状态旁；启动中禁用重启按钮。顶栏空间不足时依次收起时钟、网速、内存、CPU、Tokens / Cost、额度重置时间和模型名，任务标题自动截断；收起的额度信息可在鼠标悬停提示中查看。
-   - 没有活动终端会话时不显示额度与刷新按钮。Claude Code 的模型与推理等级取自 statusLine 快照，Codex 取最近一轮会话记录（之后改过 `config.toml` 时以配置为准），会话内切换后随即更新。
-   - 顶栏时钟默认显示系统时间，可在「设置 → 时间」中设置增加的小时数（-24 到 24）。
-   - Tokens 与 Cost 是「最近活跃会话」的累计值：Claude Code 的 Tokens 从会话记录累计（输入 + 输出 + 缓存读写，不含子代理的独立记录），Cost 取自 statusLine 快照；Codex 只有 Tokens（取最新会话的累计 token），没有 Cost；其他 CLI 不显示。多个同类会话并行时无法区分是哪一个。
-   - 顶栏右侧另有整机 `CPU / Mem / Net`，每 2 秒刷新，与当前是否有终端无关；窗口最小化时暂停采样。网速只统计状态为 Up 的物理网卡（不含 VPN / 代理的虚拟网卡与本机回环），需要系统自带的 Windows PowerShell。
+同时使用多个 AI 编程 CLI，通常意味着一堆终端窗口：分不清哪个还在跑、每个登录的是哪个账号、额度还剩多少。OneAI 把它们放进同一个侧栏，按项目文件夹分组，你在一个任务里工作时，其他终端仍在后台继续运行。
 
-   - 原生标题栏已隐藏：顶栏与侧栏品牌头部可拖动窗口，最小化 / 最大化 / 关闭按钮在右上角，颜色和高度随主题与界面缩放同步。
-   - 没有活动任务时，顶栏左侧显示新任务将要启动的文件夹与 Git 分支；中间区域列出最近 3 条历史会话（点击恢复）和各 CLI 的新建按钮。
-   - 顶栏右侧的历史按钮（或 `Ctrl + Shift + H`）打开历史会话抽屉：按今天 / 昨天 / 更早分段，显示文件夹名、Git 分支和相对时间，已在侧栏打开的会话标「已打开」，可按 CLI 筛选、搜索和删除（删除会同时删除本机会话文件）。
-   - 历史按钮左侧的用量按钮（或 `Ctrl + Shift + U`）打开「本周用量」面板：统计本机 Claude Code、Codex、Antigravity、Pi 的会话记录（含已配置账号的目录；Codex 同时读取 `sessions` 与 `archived_sessions`，并支持已压缩的 `.jsonl.zst`，Codex 自动审查子会话排在 Codex 组末尾并标「子会话」），按 CLI → 账号 → 模型分组（每组带请求数与 Tokens 小计；某个 CLI 只有默认账号时不多显示账号一层，账号名取自「设置 → 账号」，默认账号显示为「默认账号」；Antigravity、Pi 无法区分账号，统一归默认账号），列出本周（周一起）各 CLI 下各模型的请求数、会话数和输入 / 输出 / 缓存 Tokens，并附近 26 周每日请求数的绿色方块图（类似 GitHub 贡献图，颜色越深当天请求越多，悬停显示各 CLI（及账号）的请求数）。请求数为模型回复次数；Antigravity 记录里没有模型字段，模型名按会话内的切换记录推断；Kimi Code、OpenCode 暂不统计（缺少可核对的本机会话样本），只存在于 Codex 的 SQLite 线程库（`thread_history_1.sqlite`）而没有会话文件的对话也统计不到；首次打开需解压历史会话，可能要几秒，之后走缓存；本机只保留一段时间的会话记录，更早的日期显示为空。
+## 亮点
 
-3. **高性能保活终端视窗（Keep-Alive Viewport）**：
-   - 基于 `@xterm/xterm` 与 Windows ConPTY（`node-pty`）底层原生驱动。
-   - 终端输出中指向任务工作目录内真实文件的路径（绝对或相对，可带 `:行号`）会显示为链接，按住 `Ctrl` 单击后在终端右侧打开只读预览面板（网址同样按住 `Ctrl` 单击打开），支持文本和图片，面板宽度可拖拽；文本预览右侧带有类似 VS Code 的代码缩略图（minimap），显示可见范围，点击或拖动可快速滚动，可在「设置 → 终端 → 文件预览」中开关（默认开启）；带行号时定位并高亮该行，预览文字可选中复制，再次点击路径或点刷新按钮会重新读取文件。超过 1 MB 的文本、超过 5 MB 的图片、二进制文件和工作目录外的文件不预览。
-   - 在 AI CLI 任务中按 `Shift + Enter` 在输入框内换行（系统终端任务保持普通回车）；`Ctrl + Shift + F` 搜索终端内容，高亮全部匹配并显示匹配数量。
-   - 导出与复制的会话文本取自终端实际渲染的内容（含回滚区，最多 5000 行）。
-   - 仍有终端进程运行时关闭窗口会先确认。
-   - 切换左侧会话与子任务时，DOM 采用保活显隐机制，进程持续运行，输出与上下文绝不中断丢失。
-   - 自适应窗口缩放，自动重算字符矩阵行高列宽。
+- **文件夹树与多任务**：任务按项目文件夹分组，每个任务有状态灯、Git 分支徽标和会话里最近一条消息；后台任务输出停下后会显示「待查看」。
+- **保活终端**：基于 xterm.js 与 Windows ConPTY（`node-pty`），切换任务或文件夹不会结束任何进程。
+- **单行实时额度**：顶栏用一行文字显示 Tokens、Cost、5h / 7d 额度和当前模型，另有 CPU、内存和网速；只有纯文字，没有弹窗。
+- **多账号**：Codex、Claude Code、Kimi Code 可并行使用多个账号。账号只是「配置目录 + 环境变量」，OneAI 不读取、不复制你的登录凭据。
+- **本周用量面板**：按 CLI、账号、模型统计请求数与 Tokens，附近 26 周每日活跃方块图，数据来自本机会话记录。
+- **历史会话**：浏览并恢复 Claude Code、Codex、Kimi Code 的历史会话。
+- **文件预览**：在终端里按住 Ctrl 单击路径，即可只读预览文件，并带代码缩略图。
+- **任意 CLI**：按 `PATH` 自动检测已安装的 CLI，其他命令可添加为自定义 CLI。
+- **简体中文与英文**、20 个主题（浅色、深色、护眼与编辑器配色），以及简短的首次引导。
 
-4. **工作文件夹**：
-   - 点击侧栏底部「添加文件夹」，选择一个本地文件夹加入侧栏；只加入，不结束任何已在运行的终端。没有活动任务时，新任务默认在最近使用的文件夹启动。
-   - 文件夹列表、各文件夹的任务和当前选择整体保存，重启后恢复（任务状态为已停止，选中时再启动）。
-   - 从旧版升级时，首次启动会把旧版「每个文件夹各存一份」的任务按各自目录合并进来（空工作区不导入）；旧数据原样保留，不删除。
-   - 新建任务弹窗的「工作目录」可改成其他文件夹，任务会出现在对应的文件夹下。
+每项功能的详细行为见 [docs/features.zh-CN.md](docs/features.zh-CN.md)。
 
-5. **主题色设置**：
-   - 点击左下角设置按钮，可选择「随系统」「浅色」「深色」。选择即时生效并保存在本地；「随系统」会在系统外观变化时同步切换。
-   - 「设置 → 外观」另有护眼配色（豆沙绿、羊皮纸、暖夜、北极灰蓝）和编辑器配色：Darcula、Sublime Material，Sublime Text 内置的 Monokai、Mariana、Breakers、Solarized Dark、Solarized Light、Cobalt，以及 IntelliJ IDEA 自带的 IntelliJ Light、IDEA Light、IDEA Dark（新版界面）、IDEA 高对比度，以及 Kiro IDE 的 Kiro Dark、Kiro Light；终端配色同步切换。
-   - 界面配色统一由语义颜色变量控制；任务名和主要额度文字使用 13px，辅助信息至少为 12px（默认 UI 缩放下）。
+## 支持的 CLI
 
-6. **多账号（Codex、Claude Code、Kimi Code）**：
-   - 在「设置 → 账号」为这三个 CLI 各自添加多个账号。每个账号是一个独立的配置目录（登录凭据与会话记录都在其中），启动任务时分别注入 `CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`KIMI_CODE_HOME`；目录不存在时自动创建。可选附加环境变量（如代理），以明文保存在本机应用设置中，不要填写密钥。
-   - 点击账号的「登录」，会在该账号环境下新开终端任务运行 `codex login` / `claude auth login` / `kimi login`。列表中的登录状态来自 `codex login status` / `claude auth status`；Kimi Code 没有状态命令，只检查凭据文件是否存在。OneAI 不复制、不读取凭据。
-   - 新建任务弹窗可选账号，文件夹「+」菜单里每个有账号的 CLI 下方提供「用 <账号> 新建」，任务行与顶栏面包屑显示账号名。重启沿用任务绑定的账号；账号配置被删除后该任务拒绝启动，不会回落到默认账号。「恢复默认设置」不会清除账号。
-   - 顶栏额度跟随任务的账号：Codex 与 Kimi Code 读取该账号目录；Claude Code 的非默认账号只显示模型与推理等级，额度显示「--」（额度来自共用的 statusLine 快照，无法区分账号）。
+启动时，OneAI 按你的 `PATH` 查找下列命令，只提供找到的 CLI。清单在 [`src/main/known-clis.json`](src/main/known-clis.json)，「设置 → CLI」会显示每个 CLI 的检测状态。
 
-7. **工作时长提醒**：
-   - OneAI 打开满设定时长（默认 1 小时，可设 1 到 12 小时）后显示需要手动关闭的休息提醒弹框，并默认语音播报一次，内容为「主人您已经工作 N 小时了，该休息一下了。」（N 为设定的小时数）；可在「设置 → 提醒」中调整时长或关闭语音，弹框仍会出现。关闭应用后计时清零。
+Codex、Claude Code、Kimi Code、OpenCode、Grok Build、Antigravity、Qwen Code、Aider、Cursor Agent、GitHub Copilot、Amp、Droid、Crush、Goose、iFlow CLI、Auggie、Kiro CLI、Cline、Pi。
 
----
+不在清单里的 CLI，可在「设置 → CLI」填写名称和启动命令添加。所有 CLI 都在普通终端里运行，额外功能取决于各 CLI 的本机会话格式：
 
-## 技术栈
+| | 额度 | 任务摘要与历史会话 | 用量统计 | 多账号 |
+| --- | :---: | :---: | :---: | :---: |
+| Codex | 支持 | 支持 | 支持 | 支持 |
+| Claude Code | 支持 | 支持 | 支持 | 支持 |
+| Kimi Code | 支持 | 支持 | 暂不支持 | 支持 |
+| Antigravity、Pi | | | 支持 | |
+| 其他 CLI 与自定义 CLI | | | | |
 
-- **桌面运行时**：Electron 31 + Node.js
-- **系统伪终端底层**：`node-pty`（调用 Windows ConPTY API）
-- **前端与终端引擎**：React 18 + TypeScript + Tailwind CSS + Lucide React + `@xterm/xterm`
-- **构建管道**：Vite 5 + `vite-plugin-electron`
+## 安装
 
----
+OneAI 目前只支持 **Windows 10 / 11（x64）**，因为依赖 Windows ConPTY 接口。各 AI CLI 本身不随 OneAI 分发：请自行安装需要的 CLI，并确认它们的命令在 `PATH` 中。
 
-## 快速上手
+- **安装包**：预编译的安装包（`OneAI-Setup-<version>.exe`）将发布在 [GitHub Releases](https://github.com/keepingFE/oneAI/releases) 页面；首个版本发布之前，请从源码构建。
+- **从源码构建**：见下文。
 
-### 1. 安装依赖
+首次启动时，OneAI 会请你选择界面语言，再显示一段简短的引导。之后添加项目文件夹，点文件夹右侧的「+」选择 CLI 即可。
+
+## 从源码构建
+
+需要 Node.js 18 或更高版本。
+
 ```bash
 npm install
-```
-
-### 2. 启动开发工作台
-```bash
-npm run dev
-```
-
-### 3. 构建打包
-```bash
-npm run build
+npm run dev              # 开发模式启动工作台
+npm run build            # 类型检查并构建
 npm run build:win        # 安装版：release/OneAI-Setup-<version>.exe
 npm run build:portable   # 便携版（可选）：release/OneAI-Portable-<version>.exe
 ```
@@ -106,10 +71,27 @@ npm run build:portable   # 便携版（可选）：release/OneAI-Portable-<versi
 npm run build:win -- --config.directories.output=release/ui-polish
 ```
 
-### 4. 界面回归检查
+### 检查
 
 ```bash
-npm run check:ui
+npm run check:ui     # 在隐藏的 Electron 窗口里做界面回归检查（主题、布局、键盘、终端、设置、首次引导）
+npm run check:i18n   # 每条界面文案都有英文译文
 ```
 
-使用隐藏 Electron 窗口检查主题配色、状态文案、字号、键盘操作、不同宽度下的顶栏布局、侧栏的待查看标记、右键菜单与任务排序，以及终端粘贴、搜索、链接定位和文件预览；检查产物写入 `.tmp/ui-polish/`。
+检查产物写入 `.tmp/ui-polish/`。
+
+## 技术栈
+
+Electron 31、React 18、TypeScript、Tailwind CSS、Lucide React、`@xterm/xterm`、`node-pty`、Vite 5 与 `vite-plugin-electron`。
+
+## 隐私
+
+OneAI 在本机运行，没有遥测和统计，也没有更新检查。它读取你所用 CLI 的本机会话文件来显示历史、摘要和用量，不读取、不复制登录凭据。OneAI 自己发起的网络请求只有 Kimi Code 的额度查询（`api.kimi.com`），使用你自己的 Kimi Code 登录，并且只在使用 Kimi Code 时发生。你在终端里启动的各 CLI 照常访问它们自己的服务。
+
+## 参与贡献
+
+欢迎提交 Issue 和 Pull Request。项目约定、目录结构和检查方式见 [AGENTS.md](AGENTS.md)。要点：commit 信息使用英文，所有界面文案都要经过 `t()` 并在 `src/shared/en.ts` 里登记英文，`npm run check:ui` 与 `npm run check:i18n` 应通过。
+
+## 许可证
+
+[MIT](LICENSE)
