@@ -367,8 +367,6 @@ export const EN: Record<string, string> = {
   '重新检测': 'Detect again',
   '在线音乐': 'Online music',
   '填写音频直链、网络电台流或 .m3u / .pls 歌单地址，歌曲会排在本地音乐之后出现在播放器里。不支持 .m3u8（HLS）流，也不支持需要登录的网页播放器。': 'Enter a direct audio link, an internet radio stream or a .m3u / .pls playlist address. The tracks appear in the player after your local music. .m3u8 (HLS) streams and web players that need a login are not supported.',
-  '内置的免费电台，点一下加入播放器：': 'Built-in free radio stations, click one to add it to the player:',
-  '已添加': 'Added',
   '添加在线音乐': 'Add online music',
   '名称（可选）': 'Name (optional)',
   '音乐网址': 'Music URL',

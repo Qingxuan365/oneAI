@@ -65,7 +65,6 @@ d:/GitHub/OneAI/
 │           ├── i18n.ts                   # 渲染进程多语言：t() / T() / setLanguage，文案以中文原文为键
 │           ├── customClis.ts             # 自定义 CLI：id 生成、转 CliDef、读取过滤与保存前校验
 │           ├── musicStreams.ts           # 在线音乐：id 生成、读取过滤与添加前校验
-│           ├── musicPresets.ts           # 内置免费电台清单，设置里点击后才加入，添加前不联网
 │           ├── workspaceState.ts         # 文件夹树的状态：folderKey、排序、旧数据迁移、状态校验、最近任务归类与读写
 │           ├── accounts.ts               # 多账号：支持的 CLI 与登录命令、环境变量文本解析、账号校验
 │           ├── components/
@@ -87,7 +86,7 @@ d:/GitHub/OneAI/
 │           │   ├── Modal.tsx             # 所有弹窗共用的外壳（遮罩、标题栏、Esc 关闭、焦点归还）
 │           │   ├── ConfirmDialog.tsx     # 应用内确认与通知弹窗，替代原生 confirm / alert
 │           │   ├── MusicPlayer.tsx       # 侧栏底部迷你音乐播放器（本地目录 + 在线音乐），没有任何曲目时不显示
-│           │   ├── MusicStreamsSettings.tsx # 设置 → 提醒：添加 / 删除在线音乐与内置电台
+│           │   ├── MusicStreamsSettings.tsx # 设置 → 提醒：添加 / 删除在线音乐（列表最多显示 5 行，超出滚动）
 │           │   ├── BrandIcon.tsx         # 各 CLI 品牌徽标
 │           │   └── AppLogo.tsx           # 应用 Logo
 │           └── types/index.ts            # 前端类型与 window.electronAPI 声明
@@ -136,7 +135,7 @@ interface Account {
 
 自定义 CLI 约定：`AppSettings.customClis`（`{ id: 'custom-xxxx', name, command }`）由用户在「设置 → CLI」维护，运行时转成 `CliDef`（`custom: true`，通用终端图标），启动时整条命令交给 PowerShell 解析（`createSession` 的 `shell` 选项）；检测与内置 CLI 一样按 `PATH` 进行，命令不存在时隐藏；删除时必须关闭并移除其任务；额度、任务摘要、历史会话、用量统计和多账号不对自定义 CLI 提供；「恢复默认设置」不清除自定义 CLI、账号、语言和首次引导状态。
 
-在线音乐约定：`AppSettings.musicStreams`（`{ id, name, url }`）由用户在「设置 → 提醒 → 音乐播放器」添加，支持音频直链、电台流和 `.m3u` / `.pls` 歌单（主进程 `music:resolve-stream` 展开，只接受 http(s)，不支持 `.m3u8`）；内置电台只列在 `musicPresets.ts`，用户点击后才加入，添加前不得发起任何网络请求；在线曲目走独立的 audio 元素（跨域音频接入分析器会被静音），不做频谱；「恢复默认设置」不清除。
+在线音乐约定：`AppSettings.musicStreams`（`{ id, name, url }`）由用户在「设置 → 提醒 → 音乐播放器」添加，支持音频直链、电台流和 `.m3u` / `.pls` 歌单（主进程 `music:resolve-stream` 展开，只接受 http(s)，不支持 `.m3u8`）；不内置任何电台或默认链接，添加前不得发起任何网络请求；在线曲目走独立的 audio 元素（跨域音频接入分析器会被静音），不做频谱；「恢复默认设置」不清除。
 
 多语言约定：`AppSettings.language`（`zh-CN` | `en`）与 `onboardingDone` 决定界面语言和首次引导；首次启动按系统语言预选；全新安装不预置任务与文件夹。
 
