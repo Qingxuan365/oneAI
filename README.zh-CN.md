@@ -48,7 +48,7 @@ Codex、Claude Code、Kimi Code、OpenCode、Grok Build、Antigravity、Qwen Cod
 
 OneAI 目前只支持 **Windows 10 / 11（x64）**，因为依赖 Windows ConPTY 接口。各 AI CLI 本身不随 OneAI 分发：请自行安装需要的 CLI，并确认它们的命令在 `PATH` 中。
 
-- **安装包**：预编译的安装包（`OneAI-Setup-<version>.exe`）将发布在 [GitHub Releases](https://github.com/keepingFE/oneAI/releases) 页面；首个版本发布之前，请从源码构建。
+- **安装包**：从[最新发布](https://github.com/keepingFE/oneAI/releases/latest)下载 `OneAI-Setup-<version>.exe` 并运行。
 - **从源码构建**：见下文。
 
 首次启动时，OneAI 会请你选择界面语言，再显示一段简短的引导。之后添加项目文件夹，点文件夹右侧的「+」选择 CLI 即可。

@@ -48,7 +48,7 @@ A CLI that is not listed can be added under Settings → CLI with a name and a s
 
 OneAI currently runs on **Windows 10 / 11 (x64)**, because it relies on the Windows ConPTY API. The AI CLIs themselves are not bundled: install the ones you want separately and make sure their commands are on your `PATH`.
 
-- **Installer**: prebuilt installers (`OneAI-Setup-<version>.exe`) will be attached to the [GitHub Releases](https://github.com/keepingFE/oneAI/releases) page. Until the first release is published, build from source.
+- **Installer**: download `OneAI-Setup-<version>.exe` from the [latest release](https://github.com/keepingFE/oneAI/releases/latest) and run it.
 - **From source**: see below.
 
 On first launch OneAI asks for the interface language, then shows a short guide. After that, add a project folder, click the "+" next to it and pick a CLI.
