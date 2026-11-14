@@ -187,7 +187,8 @@
 
 ## 5. 最近完成
 
-- **2026-11-14 22:22** 应用版本升为 2.1.3（`package.json` 与 `package-lock.json`），安装包名为 `OneAI-Setup-2.1.3.exe`；已合并到并推送 `main`，未创建 tag 与 GitHub Release。
+- **2026-11-14 22:26** 发布 GitHub Release `v2.1.3`（目标提交 `33a3f9f`），附 `OneAI-Setup-2.1.3.exe`（85179080 字节，SHA-256 `87d1c2f5…330dcf09`），已核对线上附件大小与本地一致；README 的安装说明指向「latest release」，无需修改。内置电台与 AAC 流的实际播放仍待手工验收。入口：https://github.com/Qingxuan365/oneAI/releases/tag/v2.1.3 。
+- **2026-11-14 22:22** 应用版本升为 2.1.3（`package.json` 与 `package-lock.json`），安装包名为 `OneAI-Setup-2.1.3.exe`；已推送 `main`。
 - **2026-11-14 22:19** 修复设置面板 4 处问题：提醒时长输入框清空即被重置为 1、时钟「增加小时数」无法用键盘输入负数（两处改为整数输入框：输入中允许暂时为空或只有负号，合法值即时生效，失焦补齐到范围内）；时间页「当前顶栏显示」改为每秒刷新；账号配置目录不能与默认账号目录相同（含 `~` 写法）。入口：[SettingsModal.tsx](D:/GitHub/OneAI/src/renderer/src/components/SettingsModal.tsx)、[accounts.ts](D:/GitHub/OneAI/src/renderer/src/accounts.ts)、[check-ui.mjs](D:/GitHub/OneAI/scripts/check-ui.mjs)。
 - **2026-11-14 22:15** 音乐播放器新增在线音乐：「设置 → 提醒 → 音乐播放器」可添加音频直链、电台流、.m3u / .pls 歌单地址，并内置 5 个免费电台（Radio Paradise 四个频道、KEXP）点击即加入；在线曲目排在本地音乐之后，用独立 audio 元素播放（跨域音频接入频谱分析器会被静音，在线曲目的跳动条为装饰动画）；不支持 .m3u8（HLS）；「恢复默认设置」保留在线音乐；README 隐私说明、features、AGENTS 同步更新。SomaFM 的流地址在本机返回 403，未内置（待确认是否网络原因）。入口：[music-library.ts](D:/GitHub/OneAI/src/main/music-library.ts)、[MusicPlayer.tsx](D:/GitHub/OneAI/src/renderer/src/components/MusicPlayer.tsx)、[MusicStreamsSettings.tsx](D:/GitHub/OneAI/src/renderer/src/components/MusicStreamsSettings.tsx)。
 - **2026-11-14 22:03** 修复设置 → CLI 的「重新检测」点击后看起来没反应：检测是瞬间完成的同步 PATH 查找，结果不变时界面毫无变化；按钮现在检测期间显示旋转图标、文字变「检测中…」并禁用，完成后旁边显示「已重新检测」3 秒。未改检测逻辑；主进程沿用启动时的 PATH，新增 PATH 目录后可能仍需重启应用（待确认）。入口：[CliSettings.tsx](D:/GitHub/OneAI/src/renderer/src/components/CliSettings.tsx)、[check-ui.mjs](D:/GitHub/OneAI/scripts/check-ui.mjs)。
