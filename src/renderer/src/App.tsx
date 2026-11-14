@@ -1009,7 +1009,7 @@ ${entry.cwd}`}
         fallbackKnownClis={[...BUILTIN_CLIS, ...extraClis].filter((cli) => cli.id !== 'terminal').map((cli) => ({ id: cli.id, name: cli.name, command: cli.defaultCommand }))}
         installed={installed}
         onCustomClisChange={handleCustomClisChange}
-        onRedetectClis={() => void redetectClis()}
+        onRedetectClis={redetectClis}
       />
       <Modal
         isOpen={workReminderVisible}

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Pencil, Plus, RotateCw, Trash2 } from 'lucide-react';
 import { CustomCli } from '../types';
 import { newCustomCliId, validateCustomCli } from '../customClis';
@@ -17,7 +17,7 @@ interface CliSettingsProps {
   /** 已检测到的 CLI；null 表示检测尚未完成 */
   installed: Record<string, boolean> | null;
   onChange: (customClis: CustomCli[]) => void;
-  onRedetect: () => void;
+  onRedetect: () => void | Promise<void>;
 }
 
 interface Draft {
@@ -48,6 +48,26 @@ export const CliSettings: React.FC<CliSettingsProps> = ({ fallbackKnownClis, cus
     return () => { active = false; };
   }, []);
 
+  // 检测本身是瞬间完成的同步查找，结果没变时界面毫无变化；用旋转图标和完成提示让点击有反馈
+  const [checking, setChecking] = useState(false);
+  const [checkedDone, setCheckedDone] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
+  const redetect = async () => {
+    if (checking) return;
+    setChecking(true);
+    setCheckedDone(false);
+    try {
+      await Promise.all([Promise.resolve(onRedetect()), new Promise((resolve) => setTimeout(resolve, 600))]);
+    } finally {
+      if (mounted.current) {
+        setChecking(false);
+        setCheckedDone(true);
+        setTimeout(() => { if (mounted.current) setCheckedDone(false); }, 3000);
+      }
+    }
+  };
+
   const save = () => {
     if (!draft) return;
     const problem = validateCustomCli(draft, customClis.filter((cli) => cli.id !== draft.id), knownClis.map((cli) => cli.name));
@@ -69,9 +89,12 @@ export const CliSettings: React.FC<CliSettingsProps> = ({ fallbackKnownClis, cus
             {t('自动检测')}
             <span className="ml-2 text-xs font-normal text-fg-faint">{t('按 PATH 查找命令，启动时检测一次')}</span>
           </h3>
-          <button type="button" onClick={onRedetect} className="btn-secondary px-2.5 py-1 text-xs" title={t('重新检测已安装的 CLI，新装 CLI 后点这里即可，不必重启')}>
-            <RotateCw size={12} />{t('重新检测')}
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="text-xs text-success" role="status" aria-live="polite">{checkedDone ? t('已重新检测') : ''}</span>
+            <button type="button" onClick={() => void redetect()} disabled={checking} className="btn-secondary px-2.5 py-1 text-xs" title={t('重新检测已安装的 CLI，新装 CLI 后点这里即可，不必重启')}>
+              <RotateCw size={12} className={checking ? 'animate-spin' : ''} />{checking ? t('检测中…') : t('重新检测')}
+            </button>
+          </div>
         </div>
         <ul className="divide-y divide-line overflow-hidden rounded-md border border-line">
           {knownClis.map((cli) => (

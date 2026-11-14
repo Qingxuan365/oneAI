@@ -640,6 +640,11 @@ app.whenReady().then(async () => {
       check('CLI page marks detected and missing CLIs', rowOf('codex').textContent.includes('已安装') && rowOf('opencode').textContent.includes('未检测到'));
       [...document.querySelectorAll('section[aria-label="自动检测的 CLI"] button')].find(b => b.textContent.includes('重新检测')).click();
       check('re-detect button asks the app to detect again', window.events.includes('redetect'));
+      const redetectBtn = () => [...document.querySelectorAll('section[aria-label="自动检测的 CLI"] button')].find(b => b.textContent.includes('检测'));
+      await tick(50);
+      check('re-detect button shows progress while detecting', redetectBtn().disabled && redetectBtn().textContent.includes('检测中'));
+      await tick(900);
+      check('re-detect button shows a finished hint afterwards', !redetectBtn().disabled && document.querySelector('section[aria-label="自动检测的 CLI"] [role="status"]').textContent.includes('已重新检测'));
       const customAdd = () => [...document.querySelectorAll('section[aria-label="自定义 CLI"] button')].find(b => b.textContent.includes('添加 CLI'));
       const customForm = () => document.querySelector('form[aria-label="添加自定义 CLI"], form[aria-label="编辑自定义 CLI"]');
       const customRow = () => document.querySelector('li[data-custom-cli-id]');

@@ -19,7 +19,7 @@ interface SettingsModalProps {
   fallbackKnownClis: Array<{ id: string; name: string; command: string }>;
   installed: Record<string, boolean> | null;
   onCustomClisChange: (customClis: CustomCli[]) => void;
-  onRedetectClis: () => void;
+  onRedetectClis: () => void | Promise<void>;
 }
 
 type TabId = 'appearance' | 'terminal' | 'general' | 'accounts' | 'clis' | 'time' | 'shortcuts';

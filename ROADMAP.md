@@ -121,6 +121,7 @@
 
 ## 4. 最近验证
 
+- **2026-11-14 22:03**：「重新检测」按钮反馈修复后 `tsc --noEmit` 通过，`npm run check:i18n` 485 条无缺失，`npm run check:ui` 全部通过（含新增 2 项按钮反馈检查）；`npm run build:win` 通过，`release/OneAI-Setup-1.0.1.exe` 85176631 字节。未在桌面实际点击验证，待手工验收。
 - **2026-11-14 12:30**：升版本到 1.0.1 后 `tsc --noEmit` 通过，`npm run check:i18n` 484 条无缺失，`npm run check:ui` 264 项全部通过，`npm run build:win` 通过（`release/OneAI-Setup-1.0.1.exe` 约 81 MB）。
 
 - **2026-11-14 12:20**：修复英文界面残留中文后 `tsc --noEmit` 通过；`npm run check:ui` 264 项全部通过（新增：英文下主界面、侧栏、折叠侧栏、账号侧栏、用量面板、历史抽屉以及设置各页扫描文本与 title / aria-label / placeholder 属性，不得出现中文）；`npm run check:i18n` 484 条文案、0 缺失；`npm run build:win` 通过，安装包约 81 MB。已发布的 `v1.0.0` 仍是修复前的构建，需要重新发布才能带上修复。
@@ -183,6 +184,7 @@
 
 ## 5. 最近完成
 
+- **2026-11-14 22:03** 修复设置 → CLI 的「重新检测」点击后看起来没反应：检测是瞬间完成的同步 PATH 查找，结果不变时界面毫无变化；按钮现在检测期间显示旋转图标、文字变「检测中…」并禁用，完成后旁边显示「已重新检测」3 秒。未改检测逻辑；主进程沿用启动时的 PATH，新增 PATH 目录后可能仍需重启应用（待确认）。入口：[CliSettings.tsx](D:/GitHub/OneAI/src/renderer/src/components/CliSettings.tsx)、[check-ui.mjs](D:/GitHub/OneAI/scripts/check-ui.mjs)。
 - **2026-11-14 21:55** 提交规范改为：由 Claude 参与完成的提交，信息末尾加 `Co-Authored-By: Claude <noreply@anthropic.com>`（覆盖原「不添加 Co-Authored-By」）；本次提交即按此署名。Claude 是否出现在 GitHub 仓库 Contributors 列表，待推送后到仓库页确认（待确认）；Codex 无可关联的 GitHub 邮箱，仅在 README 署名。入口：[AGENTS.md](D:/GitHub/OneAI/AGENTS.md)。
 - **2026-11-14 21:51** 两份 README 新增「贡献者 / Contributors」小节，列入 Claude（Anthropic）与 Codex（OpenAI）；仅文档改动，未执行构建。GitHub 仓库页右侧的 Contributors 列表由提交作者或 `Co-authored-by` 决定，历史提交未改写，尚未生效，待确认是否在后续提交中加 trailer（需先改 AGENTS.md「不添加 Co-Authored-By」规则）。入口：[README.md](D:/GitHub/OneAI/README.md)、[README.zh-CN.md](D:/GitHub/OneAI/README.zh-CN.md)。
 - **2026-11-14 11:12** 修复历史会话抽屉的关闭按钮与窗口右上角关闭按钮重叠、点击后整个应用退出：抽屉型弹窗的遮罩与面板改为从顶栏下沿（44px）开始，不再覆盖顶部窗口控件；居中弹窗不变。入口：[Modal.tsx](D:/GitHub/OneAI/src/renderer/src/components/Modal.tsx)、[check-ui.mjs](D:/GitHub/OneAI/scripts/check-ui.mjs)。

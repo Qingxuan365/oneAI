@@ -364,6 +364,7 @@ export const EN: Record<string, string> = {
   '按 PATH 查找命令，启动时检测一次': 'Looks up commands on PATH, once at startup',
   '重新检测已安装的 CLI，新装 CLI 后点这里即可，不必重启': 'Detect the installed CLIs again. Click here after installing a CLI, no restart needed',
   '重新检测': 'Detect again',
+  '已重新检测': 'Detection finished',
   '以上是 OneAI 已知的 CLI，安装后会自动出现在新建菜单里。不在其中的 CLI，请在下方添加。': 'These are the CLIs OneAI knows about. Once installed they appear in the new task menu automatically. For a CLI that is not listed, add it below.',
   '自定义 CLI': 'Custom CLIs',
   '名称 + 启动命令': 'Name + start command',
