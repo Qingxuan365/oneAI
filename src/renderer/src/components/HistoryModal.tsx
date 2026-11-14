@@ -6,23 +6,13 @@ import { HistoryEntry } from '../types';
 import { folderKey, folderName } from '../workspaceState';
 import { formatAgo } from '../taskSummary';
 
-const CLI_LABELS: Record<HistoryEntry['cliId'], string> = {
+const CLI_LABELS: Record<string, string> = {
   claude: 'Claude Code',
   codex: 'Codex',
   kimi: 'Kimi Code',
 };
 
-type HistoryFilter = 'all' | 'codex' | 'claude' | 'agy' | 'pi' | 'kimi';
-
-/** 下拉筛选项；Antigravity 与 Pi 暂无可读取的本机历史，选中后列表为空并给出说明 */
-const FILTER_OPTIONS: { id: HistoryFilter; label: string }[] = [
-  { id: 'all', label: '全部' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'claude', label: 'Claude Code' },
-  { id: 'agy', label: 'Antigravity' },
-  { id: 'pi', label: 'Pi' },
-  { id: 'kimi', label: 'Kimi Code' },
-];
+const cliLabel = (cliId: string) => CLI_LABELS[cliId] ?? cliId;
 
 const entryKey = (entry: HistoryEntry) => `${entry.cliId}-${entry.id}`;
 
@@ -52,7 +42,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [filter, setFilter] = useState<HistoryFilter>('all');
+  const [filter, setFilter] = useState('all')  // 'all' 或历史记录里出现过的 cliId;
   const [query, setQuery] = useState('');
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
@@ -81,6 +71,18 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [isOpen]);
+
+  // 下拉选项来自实际读到的历史记录，新增 CLI 的历史出现后自动可选
+  const filterOptions = useMemo(() => {
+    const ids = [...new Set(entries.map((entry) => entry.cliId))];
+    ids.sort((a, b) => cliLabel(a).localeCompare(cliLabel(b)));
+    return [{ id: 'all', label: '全部' }, ...ids.map((id) => ({ id, label: cliLabel(id) }))];
+  }, [entries]);
+
+  // 选中的 CLI 已没有历史（如刚删完）时回到「全部」
+  useEffect(() => {
+    if (filter !== 'all' && !entries.some((entry) => entry.cliId === filter)) setFilter('all');
+  }, [entries, filter]);
 
   const visible = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -138,11 +140,11 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
           </label>
           <select
             value={filter}
-            onChange={(e) => setFilter(e.target.value as HistoryFilter)}
+            onChange={(e) => setFilter(e.target.value)}
             aria-label="按 CLI 筛选"
             className="input !w-auto shrink-0"
           >
-            {FILTER_OPTIONS.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+            {filterOptions.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
           </select>
         </div>
         {visible.length > 0 && (
@@ -167,7 +169,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
         {!loading && !error && visible.length === 0 && (
           <div className="p-8 text-center text-sm text-fg-subtle">
             <p>{entries.length === 0 ? '还没有历史会话' : '没有符合条件的会话'}</p>
-            {(entries.length === 0 || filter === 'agy' || filter === 'pi') && <p className="mt-1.5 text-xs text-fg-faint">只读取 Claude Code、Codex、Kimi Code 的本机会话；Antigravity、Pi 等其他 CLI 暂无可读的历史。</p>}
+            {entries.length === 0 && <p className="mt-1.5 text-xs text-fg-faint">只读取 Claude Code、Codex、Kimi Code 的本机会话，其他 CLI 暂无可读的历史。</p>}
           </div>
         )}
         {visible.map((entry, index) => {
@@ -200,7 +202,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
                   </span>
                 </span>
                 <span className="shrink-0 text-right text-xs">
-                  <span className="block text-fg-muted">{CLI_LABELS[entry.cliId]}</span>
+                  <span className="block text-fg-muted">{cliLabel(entry.cliId)}</span>
                   <span className="block tabular-nums text-fg-faint" title={formatTime(entry.updatedAt)}>{formatAgo(entry.updatedAt)}</span>
                   {isOpenTask && <span className="mt-0.5 inline-block rounded-full bg-accent/15 px-1.5 text-2xs font-medium text-accent" data-history-open>已打开</span>}
                 </span>

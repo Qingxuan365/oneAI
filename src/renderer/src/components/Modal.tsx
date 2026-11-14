@@ -14,7 +14,7 @@ interface ModalProps {
   footer?: React.ReactNode;
   /** 传入后内容区不加默认内边距与滚动，由调用方自行布局 */
   bare?: boolean;
-  /** drawer：靠右、与窗口等高的侧边抽屉；默认居中弹窗 */
+  /** drawer：靠右的侧边抽屉，从顶栏下沿（44px）开始，避开右上角的窗口控件；默认居中弹窗 */
   variant?: 'center' | 'drawer';
   children: React.ReactNode;
 }
@@ -48,7 +48,7 @@ export const Modal: React.FC<ModalProps> = ({
 
   return (
     <div
-      className={`modal-overlay fixed inset-0 z-50 flex bg-black/55 backdrop-blur-[2px] ${drawer ? 'justify-end' : 'items-center justify-center p-4'}`}
+      className={`modal-overlay fixed z-50 flex bg-black/55 backdrop-blur-[2px] ${drawer ? 'inset-x-0 bottom-0 top-11 justify-end' : 'inset-0 items-center justify-center p-4'}`}
       onMouseDown={(e) => { if (e.target === e.currentTarget && !closeDisabled) onClose(); }}
     >
       <div

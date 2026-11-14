@@ -460,8 +460,10 @@ app.whenReady().then(async () => {
       const borderBlurred = getComputedStyle(historySearch.parentElement).borderColor;
       historySearch.focus(); await tick(50);
       check('history search box shows no focus outline or highlighted border', (getComputedStyle(historySearch).outlineStyle === 'none' || getComputedStyle(historySearch).outlineColor === 'rgba(0, 0, 0, 0)') && getComputedStyle(historySearch.parentElement).borderColor === borderBlurred);
+      const drawerRect = document.querySelector('[role="dialog"]').getBoundingClientRect();
+      check('history drawer starts below the 44px top bar so the window controls stay clickable', drawerRect.top >= 44 && document.querySelector('.modal-overlay').getBoundingClientRect().top >= 44);
       const cliSelect = document.querySelector('select[aria-label="按 CLI 筛选"]');
-      check('history CLI filter is a dropdown with all CLIs', cliSelect && [...cliSelect.options].map(o => o.textContent).join('|') === '全部|Codex|Claude Code|Antigravity|Pi|Kimi Code');
+      check('history CLI filter is a dropdown built from the CLIs present in the history', cliSelect && [...cliSelect.options].map(o => o.textContent).join('|') === '全部|Claude Code|Codex|Kimi Code');
       [...document.querySelectorAll('button')].find(b => b.textContent.includes('Today one')).click();
       check('clicking a session resumes it', window.events.includes('resume:h1'));
       [...document.querySelectorAll('button')].find(b => b.textContent.includes('删除列表中全部')).click(); await tick();
