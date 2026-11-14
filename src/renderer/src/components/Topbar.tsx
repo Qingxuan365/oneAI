@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FolderOpen, ChevronRight, Search, Eraser, RotateCcw, Download, Copy, FileText, Check, PanelLeftClose, PanelLeftOpen, History } from 'lucide-react';
+import { FolderOpen, ChevronRight, Search, Eraser, RotateCcw, Download, Copy, FileText, Check, PanelLeftClose, PanelLeftOpen, History, BarChart3 } from 'lucide-react';
 import { InlineQuotaText } from './InlineQuotaText';
 import { SystemStatsText } from './SystemStatsText';
 import { QuotaData, TaskSession, CliDef } from '../types';
@@ -23,6 +23,7 @@ interface TopbarProps {
   onRestartSession?: () => Promise<void>;
   onExportLogs?: (mode: 'copy' | 'save') => Promise<{ success: boolean; error?: string; canceled?: boolean }>;
   onOpenHistory?: () => void;
+  onOpenUsage?: () => void;
 }
 
 // 数字日期转中文数字（1~30）
@@ -81,6 +82,7 @@ export const Topbar: React.FC<TopbarProps> = ({
   onRestartSession,
   onExportLogs,
   onOpenHistory,
+  onOpenUsage,
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
   const [currentTime, setCurrentTime] = useState<string>(() => getFormattedTime(false, clockOffsetHours));
@@ -273,6 +275,18 @@ export const Topbar: React.FC<TopbarProps> = ({
 
       {/* 整机 CPU / 内存 / 网速：与活动终端无关，始终显示；空间不足时由 .topbar-sys-* 依次收起 */}
       <SystemStatsText />
+
+      {onOpenUsage && (
+        <button
+          type="button"
+          onClick={onOpenUsage}
+          aria-label="查看本周用量"
+          title="本周各模型用量与每日使用频次 (Ctrl+Shift+U)"
+          className="icon-btn"
+        >
+          <BarChart3 size={16} />
+        </button>
+      )}
 
       {onOpenHistory && (
         <button

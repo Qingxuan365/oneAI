@@ -60,6 +60,7 @@ const SHORTCUTS: { title: string; items: [string, string][] }[] = [
       ['鼠标中键', '关闭侧栏中的任务'],
       ['Ctrl + Shift + B', '折叠或展开左侧导航栏'],
       ['Ctrl + Shift + H', '打开历史会话'],
+      ['Ctrl + Shift + U', '打开本周用量'],
       ['Ctrl + ,', '打开设置'],
       ['F2 / 双击任务', '重命名任务'],
     ],
@@ -180,18 +181,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </button>
                   ))}
                 </div>
-                <div className="pt-1 text-xs text-fg-faint">护眼配色</div>
-                <div className="grid grid-cols-4 gap-2" role="group" aria-label="护眼主题色">
-                  {THEME_OPTIONS.filter(({ id }) => id !== 'light' && id !== 'dark').map(({ id, label, swatch }) => (
-                    <button key={id} type="button" aria-pressed={settings.theme === id}
-                      onClick={() => update({ theme: id })}
-                      className={`flex items-center justify-center gap-1.5 py-2 ${optionClass(settings.theme === id)}`}>
-                      <span className="inline-block h-3.5 w-3.5 rounded-full border border-line-strong"
-                        style={{ background: `linear-gradient(135deg, ${swatch[0]} 50%, ${swatch[1]} 50%)` }} />
-                      {label}
-                    </button>
-                  ))}
-                </div>
+                {([
+                  { group: 'eyecare', title: '护眼配色', label: '护眼主题色', cols: 'grid-cols-4' },
+                  { group: 'editor', title: '编辑器配色（Sublime Text、JetBrains 等风格）', label: '编辑器配色主题', cols: 'grid-cols-3' },
+                ] as const).map(({ group, title, label, cols }) => (
+                  <React.Fragment key={group}>
+                    <div className="pt-1 text-xs text-fg-faint">{title}</div>
+                    <div className={`grid ${cols} gap-2`} role="group" aria-label={label}>
+                      {THEME_OPTIONS.filter((option) => option.group === group).map(({ id, label: name, swatch }) => (
+                        <button key={id} type="button" aria-pressed={settings.theme === id}
+                          onClick={() => update({ theme: id })}
+                          className={`flex items-center justify-center gap-1.5 py-2 ${optionClass(settings.theme === id)}`}>
+                          <span className="inline-block h-3.5 w-3.5 shrink-0 rounded-full border border-line-strong"
+                            style={{ background: `linear-gradient(135deg, ${swatch[0]} 50%, ${swatch[1]} 50%)` }} />
+                          <span className="min-w-0 truncate">{name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </React.Fragment>
+                ))}
               </Section>
 
               <Section title="界面缩放" hint="侧栏、顶栏与弹窗的文字和元素大小">

@@ -19,6 +19,7 @@ await build({
     import { FilePreviewPanel } from './src/renderer/src/components/FilePreviewPanel';
     import { NewTaskModal } from './src/renderer/src/components/NewTaskModal';
     import { HistoryModal } from './src/renderer/src/components/HistoryModal';
+    import { UsageModal } from './src/renderer/src/components/UsageModal';
     import { SettingsModal } from './src/renderer/src/components/SettingsModal';
     import { Terminal } from '@xterm/xterm';
     window.electronAPI = { onWindowMaximizedChange: callback => { window.setMaximized = callback; return () => {}; }, isWindowMaximized: async () => false,
@@ -28,7 +29,32 @@ await build({
       selectWorkspaceDirectory: async () => 'C:/picked/dir',
       listSessionHistory: async () => { const h = (id, cliId, title, cwd, ago) => ({ id, cliId, title, cwd, updatedAt: Date.now() - ago, command: 'x' }); return [h('h1', 'codex', 'Today one', 'D:/GitHub/OneAI', 60000), h('h2', 'claude', 'Yesterday one', 'D:/plan', 86400000 + 3600000 * 2), h('h3', 'kimi', 'Old one', 'D:/old', 10 * 86400000)]; },
       getGitBranches: async (dirs) => Object.fromEntries(dirs.map((d) => [d, d === 'D:/GitHub/OneAI' ? 'main' : null])),
+      getUsageStats: async () => window.usageFixture(window.usageEmpty),
       deleteSessionHistory: async () => ({ deleted: 0, failed: 0 }) };
+    // 用量面板夹具：近 26 周的每日请求数（每 3 天一个非零值，最大 39），以及三个 CLI 的模型行
+    window.usageEmpty = false;
+    window.usageFixture = (empty) => {
+      const pad = n => String(n).padStart(2, '0');
+      const key = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+      const now = new Date();
+      const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+      const start = new Date(monday);
+      start.setDate(start.getDate() - 7 * 25);
+      const days = [];
+      for (let i = 0; i < 182; i++) {
+        const d = new Date(start);
+        d.setDate(d.getDate() + i);
+        const requests = empty ? 0 : (i % 3 === 0 ? i % 40 : 0);
+        days.push({ date: key(d), requests, byCli: requests ? { claude: requests } : {} });
+      }
+      const rows = empty ? [] : [
+        { cliId: 'claude', model: 'Sonnet 5.5', requests: 246, sessions: 3, input: 546, output: 560666, cacheRead: 104684416, cacheWrite: 1044518 },
+        { cliId: 'codex', model: 'gpt-5.5', requests: 21, sessions: 1, input: 93118, output: 1569, cacheRead: 1235456, cacheWrite: 0 },
+        { cliId: 'agy', model: 'Gemini 4 Hydrogen', requests: 103, sessions: 9, input: 1160400, output: 111017, cacheRead: 11419012, cacheWrite: 0 },
+      ];
+      return { generatedAt: Date.now(), weekStart: monday.getTime(), rows, days };
+    };
     // 顶栏系统资源的最宽取值：CPU 100%、内存 31.9 GB、上行 999K/s、下行 99.9M/s
     window.fakeStats = { cpuPercent: 100, memUsedBytes: 31.9 * 1024 ** 3, memTotalBytes: 32 * 1024 ** 3, netUpBytesPerSec: 999 * 1024, netDownBytesPerSec: 99.9 * 1024 ** 2 };
     const root = createRoot(document.getElementById('root'));
@@ -47,7 +73,7 @@ await build({
           onReorderFolder={() => {}} onNewTask={() => {}} onCloseTask={() => window.events.push('close')} onRenameTask={(_id, title) => window.events.push('rename:' + title)} />
         <div className="flex-1 min-w-0"><Topbar isSidebarCollapsed={false} onToggleSidebar={() => {}} currentGroup={group} activeTask={task} accountName={accountName}
           quota={{ status: 'online', cliName: 'Codex', model: 'gpt-5-codex', effort: 'high', tokens: 866_000, costUsd: 0.24, fiveHourPercent: 82, sevenDayPercent: 65, fiveHourResetsIn: '2h 45m', sevenDayResetsOn: 'Sun' }} onRefreshQuota={async () => {}} onOpenSearch={() => window.events.push('search')}
-          onClearScreen={() => {}} onRestartSession={async () => {}} onExportLogs={async () => ({ success: true })} onOpenHistory={() => {}} /></div>
+          onClearScreen={() => {}} onRestartSession={async () => {}} onExportLogs={async () => ({ success: true })} onOpenHistory={() => {}} onOpenUsage={() => window.events.push('usage')} /></div>
       </div>));
       window.pushStats?.(window.fakeStats);
     };
@@ -116,6 +142,7 @@ await build({
       return <SettingsModal isOpen onClose={() => {}} settings={settings} onUpdateSettings={setSettings} onResetDefault={() => {}} onLoginAccount={(a) => window.events.push('login:' + a.name)} />;
     }
     window.drawSettings = () => flushSync(() => root.render(<div className="workbench-ui h-screen"><SettingsHarness /></div>));
+    window.drawUsage = () => flushSync(() => root.render(<div className="workbench-ui h-screen"><UsageModal key={String(window.usageEmpty)} isOpen onClose={() => {}} accounts={[]} /></div>));
     window.drawHistory = (open) => flushSync(() => root.render(<div className="workbench-ui h-screen"><HistoryModal isOpen onClose={() => {}} onResume={(e) => window.events.push('resume:' + e.id)} openHistoryIds={new Set(open)} /></div>));
     window.drawTermMany = (count, active) => {
       const tasks = Array.from({ length: count }, (_, i) => ({ id: 'many-' + i, groupId: 'terminal', title: 'm' + i, status: 'running', cwd: 'D:/GitHub/OneAI', createdAt: 1 }));
@@ -174,13 +201,24 @@ app.whenReady().then(async () => {
       await new Promise(r => setTimeout(r, 250));
       check('close visible when task focused', getComputedStyle(document.querySelector('button[aria-label="关闭 Task 1: UI regression"]')).opacity === '1');
       const colors = [];
-      for (const theme of ['dark', 'light']) {
+      // 新增编辑器配色：正文、次要文字与点缀色在面板 / 画布上的对比度（WCAG 相对亮度）须达到下限
+      const NEW_THEMES = ['darcula', 'material', 'monokai', 'mariana', 'breakers', 'solarized-dark', 'solarized-light', 'cobalt'];
+      const rgbOf = name => getComputedStyle(document.documentElement).getPropertyValue('--color-' + name).trim().split(' ').map(Number);
+      const lum = ([r, g, b]) => { const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+      const ratio = (a, b) => { const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
+      for (const theme of NEW_THEMES) {
+        document.documentElement.dataset.theme = theme;
+        const low = [['fg', 'canvas', 6], ['fg', 'panel', 5.5], ['fg-muted', 'canvas', 4.5], ['fg-subtle', 'panel', 4], ['fg-faint', 'panel', 3.5], ['accent', 'panel', 3.5], ['accent', 'canvas', 3.5], ['success', 'canvas', 3.5], ['danger', 'canvas', 3.5], ['warning', 'canvas', 3.5]]
+          .filter(([fg, bg, min]) => ratio(rgbOf(fg), rgbOf(bg)) < min).map(([fg, bg, min]) => fg + ' on ' + bg + ' ' + ratio(rgbOf(fg), rgbOf(bg)).toFixed(2) + ' < ' + min);
+        check(theme + ' text and accent colors keep enough contrast' + (low.length ? ' [' + low.join('; ') + ']' : ''), low.length === 0);
+      }
+      for (const theme of ['dark', ...NEW_THEMES, 'light']) {
         document.documentElement.dataset.theme = theme;
         const panel = getComputedStyle(document.querySelector('header')).backgroundColor;
         colors.push(panel);
         check(theme + ' header/sidebar same panel', panel === getComputedStyle(document.querySelector('aside > div')).backgroundColor);
       }
-      check('theme colors change', colors[0] !== colors[1]);
+      check('theme colors change (dark, light, Darcula and Sublime Material all differ)', new Set(colors).size === colors.length);
       for (const [status, label] of Object.entries({ starting: '启动中', running: '运行中', idle: '空闲', waiting: '等待输入', stopped: '已停止', error: '启动失败' })) {
         window.draw(status);
         check(status + ' Chinese label', document.querySelector('header').textContent.includes(label));
@@ -224,6 +262,7 @@ app.whenReady().then(async () => {
         const header = document.querySelector('header').getBoundingClientRect();
         const rects = ['oneai-terminal-tools', 'oneai-topbar-clock', 'oneai-topbar-quota', 'oneai-topbar-sys']
           .map(id => document.getElementById(id).getBoundingClientRect()).filter(rect => rect.width > 0);
+        rects.push(document.querySelector('header button[aria-label="查看本周用量"]').getBoundingClientRect());
         rects.push(document.querySelector('header button[aria-label="查看历史会话"]').getBoundingClientRect());
         const quota = document.getElementById('oneai-topbar-quota');
         return rects.length >= 3 && rects.every((rect, i) => rect.left >= header.left && rect.right <= (rects[i + 1]?.left ?? header.right))
@@ -404,6 +443,43 @@ app.whenReady().then(async () => {
       check('delete-all confirmation says it deletes the local session files', document.body.textContent.includes('同时删除本机会话文件'));
       return checks;
     })()\`));
+    // 本周用量面板与每日方块图
+    result.push(...await win.webContents.executeJavaScript(\`(async () => {
+      const checks = [];
+      const check = (name, ok) => checks.push({ name, ok: Boolean(ok) });
+      const tick = (ms = 200) => new Promise(r => setTimeout(r, ms));
+      const pad = n => String(n).padStart(2, '0');
+      const today = new Date();
+      const todayKey = today.getFullYear() + '-' + pad(today.getMonth() + 1) + '-' + pad(today.getDate());
+      window.usageEmpty = false;
+      window.drawUsage(); await tick(400);
+      const text = document.body.textContent;
+      check('usage panel lists each model with its CLI', document.querySelectorAll('[data-usage-row]').length === 3 && text.includes('Sonnet 5.5') && text.includes('Gemini 4 Hydrogen') && text.includes('Antigravity') && text.includes('Codex'));
+      const fixture = window.usageFixture(false);
+      const requests = fixture.rows.reduce((sum, r) => sum + r.requests, 0);
+      check('usage summary shows the weekly request total', document.querySelector('[data-usage-summary]').textContent.includes(String(requests)));
+      check('usage tokens are shown in compact units', text.includes('105.7M'));
+      const cells = [...document.querySelectorAll('[data-usage-cell]')];
+      check('heatmap has one cell per day for 26 weeks', cells.length === 182);
+      const column = document.querySelector('[data-usage-cell]').parentElement;
+      check('each heatmap column is one week (7 cells, Monday first)', column.querySelectorAll('[data-usage-cell]').length === 7 && new Date(cells[0].dataset.date + 'T00:00:00').getDay() === 1);
+      const levels = new Set(cells.map(c => c.dataset.level));
+      check('heatmap uses all four green levels plus the empty level', ['0', '1', '2', '3', '4'].every(l => levels.has(l)));
+      const level4 = cells.find(c => c.dataset.level === '4');
+      const level0 = cells.find(c => c.dataset.level === '0');
+      const level1 = cells.find(c => c.dataset.level === '1');
+      check('busier days are drawn in a stronger green than empty days', getComputedStyle(level4).backgroundColor !== getComputedStyle(level0).backgroundColor && getComputedStyle(level4).backgroundColor !== getComputedStyle(level1).backgroundColor);
+      check('days after today are marked as future and have no tooltip', cells.filter(c => c.dataset.date > todayKey).every(c => c.dataset.level === 'future' && !c.title) && cells.filter(c => c.dataset.date <= todayKey).every(c => c.dataset.level !== 'future'));
+      check('today is outlined', cells.filter(c => c.className.includes('ring-1')).map(c => c.dataset.date).join() === todayKey);
+      check('a cell tooltip gives the date and request count', level4.title.includes(level4.dataset.date) && level4.title.includes('次请求'));
+      const grid = document.querySelector('[data-usage-heatmap]');
+      check('heatmap fits inside the modal without horizontal scrolling', grid.parentElement.scrollWidth <= grid.parentElement.clientWidth);
+      window.usageEmpty = true;
+      window.drawUsage(); await tick(400);
+      check('empty week shows a hint and an all-empty heatmap', Boolean(document.querySelector('[data-usage-empty]')) && [...document.querySelectorAll('[data-usage-cell]')].every(c => c.dataset.level === '0' || c.dataset.level === 'future'));
+      window.usageEmpty = false;
+      return checks;
+    })()\`));
     // 多账号
     result.push(...await win.webContents.executeJavaScript(\`(async () => {
       const checks = [];
@@ -439,7 +515,10 @@ app.whenReady().then(async () => {
       check('new task modal submits the chosen CLI with its default command', window.events.includes('create:claude:default:Task 5:claude:D:/GitHub/OneAI'));
 
       window.drawSettings(); await tick();
-      const tab = [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.includes('账号'));
+      const names = label => [...document.querySelectorAll('[aria-label="' + label + '"] button')].map(b => b.textContent.trim()).join('|');
+      check('settings lists the eye-care themes', names('护眼主题色') === '豆沙绿|羊皮纸|暖夜|北极灰蓝');
+      check('settings lists the editor themes (Darcula, Sublime Material and the Sublime Text built-ins)', names('编辑器配色主题') === 'Darcula|Sublime Material|Monokai|Mariana|Breakers|Solarized Dark|Solarized Light|Cobalt');
+      const tab =[...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.includes('账号'));
       check('settings has an accounts tab', Boolean(tab));
       tab.click(); await tick(300);
       const section = name => document.querySelector('section[aria-label="' + name + ' 账号"]');

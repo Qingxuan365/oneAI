@@ -8,14 +8,32 @@ export const THEME_MODE: Record<ThemeId, 'light' | 'dark'> = {
   parchment: 'light',
   dusk: 'dark',
   nord: 'dark',
+  darcula: 'dark',
+  material: 'dark',
+  monokai: 'dark',
+  mariana: 'dark',
+  breakers: 'light',
+  'solarized-dark': 'dark',
+  'solarized-light': 'light',
+  cobalt: 'dark',
 };
 
-/** 设置页展示的主题；swatch 为 [底色, 强调色] 预览。 */
-export const THEME_OPTIONS: ReadonlyArray<{ id: ThemeId; label: string; swatch: [string, string] }> = [
-  { id: 'light', label: '浅色', swatch: ['#ffffff', '#0969da'] },
-  { id: 'dark', label: '深色', swatch: ['#0d1117', '#38bdf8'] },
-  { id: 'bean', label: '豆沙绿', swatch: ['#cce8cf', '#0e5e8a'] },
-  { id: 'parchment', label: '羊皮纸', swatch: ['#f4ecd8', '#1e64a0'] },
-  { id: 'dusk', label: '暖夜', swatch: ['#1e1b18', '#e0a85a'] },
-  { id: 'nord', label: '北极灰蓝', swatch: ['#2e3440', '#88c0d0'] },
+export type ThemeGroup = 'basic' | 'eyecare' | 'editor';
+
+/** 设置页展示的主题；swatch 为 [底色, 强调色] 预览。basic 为顶部的浅 / 深色，eyecare 为护眼配色，editor 为编辑器配色。 */
+export const THEME_OPTIONS: ReadonlyArray<{ id: ThemeId; label: string; group: ThemeGroup; swatch: [string, string] }> = [
+  { id: 'light', label: '浅色', group: 'basic', swatch: ['#ffffff', '#0969da'] },
+  { id: 'dark', label: '深色', group: 'basic', swatch: ['#0d1117', '#38bdf8'] },
+  { id: 'bean', label: '豆沙绿', group: 'eyecare', swatch: ['#cce8cf', '#0e5e8a'] },
+  { id: 'parchment', label: '羊皮纸', group: 'eyecare', swatch: ['#f4ecd8', '#1e64a0'] },
+  { id: 'dusk', label: '暖夜', group: 'eyecare', swatch: ['#1e1b18', '#e0a85a'] },
+  { id: 'nord', label: '北极灰蓝', group: 'eyecare', swatch: ['#2e3440', '#88c0d0'] },
+  { id: 'darcula', label: 'Darcula', group: 'editor', swatch: ['#2b2b2b', '#589df6'] },
+  { id: 'material', label: 'Sublime Material', group: 'editor', swatch: ['#263238', '#80cbc4'] },
+  { id: 'monokai', label: 'Monokai', group: 'editor', swatch: ['#272822', '#66d9ef'] },
+  { id: 'mariana', label: 'Mariana', group: 'editor', swatch: ['#2e3842', '#f9ae58'] },
+  { id: 'breakers', label: 'Breakers', group: 'editor', swatch: ['#fcfdfd', '#2473b1'] },
+  { id: 'solarized-dark', label: 'Solarized Dark', group: 'editor', swatch: ['#042029', '#268bd2'] },
+  { id: 'solarized-light', label: 'Solarized Light', group: 'editor', swatch: ['#fdf6e3', '#1e76b4'] },
+  { id: 'cobalt', label: 'Cobalt', group: 'editor', swatch: ['#002240', '#ff9d00'] },
 ];

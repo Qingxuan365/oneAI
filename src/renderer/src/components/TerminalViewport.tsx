@@ -236,6 +236,70 @@ const NORD_TERMINAL_THEME = {
   brightMagenta: '#c4a3bd', brightCyan: '#8fbcbb', brightWhite: '#eceff4',
 };
 
+const DARCULA_TERMINAL_THEME = {
+  background: '#2b2b2b', foreground: '#a9b7c6', cursor: '#bbbbbb', selectionBackground: '#21428399',
+  black: '#555555', red: '#ff6b68', green: '#a8c023', yellow: '#d6bf55', blue: '#5394ec',
+  magenta: '#ae8abe', cyan: '#299999', white: '#bbbbbb', brightBlack: '#787878',
+  brightRed: '#ff8785', brightGreen: '#bdd74a', brightYellow: '#ffc66d', brightBlue: '#589df6',
+  brightMagenta: '#c3a3d2', brightCyan: '#3dbcbc', brightWhite: '#ffffff',
+};
+
+const MATERIAL_TERMINAL_THEME = {
+  background: '#263238', foreground: '#eeffff', cursor: '#ffcc00', selectionBackground: '#546e7a66',
+  black: '#546e7a', red: '#f07178', green: '#c3e88d', yellow: '#ffcb6b', blue: '#82aaff',
+  magenta: '#c792ea', cyan: '#89ddff', white: '#b0bec5', brightBlack: '#78909c',
+  brightRed: '#ff5370', brightGreen: '#d1f0a5', brightYellow: '#ffe08a', brightBlue: '#a1bfff',
+  brightMagenta: '#dab4f2', brightCyan: '#a9e8ff', brightWhite: '#ffffff',
+};
+
+const MONOKAI_TERMINAL_THEME = {
+  background: '#272822', foreground: '#f8f8f2', cursor: '#f8f8f0', selectionBackground: '#49483e',
+  black: '#75715e', red: '#f92672', green: '#a6e22e', yellow: '#e6db74', blue: '#66d9ef',
+  magenta: '#ae81ff', cyan: '#a1efe4', white: '#cfcfc2', brightBlack: '#8f8b77',
+  brightRed: '#ff5c93', brightGreen: '#bdeb4f', brightYellow: '#f4ea9a', brightBlue: '#8fe3f5',
+  brightMagenta: '#c4a5ff', brightCyan: '#bcf5ee', brightWhite: '#f9f8f5',
+};
+
+const MARIANA_TERMINAL_THEME = {
+  background: '#2e3842', foreground: '#d8dee9', cursor: '#f9ae58', selectionBackground: '#596673b3',
+  black: '#647382', red: '#ee6a6f', green: '#a3ce9e', yellow: '#fab763', blue: '#6699cc',
+  magenta: '#c594c5', cyan: '#5fb4b4', white: '#d8dee9', brightBlack: '#a6acb9',
+  brightRed: '#f58b8f', brightGreen: '#b9dcb5', brightYellow: '#fcc98a', brightBlue: '#86b1da',
+  brightMagenta: '#d6b0d6', brightCyan: '#7fc7c7', brightWhite: '#ffffff',
+};
+
+const BREAKERS_TERMINAL_THEME = {
+  background: '#fcfdfd', foreground: '#333333', cursor: '#449999', selectionBackground: '#d8dcdfb3',
+  black: '#333333', red: '#d63a44', green: '#4f8c48', yellow: '#b87a1f', blue: '#3f7fbf',
+  magenta: '#8f5288', cyan: '#2f8484', white: '#6b6b6b', brightBlack: '#666666',
+  brightRed: '#b8222c', brightGreen: '#3e7d38', brightYellow: '#9a6410', brightBlue: '#2f69a5',
+  brightMagenta: '#774471', brightCyan: '#236b6b', brightWhite: '#333333',
+};
+
+const SOLARIZED_DARK_TERMINAL_THEME = {
+  background: '#042029', foreground: '#839496', cursor: '#819090', selectionBackground: '#124455',
+  black: '#586e75', red: '#dc322f', green: '#859900', yellow: '#b58900', blue: '#268bd2',
+  magenta: '#d33682', cyan: '#2aa198', white: '#eee8d5', brightBlack: '#657b83',
+  brightRed: '#e8584f', brightGreen: '#9bb300', brightYellow: '#d0a000', brightBlue: '#4aa5e8',
+  brightMagenta: '#e0589a', brightCyan: '#3fbfb5', brightWhite: '#fdf6e3',
+};
+
+const SOLARIZED_LIGHT_TERMINAL_THEME = {
+  background: '#fdf6e3', foreground: '#586e75', cursor: '#073642', selectionBackground: '#d9d2b8',
+  black: '#073642', red: '#dc322f', green: '#6b7d00', yellow: '#9a7400', blue: '#1f78b6',
+  magenta: '#d33682', cyan: '#1f8a82', white: '#657b83', brightBlack: '#586e75',
+  brightRed: '#cb4b16', brightGreen: '#5a6b00', brightYellow: '#7d5e00', brightBlue: '#1a68a0',
+  brightMagenta: '#6c71c4', brightCyan: '#176b64', brightWhite: '#073642',
+};
+
+const COBALT_TERMINAL_THEME = {
+  background: '#002240', foreground: '#ffffff', cursor: '#ffffff', selectionBackground: '#b36539bf',
+  black: '#3b5f8a', red: '#ff628c', green: '#3ad900', yellow: '#ffdd00', blue: '#0088ff',
+  magenta: '#d08cff', cyan: '#5ce1e6', white: '#d6e4f5', brightBlack: '#6c8db5',
+  brightRed: '#ff8aa8', brightGreen: '#6ff03a', brightYellow: '#ffee80', brightBlue: '#4da8ff',
+  brightMagenta: '#e0b0ff', brightCyan: '#8cf0f3', brightWhite: '#ffffff',
+};
+
 const TERMINAL_THEMES: Record<ThemeId, typeof DARK_TERMINAL_THEME> = {
   light: LIGHT_TERMINAL_THEME,
   dark: DARK_TERMINAL_THEME,
@@ -243,6 +307,14 @@ const TERMINAL_THEMES: Record<ThemeId, typeof DARK_TERMINAL_THEME> = {
   parchment: PARCHMENT_TERMINAL_THEME,
   dusk: DUSK_TERMINAL_THEME,
   nord: NORD_TERMINAL_THEME,
+  darcula: DARCULA_TERMINAL_THEME,
+  material: MATERIAL_TERMINAL_THEME,
+  monokai: MONOKAI_TERMINAL_THEME,
+  mariana: MARIANA_TERMINAL_THEME,
+  breakers: BREAKERS_TERMINAL_THEME,
+  'solarized-dark': SOLARIZED_DARK_TERMINAL_THEME,
+  'solarized-light': SOLARIZED_LIGHT_TERMINAL_THEME,
+  cobalt: COBALT_TERMINAL_THEME,
 };
 
 /**

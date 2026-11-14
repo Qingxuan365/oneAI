@@ -9,6 +9,7 @@ import { checkAccountLogin } from './account-login';
 import { setupGitBranch } from './git-branch';
 import { setupTaskSummary } from './task-summary';
 import { listSessionHistory, deleteSessionHistory } from './session-history';
+import { getUsageStats } from './usage-stats';
 import { detectInstalledClis } from './cli-detect';
 import { setupWorkspaceStore } from './workspace-store';
 import { setupMusicLibrary } from './music-library';
@@ -114,6 +115,7 @@ function setupIPC() {
   setupTaskSummary();
   ipcMain.handle('history:list', () => listSessionHistory());
   ipcMain.handle('history:delete', (_event, items) => deleteSessionHistory(Array.isArray(items) ? items : []));
+  ipcMain.handle('usage:stats', (_event, accounts) => getUsageStats(accounts));
   ipcMain.handle('cli:detect', () => detectInstalledClis());
   ipcMain.handle('window:is-maximized', () => mainWindow?.isMaximized() ?? false);
   ipcMain.handle('workspace:select-directory', async (_event, currentPath?: string) => {

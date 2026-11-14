@@ -35,6 +35,7 @@ d:/GitHub/OneAI/
 │   │   ├── quota-service.ts   # 大模型配额、模型与推理等级、会话累计 Tokens / Cost 读取及配置热监听
 │   │   ├── system-stats.ts    # 整机 CPU / 内存 / 网速采样（网速读物理网卡，常驻 PowerShell），每 2 秒推送给顶栏
 │   │   ├── task-summary.ts    # 读取任务对应会话（Claude / Codex / Kimi 的本机会话文件）里最近一条用户消息，供侧栏任务行第二行
+│   │   ├── usage-stats.ts     # 本周用量：流式解析 Claude Code / Codex / Antigravity 本机会话记录，按 CLI × 模型汇总请求数与 Tokens，并给出近 26 周每日请求数（按文件 mtime + 大小缓存解析结果）
 │   │   ├── git-branch.ts      # 读取文件夹所在 Git 仓库的当前分支（只读 .git/HEAD，不执行 git）
 │   │   ├── account-env.ts     # 多账号：各 CLI 的配置目录环境变量、路径校验与目录创建，只创建目录不读凭据
 │   │   ├── account-login.ts   # 多账号：调用 CLI 自带状态命令判断登录状态（Kimi Code 只检查凭据文件是否存在）
@@ -49,7 +50,7 @@ d:/GitHub/OneAI/
 │           ├── main.tsx
 │           ├── App.tsx                   # 全局状态、工作区持久化与会话调度
 │           ├── index.css                 # 语义颜色 token、各主题配色变量、通用控件类（icon-btn / btn-* / input / option）与顶栏容器查询断点
-│           ├── themes.ts                 # 主题明暗基调与设置页主题选项
+│           ├── themes.ts                 # 主题明暗基调与设置页主题选项（浅 / 深、护眼、编辑器三组）；新增主题须同步 index.css、index.html 首帧脚本的主题白名单与 TerminalViewport 终端配色
 │           ├── taskSummary.ts            # 任务行第二行支持的 CLI 与「新会话 · 时间」的格式化
 │           ├── clis.ts                   # 内置 CLI 定义（CliDef）、默认文件夹与首次启动的示例任务
 │           ├── workspaceState.ts         # 文件夹树的状态：folderKey、排序、旧数据迁移、状态校验、最近任务归类与读写
@@ -64,6 +65,7 @@ d:/GitHub/OneAI/
 │           │   ├── NewTaskModal.tsx      # 新建 Task 弹窗（该 CLI 配置了账号时可选账号）
 │           │   ├── FilePreviewPanel.tsx  # 终端右侧只读文件预览面板（Ctrl+单击终端路径打开，宽度可拖拽）
 │           │   ├── HistoryModal.tsx      # 历史会话抽屉（顶栏右上角入口）：按日期分段，显示文件夹、分支与「已打开」
+│           │   ├── UsageModal.tsx        # 本周用量弹窗（顶栏用量按钮 / Ctrl+Shift+U）：各模型用量表与近 26 周每日请求数方块图
 │           │   ├── SettingsModal.tsx     # 分页设置：外观、时间、终端、账号、提醒、快捷键列表
 │           │   ├── AccountsSettings.tsx  # 设置 → 账号：添加 / 编辑 / 删除账号、登录入口与登录状态
 │           │   ├── Modal.tsx             # 所有弹窗共用的外壳（遮罩、标题栏、Esc 关闭、焦点归还）

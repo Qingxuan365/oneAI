@@ -57,8 +57,11 @@ export interface FolderEntry {
   isExpanded: boolean;
 }
 
-// 具体主题 id；bean 豆沙绿、parchment 羊皮纸、dusk 暖夜、nord 北极灰蓝为护眼主题
-export type ThemeId = 'light' | 'dark' | 'bean' | 'parchment' | 'dusk' | 'nord';
+// 具体主题 id；bean 豆沙绿、parchment 羊皮纸、dusk 暖夜、nord 北极灰蓝为护眼主题；
+// 其余为编辑器配色：darcula、material（Sublime Material），以及 Sublime Text 内置的 monokai、mariana、breakers、solarized-dark、solarized-light、cobalt
+export type ThemeId =
+  | 'light' | 'dark' | 'bean' | 'parchment' | 'dusk' | 'nord'
+  | 'darcula' | 'material' | 'monokai' | 'mariana' | 'breakers' | 'solarized-dark' | 'solarized-light' | 'cobalt';
 
 export interface AppSettings {
   theme: 'system' | ThemeId; // 应用主题，默认跟随系统（仅在 light / dark 间切换）
@@ -92,6 +95,33 @@ export interface QuotaData {
   message?: string;
 }
 
+export type UsageCli = 'claude' | 'codex' | 'agy';
+
+/** 本周某个 CLI 下某个模型的用量 */
+export interface UsageRow {
+  cliId: UsageCli;
+  model: string;
+  requests: number;   // 请求数：一次模型回复算一次
+  sessions: number;   // 本周内出现过该模型回复的会话数
+  input: number;      // 未命中缓存的输入 tokens
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+export interface UsageDay {
+  date: string;       // 本地日期 YYYY-MM-DD
+  requests: number;
+  byCli: Partial<Record<UsageCli, number>>;
+}
+
+export interface UsageStats {
+  generatedAt: number;
+  weekStart: number;  // 本周周一 00:00（本地时间）
+  rows: UsageRow[];
+  days: UsageDay[];   // 周一对齐、连续，到本周周日为止
+}
+
 export interface SystemStats {
   cpuPercent: number;
   memUsedBytes: number;
@@ -118,6 +148,8 @@ export interface ElectronTerminalAPI {
   saveWorkspaceState?: (json: string) => void;
   listSessionHistory: () => Promise<HistoryEntry[]>;
   deleteSessionHistory: (items: Array<{ cliId: HistoryEntry['cliId']; id: string }>) => Promise<{ deleted: number; failed: number }>;
+  /** 本周各 CLI × 模型的用量与每日请求数（Claude Code / Codex / Antigravity）；accounts 为需要一并统计的账号配置目录 */
+  getUsageStats?: (accounts: Array<{ cliId: string; configDir: string }>) => Promise<UsageStats>;
   detectClis: () => Promise<Array<{ id: string; name: string; command: string }>>;
   createSession: (options: { id: string; command?: string; cwd?: string; account?: SessionAccount }) => Promise<{ success: boolean; buffer?: string; error?: string }>;
   getSessionBuffer: (id: string) => Promise<string>;

@@ -7,6 +7,9 @@
 ## 2. 进度看板
 
 ### 已完成
+- [x] 2026-11-14 10:03 本周用量面板：顶栏用量按钮 / `Ctrl+Shift+U` 打开弹窗，统计本机 Claude Code、Codex、Antigravity 会话记录（含账号配置目录）中本周各 CLI × 模型的请求数、会话数与输入 / 输出 / 缓存 Tokens，并显示近 26 周每日请求数的 GitHub 风格绿色方块图（`usage-stats.ts`、`UsageModal.tsx`、IPC `usage:stats`）。
+- [x] 2026-11-14 10:03 新增 8 个编辑器配色主题：Darcula、Sublime Material，以及 Sublime Text 内置的 Monokai、Mariana、Breakers、Solarized Dark、Solarized Light、Cobalt；设置页主题分为护眼与编辑器两组，终端配色同步。
+- [x] 2026-11-14 10:03 休息提醒（语音与弹框共用）文案改为「主人您已经工作 N 小时了，该休息一下了。」，N 取自设置的提醒时长。
 - [x] Phase 26 第三步：任务行第二行显示该任务会话里最近一条用户消息（Claude / Codex / Kimi），没有消息时显示「新会话 · 创建时间」，其他 CLI 保持单行。
 - [x] Phase 26 第二步：侧栏按文件夹分组（多个文件夹的终端同时运行，不再因切换而结束），文件夹行带 Git 分支徽标，文件夹「+」弹出 CLI 菜单新建任务，新增「最近任务」区（由 Claude / Codex / Kimi 历史会话按文件夹归类），旧的按工作区存储的数据首次启动时合并迁移并保留。
 - [x] Phase 27：多账号配置，支持 Codex、Claude Code、Kimi Code；设置新增「账号」页，新建任务可选账号，任务行与顶栏显示账号名，额度按账号读取。
@@ -67,6 +70,8 @@
 - [x] 全量 TypeScript 类型检查（`npx tsc --noEmit`）与 Vite 构建打包（`npm run build`）测试通过。
 
 ### 待办 / 后续增强
+- [ ] 桌面验收本周用量面板与新主题：弹窗与方块图在各主题下的实际观感与窗口宽度表现（自动检查只核对 DOM、对比度和颜色差异，没有截图查看）；Codex 的模型名在有真实主会话时是否正确（本机只有一个 `codex-auto-review` 子会话，`turn_context.model` 字段位置按该会话验证）；休息提醒语音的实际播报。
+- [ ] 待决定：用量面板暂不含 Kimi Code（本机只有会话索引、没有逐条 token）、Pi（日志有 usage 与 model_change，可低成本接入）与 OpenCode；Claude Code 日志无费用字段，面板只显示 Tokens，不换算美元。
 - [ ] 在 Windows 桌面端实际运行满 60 分钟，确认中文语音开关、提醒弹框与关闭后重新计时。
 - [ ] 手工验收主题三档切换、系统外观联动、终端配色及重启恢复，以及真实 CLI 长模型名称和额度消息下的顶栏体验；自动检查使用组件夹具，未启动真实 PTY。
 - [ ] 手工验收 CLI 分组拖拽、键盘排序与重启后的顺序恢复。
@@ -94,6 +99,8 @@
 - 会话日志缓冲保留最近约 2 MiB 输出；更早内容不会出现在复制和导出的日志中。
 
 ## 4. 最近验证
+
+- **2026-11-14 10:03**：本周用量面板、8 个新主题与休息提醒文案改动后 `tsc --noEmit` 通过；`npm run check:ui` 184 项全部通过（新增：用量面板按模型列行、周请求总数、紧凑单位、方块图 182 格 / 每列 7 格且周一起始、五档颜色、未来日期不着色且无提示、今天描边、悬停提示含日期与请求数、方块图不横向溢出、空周提示；8 个新主题的正文 / 次要文字 / 点缀色对比度下限与各主题底色互不相同；设置页两组主题按钮；顶栏增加用量按钮后 7 种宽度仍不重叠）。检查中发现并修正了 Darcula 次要文字与 Breakers 点缀色对比度不足。对本机真实日志跑解析：182 天、7 个有数据的日子，本周 Claude Code（Sonnet 5.5 / Opus 5.5 / Fable 5.2）、Antigravity（Gemini 4 Hydrogen / Argon / 3.8 Flash）、Codex（`codex-auto-review`）各行合计与日志吻合，首次读取约 131 ms、缓存后约 10 ms。主题色值来源：Sublime Text 官方 `LegacyColorSchemes` 仓库（Monokai Bright、Solarized、Cobalt）与 Sublime Mariana / Breakers 的开源移植；Monokai 取自 Monokai Bright 的底色与语法色，Mariana / Breakers 为第三方移植值，面板层级按本应用 token 推导。`npm run build:win` 通过，`release/OneAI-Setup-1.0.0.exe` 85141797 字节（北京时间 2026-11-14 10:03）。未验证：弹窗与新主题的截图观感、安装包未安装运行。基线（未改动代码）上 `check:ui` 在本地时间 02:00 前会有 1 项「历史会话按今天 / 昨天 / 更早分段」失败，因夹具里的「昨天」条目按当前时刻推算，与本次改动无关，尚未修复。
 
 - **2026-11-14 06:21**：历史会话抽屉筛选改动后 `tsc --noEmit` 通过；`npm run check:ui` 154 项全部通过（新增：搜索框聚焦时无轮廓与高亮边框、CLI 筛选为含全部 / Codex / Claude Code / Antigravity / Pi / Kimi Code 的下拉）；`npm run build:win` 通过，`release/OneAI-Setup-1.0.0.exe` 85135980 字节（北京时间 2026-11-14 06:21）。未验证：Antigravity / Pi 选项在真实桌面里的观感。
 

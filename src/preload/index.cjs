@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeClipboardText: (text) => ipcRenderer.invoke('clipboard:write-text', text),
   listSessionHistory: () => ipcRenderer.invoke('history:list'),
   deleteSessionHistory: (items) => ipcRenderer.invoke('history:delete', items),
+  getUsageStats: (accounts) => ipcRenderer.invoke('usage:stats', accounts),
   detectClis: () => ipcRenderer.invoke('cli:detect'),
   createSession: (options) => ipcRenderer.invoke('terminal:create', options),
   getSessionBuffer: (id) => ipcRenderer.invoke('terminal:get-buffer', { id }),

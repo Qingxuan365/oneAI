@@ -5,6 +5,7 @@ import { TerminalViewport, TerminalViewportRef } from './components/TerminalView
 import { NewTaskModal } from './components/NewTaskModal';
 import { SettingsModal } from './components/SettingsModal';
 import { HistoryModal } from './components/HistoryModal';
+import { UsageModal } from './components/UsageModal';
 import { FilePreviewPanel } from './components/FilePreviewPanel';
 import { Modal } from './components/Modal';
 import { ConfirmDialog, ConfirmOptions } from './components/ConfirmDialog';
@@ -33,7 +34,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   accounts: [],
 };
 
-const workReminderText = (hours: number) => `已经工作 ${hours} 个小时了，起来活动一下吧。`;
+const workReminderText = (hours: number) => `主人您已经工作 ${hours} 小时了，该休息一下了。`;
 const appOpenedAt = Date.now();
 const IDLE_AFTER_MS = 10_000;
 
@@ -193,6 +194,7 @@ export const App: React.FC = () => {
   }, [resolvedTheme]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isUsageOpen, setIsUsageOpen] = useState(false);
   const [filePreview, setFilePreview] = useState<{ cwd: string; path: string; line?: number; openedAt: number } | null>(null);
   const [previewWidth, setPreviewWidth] = useState(420);
   // null 表示尚未检测完成（或非 Electron 预览），此时显示全部分组
@@ -727,7 +729,7 @@ export const App: React.FC = () => {
   const shortcutRef = useRef<(e: KeyboardEvent) => boolean>(() => false);
   shortcutRef.current = (e) => {
     if (!e.ctrlKey || e.altKey || e.metaKey) return false;
-    if (isNewTaskOpen || isSettingsOpen || isHistoryOpen || workReminderVisible || confirmOptions) return false;
+    if (isNewTaskOpen || isSettingsOpen || isHistoryOpen || isUsageOpen || workReminderVisible || confirmOptions) return false;
     const ordered = orderedTasks(folders, visibleTasks);
     const key = e.key.toLowerCase();
     if (key === 'tab') {
@@ -761,6 +763,7 @@ export const App: React.FC = () => {
     }
     if (key === 'b') { setIsSidebarCollapsed((collapsed) => !collapsed); return true; }
     if (key === 'h') { setIsHistoryOpen(true); return true; }
+    if (key === 'u') { setIsUsageOpen(true); return true; }
     return false;
   };
 
@@ -884,6 +887,7 @@ ${entry.cwd}`}
           onClearScreen={() => terminalViewportRef.current?.clearActiveTerminal()}
           onRestartSession={() => handleRestartSession()}
           onOpenHistory={() => setIsHistoryOpen(true)}
+          onOpenUsage={() => setIsUsageOpen(true)}
           onExportLogs={async (mode) => terminalViewportRef.current?.exportActiveTerminalLog(mode) || { success: false, error: '没有活动终端' }}
         />
 
@@ -933,6 +937,8 @@ ${entry.cwd}`}
         onResume={handleResumeHistory}
         openHistoryIds={new Set(tasks.flatMap((task) => (task.historyId ? [task.historyId] : [])))}
       />
+
+      <UsageModal isOpen={isUsageOpen} onClose={() => setIsUsageOpen(false)} accounts={settings.accounts} />
 
       {/* 外观与字体大小设置弹窗 */}
       <SettingsModal

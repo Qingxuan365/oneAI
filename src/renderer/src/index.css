@@ -164,6 +164,219 @@
   --color-violet: 180 142 173;
 }
 
+/* 编辑器风格深色主题：Darcula（JetBrains 默认深色）、Sublime Material（Material Theme 深色默认配色） */
+:root[data-theme='darcula'] {
+  color-scheme: dark;
+  --color-canvas: 43 43 43;
+  --color-surface: 50 52 54;
+  --color-panel: 60 63 65;
+  --color-elevated: 69 73 74;
+  --color-muted: 53 56 58;
+  --color-control: 76 80 82;
+  --color-control-hover: 92 97 99;
+  --color-hover: 72 76 78;
+  --color-selected: 33 66 131;
+  --color-line: 70 72 74;
+  --color-line-strong: 94 96 98;
+  --color-fg: 187 187 187;
+  --color-fg-muted: 169 183 198;
+  --color-fg-subtle: 157 161 165;
+  --color-fg-faint: 146 150 154;
+  --color-accent: 88 157 246;
+  --color-primary: 54 105 168;
+  --color-primary-hover: 74 136 199;
+  --color-success: 124 163 100;
+  --color-warning: 255 198 109;
+  --color-danger: 255 107 104;
+  --color-violet: 178 148 196;
+}
+
+:root[data-theme='material'] {
+  color-scheme: dark;
+  --color-canvas: 38 50 56;
+  --color-surface: 33 44 50;
+  --color-panel: 41 54 61;
+  --color-elevated: 46 60 68;
+  --color-muted: 41 54 61;
+  --color-control: 55 71 79;
+  --color-control-hover: 69 90 100;
+  --color-hover: 50 66 74;
+  --color-selected: 52 84 98;
+  --color-line: 55 71 79;
+  --color-line-strong: 84 110 122;
+  --color-fg: 238 255 255;
+  --color-fg-muted: 176 190 197;
+  --color-fg-subtle: 144 164 174;
+  --color-fg-faint: 135 157 168;
+  --color-accent: 128 203 196;
+  --color-primary: 0 137 123;
+  --color-primary-hover: 0 150 136;
+  --color-success: 195 232 141;
+  --color-warning: 255 203 107;
+  --color-danger: 240 113 120;
+  --color-violet: 199 146 234;
+}
+
+/*
+ * Sublime Text 内置配色：Monokai、Mariana、Breakers 为当前内置方案，Solarized Dark / Light、Cobalt 为旧版内置方案。
+ * 底色、前景与点缀色取自方案本身，面板层级与文字梯度按本应用的 token 结构推导。
+ */
+:root[data-theme='monokai'] {
+  color-scheme: dark;
+  --color-canvas: 39 40 34;
+  --color-surface: 45 46 39;
+  --color-panel: 52 53 44;
+  --color-elevated: 62 61 50;
+  --color-muted: 49 50 42;
+  --color-control: 73 72 59;
+  --color-control-hover: 90 89 72;
+  --color-hover: 58 59 48;
+  --color-selected: 84 82 52;
+  --color-line: 70 71 58;
+  --color-line-strong: 98 97 80;
+  --color-fg: 248 248 242;
+  --color-fg-muted: 215 215 205;
+  --color-fg-subtle: 166 166 150;
+  --color-fg-faint: 150 147 125;
+  --color-accent: 102 217 239;
+  --color-primary: 30 130 156;
+  --color-primary-hover: 60 160 185;
+  --color-success: 166 226 46;
+  --color-warning: 230 219 116;
+  --color-danger: 249 38 114;
+  --color-violet: 174 129 255;
+}
+
+:root[data-theme='mariana'] {
+  color-scheme: dark;
+  --color-canvas: 46 56 66;
+  --color-surface: 36 45 53;
+  --color-panel: 40 50 59;
+  --color-elevated: 51 62 72;
+  --color-muted: 40 50 59;
+  --color-control: 62 74 85;
+  --color-control-hover: 78 91 103;
+  --color-hover: 49 60 70;
+  --color-selected: 70 86 102;
+  --color-line: 58 69 80;
+  --color-line-strong: 89 102 115;
+  --color-fg: 216 222 233;
+  --color-fg-muted: 203 205 207;
+  --color-fg-subtle: 166 172 185;
+  --color-fg-faint: 150 159 173;
+  --color-accent: 249 174 88;
+  --color-primary: 80 128 180;
+  --color-primary-hover: 102 153 204;
+  --color-success: 163 206 158;
+  --color-warning: 250 183 99;
+  --color-danger: 238 106 111;
+  --color-violet: 197 148 197;
+}
+
+:root[data-theme='breakers'] {
+  color-scheme: light;
+  --color-canvas: 252 253 253;
+  --color-surface: 243 245 245;
+  --color-panel: 227 228 228;
+  --color-elevated: 255 255 255;
+  --color-muted: 243 245 245;
+  --color-control: 224 226 227;
+  --color-control-hover: 207 210 212;
+  --color-hover: 234 236 236;
+  --color-selected: 216 220 223;
+  --color-line: 214 217 219;
+  --color-line-strong: 178 179 179;
+  --color-fg: 51 51 51;
+  --color-fg-muted: 66 66 66;
+  --color-fg-subtle: 102 102 102;
+  --color-fg-faint: 112 112 112;
+  --color-accent: 36 115 177;
+  --color-primary: 36 115 177;
+  --color-primary-hover: 28 96 150;
+  --color-success: 62 125 56;
+  --color-warning: 190 110 10;
+  --color-danger: 224 36 52;
+  --color-violet: 143 82 137;
+}
+
+:root[data-theme='solarized-dark'] {
+  color-scheme: dark;
+  --color-canvas: 4 32 41;
+  --color-surface: 7 38 48;
+  --color-panel: 10 41 51;
+  --color-elevated: 14 50 62;
+  --color-muted: 10 41 51;
+  --color-control: 18 59 72;
+  --color-control-hover: 28 76 91;
+  --color-hover: 12 47 58;
+  --color-selected: 20 70 86;
+  --color-line: 18 59 72;
+  --color-line-strong: 60 90 100;
+  --color-fg: 147 161 161;
+  --color-fg-muted: 131 148 150;
+  --color-fg-subtle: 117 138 142;
+  --color-fg-faint: 108 131 138;
+  --color-accent: 38 139 210;
+  --color-primary: 30 120 185;
+  --color-primary-hover: 38 139 210;
+  --color-success: 133 153 0;
+  --color-warning: 181 137 0;
+  --color-danger: 220 50 47;
+  --color-violet: 108 113 196;
+}
+
+:root[data-theme='solarized-light'] {
+  color-scheme: light;
+  --color-canvas: 253 246 227;
+  --color-surface: 247 240 220;
+  --color-panel: 238 232 213;
+  --color-elevated: 255 251 240;
+  --color-muted: 247 240 220;
+  --color-control: 232 225 203;
+  --color-control-hover: 218 211 187;
+  --color-hover: 238 232 213;
+  --color-selected: 205 222 226;
+  --color-line: 221 214 192;
+  --color-line-strong: 147 161 161;
+  --color-fg: 7 54 66;
+  --color-fg-muted: 62 90 100;
+  --color-fg-subtle: 88 110 117;
+  --color-fg-faint: 101 123 131;
+  --color-accent: 30 118 180;
+  --color-primary: 28 112 172;
+  --color-primary-hover: 20 95 150;
+  --color-success: 101 120 0;
+  --color-warning: 150 110 0;
+  --color-danger: 200 38 36;
+  --color-violet: 88 93 176;
+}
+
+:root[data-theme='cobalt'] {
+  color-scheme: dark;
+  --color-canvas: 0 34 64;
+  --color-surface: 0 41 76;
+  --color-panel: 0 44 82;
+  --color-elevated: 3 54 98;
+  --color-muted: 0 44 82;
+  --color-control: 8 66 117;
+  --color-control-hover: 16 84 142;
+  --color-hover: 4 52 94;
+  --color-selected: 20 80 130;
+  --color-line: 6 58 104;
+  --color-line-strong: 24 90 148;
+  --color-fg: 240 246 255;
+  --color-fg-muted: 200 216 235;
+  --color-fg-subtle: 150 175 205;
+  --color-fg-faint: 125 155 190;
+  --color-accent: 255 157 0;
+  --color-primary: 0 120 230;
+  --color-primary-hover: 0 136 255;
+  --color-success: 58 217 0;
+  --color-warning: 255 221 0;
+  --color-danger: 255 98 140;
+  --color-violet: 200 150 255;
+}
+
 html, body, #root {
   height: 100%;
   width: 100%;
