@@ -1,6 +1,7 @@
 import React from 'react';
 import { AlertTriangle, Info } from 'lucide-react';
 import { Modal } from './Modal';
+import { t } from '../i18n';
 
 export interface ConfirmOptions {
   title: string;
@@ -20,7 +21,7 @@ interface ConfirmDialogProps {
 /** 应用内确认与通知弹窗，替代系统原生 confirm / alert，随主题显示。 */
 export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({ options, onResolve }) => {
   if (!options) return null;
-  const { title, message, confirmLabel = '确定', danger, notice } = options;
+  const { title, message, confirmLabel = t('确定'), danger, notice } = options;
   return (
     <Modal
       isOpen
@@ -31,7 +32,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({ options, onResolve
       widthClass="max-w-sm"
       footer={(
         <>
-          {!notice && <button type="button" onClick={() => onResolve(false)} className="btn-secondary">取消</button>}
+          {!notice && <button type="button" onClick={() => onResolve(false)} className="btn-secondary">{t('取消')}</button>}
           <button type="button" autoFocus onClick={() => onResolve(true)} className={danger ? 'btn-danger' : 'btn-primary'}>{confirmLabel}</button>
         </>
       )}

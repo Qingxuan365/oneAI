@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { t } from './i18n';
 
 export type AccountCliId = 'codex' | 'claude' | 'kimi';
 
@@ -36,21 +37,21 @@ export function resolveConfigDir(dir: unknown): string | null {
  */
 export function buildAccountEnv(account: unknown): { env: Record<string, string> } | { error: string } {
   const value = account as Partial<SessionAccount> | null;
-  if (!value || !isAccountCli(value.cliId)) return { error: '账号配置无效：不支持的 CLI。' };
+  if (!value || !isAccountCli(value.cliId)) return { error: t('账号配置无效：不支持的 CLI。') };
   const dir = resolveConfigDir(value.configDir);
-  if (!dir) return { error: '账号的配置目录为空或不是绝对路径，或该账号配置已被删除。请在「设置 → 账号」中检查。' };
+  if (!dir) return { error: t('账号的配置目录为空或不是绝对路径，或该账号配置已被删除。请在「设置 → 账号」中检查。') };
   try {
     fs.mkdirSync(dir, { recursive: true });
-    if (!fs.statSync(dir).isDirectory()) return { error: `账号配置目录不是文件夹：${dir}` };
+    if (!fs.statSync(dir).isDirectory()) return { error: t('账号配置目录不是文件夹：{dir}', { dir }) };
   } catch (error) {
-    return { error: `无法创建账号配置目录 ${dir}：${error instanceof Error ? error.message : String(error)}` };
+    return { error: t('无法创建账号配置目录 {dir}：{reason}', { dir, reason: error instanceof Error ? error.message : String(error) }) };
   }
 
   const env: Record<string, string> = {};
   if (value.env && typeof value.env === 'object') {
     for (const [key, val] of Object.entries(value.env)) {
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || typeof val !== 'string' || val.includes('\0')) {
-        return { error: `账号的附加环境变量无效：${key}` };
+        return { error: t('账号的附加环境变量无效：{key}', { key }) };
       }
       env[key] = val;
     }

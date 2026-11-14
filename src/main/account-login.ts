@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildAccountEnv, SessionAccount } from './account-env';
+import { t } from './i18n';
 
 export interface LoginStatus {
   loggedIn: boolean | null; // null：命令输出无法识别
@@ -40,7 +41,7 @@ export function checkAccountLogin(account: unknown): Promise<LoginStatus | { err
     // 只看文件是否存在、是否非空，不读取内容；凭据是否已过期要等 Kimi 实际请求时才知道
     try {
       const stat = fs.statSync(path.join(built.env.KIMI_CODE_HOME, 'credentials', 'kimi-code.json'));
-      return Promise.resolve(stat.isFile() && stat.size > 0 ? { loggedIn: true, detail: '有凭据文件' } : { loggedIn: false });
+      return Promise.resolve(stat.isFile() && stat.size > 0 ? { loggedIn: true, detail: t('有凭据文件') } : { loggedIn: false });
     } catch {
       return Promise.resolve({ loggedIn: false });
     }

@@ -1,0 +1,21 @@
+[
+  { "id": "kimi", "name": "Kimi Code", "command": "kimi" },
+  { "id": "codex", "name": "Codex", "command": "codex" },
+  { "id": "claude", "name": "Claude Code", "command": "claude" },
+  { "id": "opencode", "name": "OpenCode", "command": "opencode" },
+  { "id": "grok", "name": "Grok Build", "command": "grok" },
+  { "id": "agy", "name": "Antigravity", "command": "agy" },
+  { "id": "qwen", "name": "Qwen Code", "command": "qwen" },
+  { "id": "aider", "name": "Aider", "command": "aider" },
+  { "id": "cursor-agent", "name": "Cursor Agent", "command": "cursor-agent" },
+  { "id": "copilot", "name": "GitHub Copilot", "command": "copilot" },
+  { "id": "amp", "name": "Amp", "command": "amp" },
+  { "id": "droid", "name": "Droid", "command": "droid" },
+  { "id": "crush", "name": "Crush", "command": "crush" },
+  { "id": "goose", "name": "Goose", "command": "goose" },
+  { "id": "iflow", "name": "iFlow CLI", "command": "iflow" },
+  { "id": "auggie", "name": "Auggie", "command": "auggie" },
+  { "id": "kiro-cli", "name": "Kiro CLI", "command": "kiro-cli" },
+  { "id": "cline", "name": "Cline", "command": "cline" },
+  { "id": "pi", "name": "Pi", "command": "pi" }
+]

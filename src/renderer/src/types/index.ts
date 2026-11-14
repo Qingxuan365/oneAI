@@ -49,6 +49,14 @@ export interface CliDef {
   name: string;            // 显示名称，如 "Codex", "Kimi Code"
   icon: string;            // 品牌专属 Logo，未内置的 CLI 回退为通用终端图标
   defaultCommand: string;  // 默认拉起命令模版
+  custom?: boolean;        // 用户在「设置 → CLI」里自定义的 CLI：启动时整条命令交给 PowerShell 解析
+}
+
+/** 用户自定义的 CLI（AppSettings.customClis）：名称与完整启动命令，没有品牌图标，用通用终端图标 */
+export interface CustomCli {
+  id: string;
+  name: string;
+  command: string;         // 完整启动命令，可带参数，如 `mycli --model x`
 }
 
 /** 侧栏中的一个工作文件夹；任务按 cwd 归属到文件夹，文件夹按此数组顺序显示 */
@@ -66,6 +74,8 @@ export type ThemeId =
   | 'kiro-dark' | 'kiro-light';
 
 export interface AppSettings {
+  language: 'zh-CN' | 'en'; // 界面语言：首次启动按系统语言预选，在首次引导里确认，之后可在设置 → 外观 切换
+  onboardingDone: boolean; // 首次引导（选择语言、认识各入口）是否已完成；完成后不再弹出
   theme: 'system' | ThemeId; // 应用主题，默认跟随系统（仅在 light / dark 间切换）
   voiceReminderEnabled: boolean; // 工作满提醒时长时是否语音播报
   workReminderHours: number; // 工作时长提醒的间隔小时数，默认 1（1 ~ 12 的整数）
@@ -78,7 +88,9 @@ export interface AppSettings {
   musicDirectory: string; // 顶栏音乐播放目录，空字符串表示系统「音乐」目录
   musicPlayerVisible: boolean; // 侧栏底部是否显示音乐播放器，默认 true
   clockOffsetHours: number; // 顶栏时钟相对系统时间增加的小时数，默认 0（-24 ~ 24 的整数）
+  topbarDateVisible: boolean; // 窗口最大化时顶栏时钟是否显示年月日（含农历）与星期，默认 true
   accounts: Account[]; // 多账号配置（Codex / Claude Code / Kimi Code），默认空；「恢复默认设置」不会清空
+  customClis: CustomCli[]; // 用户自定义的 CLI，默认空；「恢复默认设置」不会清空
 }
 
 export interface QuotaData {
@@ -159,8 +171,15 @@ export interface ElectronTerminalAPI {
   deleteSessionHistory: (items: Array<{ cliId: HistoryEntry['cliId']; id: string }>) => Promise<{ deleted: number; failed: number }>;
   /** 本周各 CLI × 模型的用量与每日请求数（Claude Code / Codex / Antigravity）；accounts 为需要一并统计的账号配置目录 */
   getUsageStats?: (accounts: Array<{ id: string; name: string; cliId: string; configDir: string }>) => Promise<UsageStats>;
-  detectClis: () => Promise<Array<{ id: string; name: string; command: string }>>;
-  createSession: (options: { id: string; command?: string; cwd?: string; account?: SessionAccount }) => Promise<{ success: boolean; buffer?: string; error?: string }>;
+  /** 按 PATH 检测已安装的 CLI；custom 为用户自定义 CLI，检测到的会一并返回（name 为空） */
+  /** 主进程里的已知 CLI 清单（设置 → CLI 显示用），不是写死在界面里 */
+  listKnownClis?: () => Promise<Array<{ id: string; name: string; command: string }>>;
+  /** 通知主进程当前界面语言，主进程里会显示到界面的文案（错误、额度提示等）跟随它 */
+  setLanguage?: (language: string) => Promise<void>;
+  /** 当前用户的主目录，新用户首次启动时作为默认文件夹 */
+  getHomeDir?: () => string;
+  detectClis: (custom?: Array<{ id: string; command: string }>) => Promise<Array<{ id: string; name: string; command: string }>>;
+  createSession: (options: { id: string; command?: string; cwd?: string; shell?: boolean; account?: SessionAccount }) => Promise<{ success: boolean; buffer?: string; error?: string }>;
   getSessionBuffer: (id: string) => Promise<string>;
   writeSession: (id: string, data: string) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => Promise<void>;

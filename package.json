@@ -3,12 +3,14 @@
   "version": "1.0.0",
   "description": "Desktop workbench for managing multiple local AI coding CLIs with live quotas",
   "author": "OneAI Team",
+  "license": "MIT",
   "main": "dist-electron/main/index.js",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "check:ui": "node scripts/check-ui.mjs",
+    "check:i18n": "node scripts/check-i18n.mjs",
     "preview": "vite preview",
     "build:win": "npm run build && electron-builder --win",
     "build:portable": "npm run build && electron-builder --win portable"

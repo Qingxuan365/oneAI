@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+import { t } from './i18n';
 
 const MAX_TEXT_BYTES = 1024 * 1024;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -35,7 +36,7 @@ function resolveInside(cwd: string, candidate: string): string | null {
 
 function readPreview(cwd: string, candidate: string): FilePreviewResult {
   const target = resolveInside(cwd, candidate);
-  if (!target) return { kind: 'error', path: String(candidate), message: '文件不存在，或不在当前任务工作目录内' };
+  if (!target) return { kind: 'error', path: String(candidate), message: t('文件不存在，或不在当前任务工作目录内') };
   try {
     const { size } = fs.statSync(target);
     const mime = IMAGE_MIME[path.extname(target).toLowerCase()];

@@ -4,6 +4,7 @@ import { Account, CliDef, TaskSession } from '../types';
 import { folderName, nextTaskTitle, tasksInFolder } from '../workspaceState';
 import { BrandIcon } from './BrandIcon';
 import { Modal } from './Modal';
+import { t } from '../i18n';
 
 interface NewTaskModalProps {
   isOpen: boolean;
@@ -71,7 +72,7 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
         setError('');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '无法选择工作目录');
+      setError(err instanceof Error ? err.message : t('无法选择工作目录'));
     }
   };
 
@@ -83,9 +84,9 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
     try {
       const result = await onCreate(cli.id, title.trim(), command.trim(), cwd.trim(), accountId || undefined);
       if (result.success) onClose();
-      else setError(result.error || '终端启动失败，请检查工作目录和启动命令。');
+      else setError(result.error || t('终端启动失败，请检查工作目录和启动命令。'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : '终端启动失败');
+      setError(err instanceof Error ? err.message : t('终端启动失败'));
     } finally {
       setIsSubmitting(false);
     }
@@ -100,14 +101,14 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
       onClose={onClose}
       closeDisabled={isSubmitting}
       titleId="new-task-modal-title"
-      title={`新建任务 · ${folderName(folderPath)}`}
+      title={t('新建任务 · {folder}', { folder: folderName(folderPath) })}
       icon={<BrandIcon icon={cli.icon} size={18} />}
       footer={(
         <>
-          <button type="button" onClick={onClose} disabled={isSubmitting} className="btn-secondary">取消</button>
+          <button type="button" onClick={onClose} disabled={isSubmitting} className="btn-secondary">{t('取消')}</button>
           <button type="submit" form="new-task-form" disabled={isSubmitting || !title.trim()} className="btn-primary">
             <Play size={12} fill="currentColor" />
-            <span>{isSubmitting ? '正在启动…' : '启动任务'}</span>
+            <span>{isSubmitting ? t('正在启动…') : t('启动任务')}</span>
           </button>
         </>
       )}
@@ -124,7 +125,7 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
         )}
 
         <div>
-          <label htmlFor="new-task-title" className={label}>任务名称</label>
+          <label htmlFor="new-task-title" className={label}>{t('任务名称')}</label>
           <input
             id="new-task-title"
             type="text"
@@ -133,37 +134,37 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
             onFocus={(e) => e.currentTarget.select()}
             onChange={(e) => setTitle(e.target.value)}
             className="input"
-            placeholder="例如：Auth Refactor"
+            placeholder={t('例如：Auth Refactor')}
             required
           />
         </div>
 
         {cliAccounts.length > 0 && (
           <div>
-            <label htmlFor="new-task-account" className={label}>账号</label>
+            <label htmlFor="new-task-account" className={label}>{t('账号')}</label>
             <select id="new-task-account" value={accountId} onChange={(e) => setAccountId(e.target.value)} className="input">
-              <option value="">默认账号</option>
+              <option value="">{t('默认账号')}</option>
               {cliAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
             </select>
-            <p className={hint}>账号使用各自独立的配置目录；首次使用请先在「设置 → 账号」中登录。</p>
+            <p className={hint}>{t('账号使用各自独立的配置目录；首次使用请先在「设置 → 账号」中登录。')}</p>
           </div>
         )}
 
         <div>
-          <label htmlFor="new-task-command" className={label}>启动命令</label>
+          <label htmlFor="new-task-command" className={label}>{t('启动命令')}</label>
           <input
             id="new-task-command"
             type="text"
             value={command}
             onChange={(e) => setCommand(e.target.value)}
             className="input font-mono"
-            placeholder="例如：powershell.exe"
+            placeholder={t('例如：powershell.exe')}
           />
-          <p className={hint}>留空则启动系统的交互式 PowerShell。</p>
+          <p className={hint}>{t('留空则启动系统的交互式 PowerShell。')}</p>
         </div>
 
         <div>
-          <label htmlFor="new-task-cwd" className={label}>工作目录</label>
+          <label htmlFor="new-task-cwd" className={label}>{t('工作目录')}</label>
           <div className="flex gap-2">
             <input
               id="new-task-cwd"
@@ -178,13 +179,13 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
               onClick={handleChooseDirectory}
               disabled={isSubmitting}
               className="btn-secondary"
-              title="为此任务选择工作目录"
+              title={t('为此任务选择工作目录')}
             >
               <FolderOpen size={14} />
-              <span>选择文件夹</span>
+              <span>{t('选择文件夹')}</span>
             </button>
           </div>
-          <p className={hint}>改成其他目录时，任务会出现在对应的文件夹下。</p>
+          <p className={hint}>{t('改成其他目录时，任务会出现在对应的文件夹下。')}</p>
         </div>
       </form>
     </Modal>

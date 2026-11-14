@@ -5,6 +5,7 @@ import { Modal } from './Modal';
 import { HistoryEntry } from '../types';
 import { folderKey, folderName } from '../workspaceState';
 import { formatAgo } from '../taskSummary';
+import { t } from '../i18n';
 
 const CLI_LABELS: Record<string, string> = {
   claude: 'Claude Code',
@@ -67,7 +68,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
           setBranches(byKey);
         }).catch(() => {});
       })
-      .catch((err) => { if (active) setError(err instanceof Error ? err.message : '读取历史会话失败'); })
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : t('读取历史会话失败')); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [isOpen]);
@@ -76,7 +77,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
   const filterOptions = useMemo(() => {
     const ids = [...new Set(entries.map((entry) => entry.cliId))];
     ids.sort((a, b) => cliLabel(a).localeCompare(cliLabel(b)));
-    return [{ id: 'all', label: '全部' }, ...ids.map((id) => ({ id, label: cliLabel(id) }))];
+    return [{ id: 'all', label: t('全部') }, ...ids.map((id) => ({ id, label: cliLabel(id) }))];
   }, [entries]);
 
   // 选中的 CLI 已没有历史（如刚删完）时回到「全部」
@@ -102,9 +103,9 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
       setEntries(fresh);
       const stillThere = new Set(fresh.map(entryKey));
       const failed = targets.filter((entry) => stillThere.has(entryKey(entry))).length;
-      if (failed > 0) setError(`${failed} 条会话删除失败`);
+      if (failed > 0) setError(t('{n} 条会话删除失败', { n: failed }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除历史会话失败');
+      setError(err instanceof Error ? err.message : t('删除历史会话失败'));
     } finally {
       setDeleting(false);
       setPendingKey(null);
@@ -119,7 +120,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
       isOpen={isOpen}
       onClose={onClose}
       titleId="history-title"
-      title="历史会话"
+      title={t('历史会话')}
       icon={<History size={16} className="text-accent" />}
       widthClass="max-w-xl"
       variant="drawer"
@@ -133,15 +134,15 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="搜索标题或目录"
+              placeholder={t('搜索标题或目录')}
               className="min-w-0 flex-1 bg-transparent text-ui text-fg !outline-none placeholder:text-fg-faint select-text"
             />
-            {!loading && <span className="shrink-0 text-xs tabular-nums text-fg-faint">{visible.length} 条</span>}
+            {!loading && <span className="shrink-0 text-xs tabular-nums text-fg-faint">{t('{n} 条', { n: visible.length })}</span>}
           </label>
           <select
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            aria-label="按 CLI 筛选"
+            aria-label={t('按 CLI 筛选')}
             className="input !w-auto shrink-0"
           >
             {filterOptions.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
@@ -151,12 +152,12 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
           <div className="flex justify-end">
             {confirmAll ? (
               <span className="flex items-center gap-1.5">
-                <button type="button" disabled={deleting} onClick={() => removeEntries(visible)} className={`${small} border-danger/60 bg-danger/10 text-danger hover:bg-danger/20`}>确认删除 {visible.length} 条（同时删除本机会话文件）</button>
-                <button type="button" onClick={() => setConfirmAll(false)} className={`${small} border-line text-fg-muted hover:bg-hover`}>取消</button>
+                <button type="button" disabled={deleting} onClick={() => removeEntries(visible)} className={`${small} border-danger/60 bg-danger/10 text-danger hover:bg-danger/20`}>{t('确认删除 {n} 条（同时删除本机会话文件）', { n: visible.length })}</button>
+                <button type="button" onClick={() => setConfirmAll(false)} className={`${small} border-line text-fg-muted hover:bg-hover`}>{t('取消')}</button>
               </span>
             ) : (
               <button type="button" onClick={() => { setPendingKey(null); setConfirmAll(true); }} className={`${small} flex items-center gap-1 border-line text-fg-subtle hover:bg-hover hover:text-danger`}>
-                <Trash2 size={12} />删除列表中全部
+                <Trash2 size={12} />{t('删除列表中全部')}
               </button>
             )}
           </div>
@@ -164,12 +165,12 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
       </div>
 
       <div className="min-h-[12rem] flex-1 overflow-y-auto p-2">
-        {loading && <p className="p-8 text-center text-sm text-fg-subtle">正在读取…</p>}
+        {loading && <p className="p-8 text-center text-sm text-fg-subtle">{t('正在读取…')}</p>}
         {error && <p role="alert" className="p-4 text-center text-sm text-danger">{error}</p>}
         {!loading && !error && visible.length === 0 && (
           <div className="p-8 text-center text-sm text-fg-subtle">
-            <p>{entries.length === 0 ? '还没有历史会话' : '没有符合条件的会话'}</p>
-            {entries.length === 0 && <p className="mt-1.5 text-xs text-fg-faint">只读取 Claude Code、Codex、Kimi Code 的本机会话，其他 CLI 暂无可读的历史。</p>}
+            <p>{entries.length === 0 ? t('还没有历史会话') : t('没有符合条件的会话')}</p>
+            {entries.length === 0 && <p className="mt-1.5 text-xs text-fg-faint">{t('只读取 Claude Code、Codex、Kimi Code 的本机会话，其他 CLI 暂无可读的历史。')}</p>}
           </div>
         )}
         {visible.map((entry, index) => {
@@ -181,12 +182,12 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
           const branch = branches[folderKey(entry.cwd)];
           return (
             <React.Fragment key={key}>
-            {showGroup && <p className="px-3 pb-1 pt-3 text-xs font-medium text-fg-faint" data-history-group>{group}</p>}
+            {showGroup && <p className="px-3 pb-1 pt-3 text-xs font-medium text-fg-faint" data-history-group>{t(group)}</p>}
             <div className="group/row flex items-center gap-1 rounded-lg transition-colors hover:bg-hover">
               <button
                 type="button"
                 onClick={() => onResume(entry)}
-                title={isOpenTask ? '已在侧栏打开，点击切换过去' : '恢复此会话'}
+                title={isOpenTask ? t('已在侧栏打开，点击切换过去') : t('恢复此会话')}
                 className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-3 py-2.5 text-left"
               >
                 <BrandIcon icon={entry.cliId} size={18} />
@@ -204,20 +205,20 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
                 <span className="shrink-0 text-right text-xs">
                   <span className="block text-fg-muted">{cliLabel(entry.cliId)}</span>
                   <span className="block tabular-nums text-fg-faint" title={formatTime(entry.updatedAt)}>{formatAgo(entry.updatedAt)}</span>
-                  {isOpenTask && <span className="mt-0.5 inline-block rounded-full bg-accent/15 px-1.5 text-2xs font-medium text-accent" data-history-open>已打开</span>}
+                  {isOpenTask && <span className="mt-0.5 inline-block rounded-full bg-accent/15 px-1.5 text-2xs font-medium text-accent" data-history-open>{t('已打开')}</span>}
                 </span>
               </button>
               {confirming ? (
                 <span className="flex shrink-0 items-center gap-1.5 pr-2">
-                  <button type="button" disabled={deleting} onClick={() => removeEntries([entry])} className={`${small} border-danger/60 bg-danger/10 text-danger hover:bg-danger/20`}>确认删除</button>
-                  <button type="button" onClick={() => setPendingKey(null)} className={`${small} border-line text-fg-muted hover:bg-elevated`}>取消</button>
+                  <button type="button" disabled={deleting} onClick={() => removeEntries([entry])} className={`${small} border-danger/60 bg-danger/10 text-danger hover:bg-danger/20`}>{t('确认删除')}</button>
+                  <button type="button" onClick={() => setPendingKey(null)} className={`${small} border-line text-fg-muted hover:bg-elevated`}>{t('取消')}</button>
                 </span>
               ) : (
                 <button
                   type="button"
                   onClick={() => { setConfirmAll(false); setPendingKey(key); }}
-                  aria-label="删除该会话"
-                  title="删除该会话"
+                  aria-label={t('删除该会话')}
+                  title={t('删除该会话')}
                   className="icon-btn mr-2 opacity-0 enabled:hover:text-danger focus-visible:opacity-100 group-hover/row:opacity-100"
                 >
                   <Trash2 size={14} />

@@ -8,6 +8,7 @@ import { BrandIcon } from './BrandIcon';
 import { AppLogo } from './AppLogo';
 import { MusicPlayer } from './MusicPlayer';
 import { version } from '../../../../package.json';
+import { t } from '../i18n';
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -52,17 +53,17 @@ interface SidebarProps {
 
 function getGreeting(): { text: string; period: 'day' | 'evening' | 'midnight' } {
   const hour = new Date().getHours();
-  if (hour < 5) return { text: '午夜好，早休息。', period: 'midnight' };
-  if (hour < 11) return { text: '早上好，你最棒。', period: 'day' };
-  if (hour < 13) return { text: '中午好，你最棒。', period: 'day' };
-  if (hour < 18) return { text: '下午好，你最棒。', period: 'day' };
-  return { text: '晚上好，你最棒。', period: 'evening' };
+  if (hour < 5) return { text: t('午夜好，早休息。'), period: 'midnight' };
+  if (hour < 11) return { text: t('早上好，你最棒。'), period: 'day' };
+  if (hour < 13) return { text: t('中午好，你最棒。'), period: 'day' };
+  if (hour < 18) return { text: t('下午好，你最棒。'), period: 'day' };
+  return { text: t('晚上好，你最棒。'), period: 'evening' };
 }
 
 const BranchBadge: React.FC<{ branch?: string | null }> = ({ branch }) => (branch ? (
   <span
     className="flex max-w-[7rem] shrink-0 items-center gap-1 rounded-full border border-violet/30 bg-violet/10 px-1.5 text-2xs text-violet"
-    title={`Git 分支：${branch}`}
+    title={t('Git 分支：{branch}', { branch })}
     data-git-branch
   >
     <GitBranch size={10} className="shrink-0" aria-hidden="true" />
@@ -188,7 +189,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {accountedClis(cli.id).map((account) => (
             <button key={account.id} type="button" role="menuitem" className={`${menuItemClass} pl-8 text-fg-subtle`}
               onClick={() => { setMenu(null); onNewTask(folderPath, cli.id, account.id); }}>
-              <User size={12} /><span className="truncate">用 {account.name} 新建</span>
+              <User size={12} /><span className="truncate">{t('用 {name} 新建', { name: account.name })}</span>
             </button>
           ))}
         </React.Fragment>
@@ -196,7 +197,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {onCustomNewTask && (
         <button type="button" role="menuitem" className={`${menuItemClass} border-t border-line`}
           onClick={() => { setMenu(null); onCustomNewTask(folderPath); }}>
-          <SlidersHorizontal size={13} />自定义命令与目录…
+          <SlidersHorizontal size={13} />{t('自定义命令与目录…')}
         </button>
       )}
     </>
@@ -205,7 +206,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // 折叠后保留窄条：每个文件夹一个按钮（点击新建任务）及其下的任务序号按钮（带状态点，可直接切换），底部保留添加文件夹与设置
   if (isCollapsed) {
     return (
-      <aside id="oneai-sidebar" aria-label="任务列表（已折叠）" className="flex h-full w-12 shrink-0 select-none flex-col items-center border-r border-line bg-surface">
+      <aside id="oneai-sidebar" aria-label={t('任务列表（已折叠）')} className="flex h-full w-12 shrink-0 select-none flex-col items-center border-r border-line bg-surface">
         <div className="window-drag flex h-11 w-full shrink-0 items-center justify-center border-b border-line bg-panel">
           <AppLogo size={20} />
         </div>
@@ -222,8 +223,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   data-folder-strip
                   onClick={(e) => openNewMenu(e, folder.path)}
                   onContextMenu={(e) => { e.preventDefault(); openNewMenu(e, folder.path); }}
-                  title={`${name}${branch ? `（${branch}）` : ''} -- 点击在此文件夹新建任务`}
-                  aria-label={`在 ${name} 中新建任务`}
+                  title={t('{name}{branch} -- 点击在此文件夹新建任务', { name, branch: branch ? `（${branch}）` : '' })}
+                  aria-label={t('在 {name} 中新建任务', { name })}
                   className="group relative flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-hover [&:not(:first-child)]:mt-2"
                 >
                   <Folder size={17} className="text-accent" />
@@ -235,7 +236,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   const statusMeta = TASK_STATUS_META[task.status];
                   const isUnread = !isActive && Boolean(unreadTaskIds?.has(task.id));
                   const account = accountOf(task);
-                  const label = `${cliOf(task)?.name ?? task.groupId}${task.accountId ? `（${account?.name ?? '账号已删除'}）` : ''}：${task.title}`;
+                  const label = t('{cli}{account}：{title}', { cli: cliOf(task)?.name ?? task.groupId, account: task.accountId ? `（${account?.name ?? t('账号已删除')}）` : '', title: task.title });
                   return (
                     <button
                       key={task.id}
@@ -243,8 +244,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       data-task-id={task.id}
                       onClick={() => onSelectTask(task.id)}
                       aria-current={isActive ? 'true' : undefined}
-                      title={`${label}（${statusMeta.label}${isUnread ? '，待查看' : ''}）${order <= 9 ? ` Ctrl+${order}` : ''}`}
-                      aria-label={`${label}，${statusMeta.label}${isUnread ? '，待查看' : ''}`}
+                      title={`${label}（${statusMeta.label}${isUnread ? t('，待查看') : ''}）${order <= 9 ? ` Ctrl+${order}` : ''}`}
+                      aria-label={`${label}，${statusMeta.label}${isUnread ? t('，待查看') : ''}`}
                       className={`relative flex h-7 w-9 shrink-0 items-center justify-center rounded-md font-mono text-xs tabular-nums transition-colors ${isActive ? 'bg-selected font-medium text-fg' : isUnread ? 'bg-accent font-semibold text-canvas hover:bg-accent/85' : 'text-fg-subtle hover:bg-hover hover:text-fg'}`}
                     >
                       {order}
@@ -258,10 +259,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         <div className="flex w-full shrink-0 flex-col items-center gap-1 border-t border-line bg-panel py-2">
-          <button type="button" onClick={onAddFolder} className="icon-btn h-8 w-8" title="添加文件夹" aria-label="添加文件夹">
+          <button type="button" onClick={onAddFolder} className="icon-btn h-8 w-8" title={t('添加文件夹')} aria-label={t('添加文件夹')}>
             <FolderPlus size={15} className="text-accent" />
           </button>
-          <button type="button" onClick={onOpenSettings} className="icon-btn h-8 w-8" title="设置 (Ctrl+,)" aria-label="设置">
+          <button type="button" onClick={onOpenSettings} className="icon-btn h-8 w-8" title={t('设置 (Ctrl+,)')} aria-label={t('设置')}>
             <Settings size={15} />
           </button>
         </div>
@@ -301,12 +302,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* 文件夹与任务树 */}
       <div className="flex-1 overflow-y-auto px-2 pb-3">
         <div className="flex items-center justify-between px-2 pb-1.5 pt-3 text-2xs text-fg-faint">
-          <span className="font-semibold tracking-wider">当前任务<span className="ml-1.5 tabular-nums">{tasks.length}</span></span>
-          {runningCount > 0 && <span className="tabular-nums">{runningCount} 个运行中</span>}
+          <span className="font-semibold tracking-wider">{t('当前任务')}<span className="ml-1.5 tabular-nums">{tasks.length}</span></span>
+          {runningCount > 0 && <span className="tabular-nums">{t('{n} 个运行中', { n: runningCount })}</span>}
         </div>
 
         {folders.length === 0 && (
-          <p className="px-2 py-3 text-xs leading-relaxed text-fg-faint">还没有文件夹。点击下方「添加文件夹」，再在文件夹里新建任务。</p>
+          <p className="px-2 py-3 text-xs leading-relaxed text-fg-faint">{t('还没有文件夹。点击下方「添加文件夹」，再在文件夹里新建任务。')}</p>
         )}
 
         <div className="space-y-0.5">
@@ -367,8 +368,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       if (neighbor) onReorderFolder(folder.path, neighbor.path);
                     }}
                     className="flex h-8 w-4 shrink-0 cursor-grab items-center justify-center rounded-sm text-fg-faint opacity-40 transition-opacity hover:text-accent focus-visible:opacity-100 group-hover:opacity-100 active:cursor-grabbing"
-                    title={`拖动排序 ${name}；或按 Alt + 上下方向键`}
-                    aria-label={`排序 ${name}，按 Alt 加上下方向键移动`}
+                    title={t('拖动排序 {name}；或按 Alt + 上下方向键', { name })}
+                    aria-label={t('排序 {name}，按 Alt 加上下方向键移动', { name })}
                   ><GripVertical size={12} /></button>
 
                   <button
@@ -385,7 +386,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     {folderTasks.length > 0 && (
                       <span
                         className={`ml-auto shrink-0 rounded-full px-1.5 text-2xs tabular-nums ${unreadCount > 0 && !folder.isExpanded ? 'bg-accent/15 font-medium text-accent' : 'bg-muted text-fg-subtle'}`}
-                        title={unreadCount > 0 ? `${folderTasks.length} 个任务，${unreadCount} 个待查看` : `${folderTasks.length} 个任务`}
+                        title={unreadCount > 0 ? t('{n} 个任务，{u} 个待查看', { n: folderTasks.length, u: unreadCount }) : t('{n} 个任务', { n: folderTasks.length })}
                       >{folderTasks.length}</span>
                     )}
                   </button>
@@ -395,8 +396,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     type="button"
                     onClick={(e) => openNewMenu(e, folder.path)}
                     className="icon-btn ml-0.5 h-6 w-6 text-fg-faint enabled:hover:text-accent"
-                    title={`在 ${name} 中新建任务`}
-                    aria-label={`在 ${name} 中新建任务`}
+                    title={t('在 {name} 中新建任务', { name })}
+                    aria-label={t('在 {name} 中新建任务', { name })}
                     aria-haspopup="menu"
                   >
                     <Plus size={14} />
@@ -413,7 +414,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         className="flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-xs text-fg-faint transition-colors hover:bg-hover hover:text-fg-muted"
                       >
                         <Plus size={12} />
-                        <span>新建任务</span>
+                        <span>{t('新建任务')}</span>
                       </button>
                     )}
 
@@ -426,7 +427,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       // 第二行：最近一条用户消息；还没有消息时显示「新会话 · 时间」；尚未读到时占位，避免读到后行高跳动
                       const hasSummary = SUMMARY_CLIS.has(task.groupId);
                       const summary = summaries[task.id];
-                      const summaryLine = !hasSummary ? '' : summary ? (summary.text ?? `新会话 · ${formatClock(task.createdAt, clockOffsetHours)}`) : '\u00a0';
+                      const summaryLine = !hasSummary ? '' : summary ? (summary.text ?? t('新会话 · {time}', { time: formatClock(task.createdAt, clockOffsetHours) })) : '\u00a0';
                       const dropEdge = taskDropTargetId === task.id && draggedTask
                         ? (folderTasks.findIndex((t) => t.id === draggedTask.id) < folderTasks.findIndex((t) => t.id === task.id) ? 'after' : 'before')
                         : null;
@@ -437,7 +438,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             key={task.id}
                             autoFocus
                             value={editing.draft}
-                            aria-label={`重命名 ${task.title}`}
+                            aria-label={t('重命名 {title}', { title: task.title })}
                             onFocus={(e) => e.currentTarget.select()}
                             onChange={(e) => setEditing({ id: task.id, draft: e.target.value })}
                             onBlur={() => finishRename(true, false)}
@@ -514,7 +515,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                               }
                             }}
                             aria-current={isActive ? 'true' : undefined}
-                            title={`${task.title}${task.errorMessage ? ` -- 启动失败：${task.errorMessage}` : ''}${onRenameTask ? '（双击或按 F2 重命名）' : ''}`}
+                            title={`${task.title}${task.errorMessage ? ` -- ${t('启动失败：{reason}', { reason: task.errorMessage })}` : ''}${onRenameTask ? t('（双击或按 F2 重命名）') : ''}`}
                             className={`flex min-w-0 flex-1 flex-col justify-center rounded-md pl-2.5 pr-1 text-left ${hasSummary ? 'min-h-[2.75rem] gap-0.5 py-1' : 'h-8'}`}
                           >
                             <div className="flex w-full min-w-0 items-center gap-2">
@@ -523,21 +524,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             <BrandIcon icon={cli?.icon ?? task.groupId} size={14} />
                             <span className="truncate">{task.title}</span>
                             <span className="sr-only">，{cli?.name ?? task.groupId}，{statusMeta.label}</span>
-                            {task.status === 'error' && <span className="text-2xs text-danger shrink-0" aria-hidden="true">启动失败</span>}
+                            {task.status === 'error' && <span className="text-2xs text-danger shrink-0" aria-hidden="true">{t('启动失败')}</span>}
                             <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-1">
                               {task.accountId && (
                                 <span
                                   className={`max-w-[5.5rem] truncate rounded border px-1 text-2xs font-normal ${account ? 'border-line-strong text-fg-subtle' : 'border-danger/40 text-danger'}`}
-                                  title={account ? `账号：${account.name}` : '该任务使用的账号配置已被删除'}
-                                >{account?.name ?? '账号已删除'}</span>
+                                  title={account ? t('账号：{name}', { name: account.name }) : t('该任务使用的账号配置已被删除')}
+                                >{account?.name ?? t('账号已删除')}</span>
                               )}
                               {isUnread && (
-                                <span className="rounded-full bg-accent/15 px-1.5 text-2xs font-medium text-accent" title="后台有新结果，点击查看">
-                                  待查看
+                                <span className="rounded-full bg-accent/15 px-1.5 text-2xs font-medium text-accent" title={t('后台有新结果，点击查看')}>
+                                  {t('待查看')}
                                 </span>
                               )}
                               {(taskOrder.get(task.id) ?? 99) <= 9 && (
-                                <span className="font-mono text-2xs font-normal text-fg-faint" title={`Ctrl+${taskOrder.get(task.id)} 切换到此任务`} aria-hidden="true">{taskOrder.get(task.id)}</span>
+                                <span className="font-mono text-2xs font-normal text-fg-faint" title={t('Ctrl+{n} 切换到此任务', { n: taskOrder.get(task.id) ?? '' })} aria-hidden="true">{taskOrder.get(task.id)}</span>
                               )}
                             </span>
                             </div>
@@ -551,8 +552,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             type="button"
                             onClick={(e) => onCloseTask(task.id, e)}
                             className={`icon-btn mr-1 h-6 w-6 text-fg-faint transition-opacity enabled:hover:text-danger group-hover/task:opacity-100 group-focus-within/task:opacity-100 ${isActive ? 'opacity-100' : 'opacity-0'}`}
-                            title={isTaskAlive(task.status) ? '关闭并终止此终端' : '移除此终端任务'}
-                            aria-label={`关闭 ${task.title}`}
+                            title={isTaskAlive(task.status) ? t('关闭并终止此终端') : t('移除此终端任务')}
+                            aria-label={t('关闭 {title}', { title: task.title })}
                           >
                             <X size={13} />
                           </button>
@@ -570,10 +571,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {recentFolders.length > 0 && (
           <div data-recent-section>
             <div className="flex items-center justify-between px-2 pb-1.5 pt-4 text-2xs text-fg-faint">
-              <span className="font-semibold tracking-wider">最近任务<span className="ml-1.5 tabular-nums">{recentFolders.length}</span></span>
+              <span className="font-semibold tracking-wider">{t('最近任务')}<span className="ml-1.5 tabular-nums">{recentFolders.length}</span></span>
               {onOpenHistory && (
-                <button type="button" onClick={onOpenHistory} className="flex items-center gap-1 rounded px-1 hover:text-accent" title="查看所有历史会话 (Ctrl+Shift+H)" aria-label="查看所有历史会话">
-                  <History size={11} aria-hidden="true" />全部
+                <button type="button" onClick={onOpenHistory} className="flex items-center gap-1 rounded px-1 hover:text-accent" title={t('查看所有历史会话 (Ctrl+Shift+H)')} aria-label={t('查看所有历史会话')}>
+                  <History size={11} aria-hidden="true" />{t('全部')}
                 </button>
               )}
             </div>
@@ -597,7 +598,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <Folder size={15} className="shrink-0 text-fg-subtle" aria-hidden="true" />
                       <span className="truncate font-medium">{folderName(recent.path)}</span>
                       <BranchBadge branch={gitBranches[recent.key]} />
-                      <span className="ml-auto shrink-0 rounded-full bg-muted px-1.5 text-2xs tabular-nums text-fg-subtle" title={`${recent.total} 个历史会话`}>{recent.total}</span>
+                      <span className="ml-auto shrink-0 rounded-full bg-muted px-1.5 text-2xs tabular-nums text-fg-subtle" title={t('{n} 个历史会话', { n: recent.total })}>{recent.total}</span>
                     </button>
                     {isOpen && (
                       <div className="ml-[1.4rem] mt-0.5 space-y-0.5 border-l border-line pl-1.5">
@@ -607,7 +608,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             type="button"
                             data-history-id={entry.id}
                             onClick={() => onResumeHistory?.(entry)}
-                            title={`${entry.title}\n恢复此会话`}
+                            title={`${entry.title}\n${t('恢复此会话')}`}
                             className="flex h-8 w-full items-center gap-2 rounded-md pl-2.5 pr-2 text-left text-ui text-fg-subtle transition-colors hover:bg-hover hover:text-fg"
                           >
                             <BrandIcon icon={entry.cliId} size={14} />
@@ -617,7 +618,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         ))}
                         {recent.total > recent.entries.length && onOpenHistory && (
                           <button type="button" onClick={onOpenHistory} className="flex h-7 w-full items-center rounded-md px-2.5 text-xs text-fg-faint hover:bg-hover hover:text-fg-muted">
-                            还有 {recent.total - recent.entries.length} 个，查看全部…
+                            {t('还有 {n} 个，查看全部…', { n: recent.total - recent.entries.length })}
                           </button>
                         )}
                       </div>
@@ -638,17 +639,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
           type="button"
           onClick={onAddFolder}
           className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui font-medium text-fg-muted transition-colors hover:bg-hover hover:text-fg"
-          title="把另一个本地文件夹加入侧栏；不会结束已在运行的终端"
+          title={t('把另一个本地文件夹加入侧栏；不会结束已在运行的终端')}
         >
           <FolderPlus size={15} className="shrink-0 text-accent" />
-          <span className="truncate">添加文件夹</span>
+          <span className="truncate">{t('添加文件夹')}</span>
         </button>
         <button
           type="button"
           onClick={onOpenSettings}
           className="icon-btn h-8 w-8"
-          title="设置 (Ctrl+,)"
-          aria-label="设置"
+          title={t('设置 (Ctrl+,)')}
+          aria-label={t('设置')}
         >
           <Settings size={15} />
         </button>
@@ -667,17 +668,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {onOpenFolder && (
                 <button type="button" role="menuitem" className={menuItemClass}
                   onClick={() => { setMenu(null); onOpenFolder(menu.folderPath!); }}>
-                  <FolderOpen size={13} />在资源管理器中打开
+                  <FolderOpen size={13} />{t('在资源管理器中打开')}
                 </button>
               )}
               <button type="button" role="menuitem" className={menuItemClass}
                 onClick={() => { void window.electronAPI?.writeClipboardText?.(menu.folderPath!); setMenu(null); }}>
-                <Copy size={13} />复制路径
+                <Copy size={13} />{t('复制路径')}
               </button>
               {onRemoveFolder && (
                 <button type="button" role="menuitem" className={`${menuItemClass} text-danger`}
                   onClick={() => { setMenu(null); onRemoveFolder(menu.folderPath!); }}>
-                  <X size={13} />从侧栏移除文件夹
+                  <X size={13} />{t('从侧栏移除文件夹')}
                 </button>
               )}
             </>
@@ -687,29 +688,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {onRenameTask && (
                 <button type="button" role="menuitem" className={menuItemClass}
                   onClick={() => { setEditing({ id: menuTask.id, draft: menuTask.title }); setMenu(null); }}>
-                  <Pencil size={13} />重命名
+                  <Pencil size={13} />{t('重命名')}
                 </button>
               )}
               {onRestartTask && (
                 <button type="button" role="menuitem" className={menuItemClass} disabled={menuTask.status === 'starting'}
                   onClick={() => { setMenu(null); onRestartTask(menuTask.id); }}>
-                  <RotateCcw size={13} />{isTaskAlive(menuTask.status) ? '重启终端' : '启动终端'}
+                  <RotateCcw size={13} />{isTaskAlive(menuTask.status) ? t('重启终端') : t('启动终端')}
                 </button>
               )}
               <button type="button" role="menuitem" className={menuItemClass}
                 onClick={() => { void window.electronAPI?.writeClipboardText?.(menuTask.cwd); setMenu(null); }}>
-                <Copy size={13} />复制工作目录
+                <Copy size={13} />{t('复制工作目录')}
               </button>
               {onOpenFolder && (
                 <button type="button" role="menuitem" className={menuItemClass}
                   onClick={() => { setMenu(null); onOpenFolder(menuTask.cwd); }}>
-                  <FolderOpen size={13} />在资源管理器中打开
+                  <FolderOpen size={13} />{t('在资源管理器中打开')}
                 </button>
               )}
               <div className="my-1 border-t border-line" role="separator" />
               <button type="button" role="menuitem" className={`${menuItemClass} text-danger`}
                 onClick={(e) => { setMenu(null); onCloseTask(menuTask.id, e); }}>
-                <X size={13} />关闭任务
+                <X size={13} />{t('关闭任务')}
               </button>
             </>
           )}

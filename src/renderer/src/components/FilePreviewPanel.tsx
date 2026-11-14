@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw, X } from 'lucide-react';
 import { FilePreviewResult } from '../types';
 import { PreviewMinimap } from './PreviewMinimap';
+import { t } from '../i18n';
 
 interface FilePreviewPanelProps {
   cwd: string;
@@ -61,7 +62,7 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ cwd, filePat
   const name = filePath.split(/[\\/]/).pop() || filePath;
   const notice = (text: string) => <p className="p-4 text-ui text-fg-subtle">{text}</p>;
 
-  let body: React.ReactNode = notice('读取中…');
+  let body: React.ReactNode = notice(t('读取中…'));
   if (result?.kind === 'text') {
     body = (
       <pre className="m-0 min-h-full select-text whitespace-pre-wrap break-all p-3 font-mono text-xs leading-relaxed text-fg">
@@ -76,15 +77,15 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ cwd, filePat
   } else if (result?.kind === 'image') {
     body = <div className="flex justify-center p-3"><img src={result.dataUrl} alt={name} className="max-w-full" /></div>;
   } else if (result?.kind === 'binary') {
-    body = notice('二进制文件，不支持预览。');
+    body = notice(t('二进制文件，不支持预览。'));
   } else if (result?.kind === 'too-large') {
-    body = notice(`文件过大（${formatSize(result.size)}），不支持预览。`);
+    body = notice(t('文件过大（{size}），不支持预览。', { size: formatSize(result.size) }));
   } else if (result?.kind === 'error') {
-    body = notice(result.message || '读取失败');
+    body = notice(result.message || t('读取失败'));
   }
 
   return (
-    <aside className="relative flex h-full shrink-0 flex-col border-l border-line bg-surface" style={{ width }} aria-label="文件预览">
+    <aside className="relative flex h-full shrink-0 flex-col border-l border-line bg-surface" style={{ width }} aria-label={t('文件预览')}>
       <div
         role="separator"
         aria-orientation="vertical"
@@ -94,10 +95,10 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ cwd, filePat
       <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3">
         <span className="min-w-0 flex-1 truncate text-ui font-medium text-fg" title={filePath}>{name}</span>
         {result && 'size' in result && <span className="shrink-0 text-xs text-fg-faint">{formatSize(result.size)}</span>}
-        <button type="button" onClick={() => setReloadCount((count) => count + 1)} className="icon-btn" aria-label="重新读取文件" title="重新读取文件">
+        <button type="button" onClick={() => setReloadCount((count) => count + 1)} className="icon-btn" aria-label={t('重新读取文件')} title={t('重新读取文件')}>
           <RefreshCw size={13} />
         </button>
-        <button type="button" onClick={onClose} className="icon-btn" aria-label="关闭预览" title="关闭预览">
+        <button type="button" onClick={onClose} className="icon-btn" aria-label={t('关闭预览')} title={t('关闭预览')}>
           <X size={14} />
         </button>
       </header>

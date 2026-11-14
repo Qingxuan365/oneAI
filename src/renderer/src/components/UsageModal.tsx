@@ -3,9 +3,10 @@ import { BarChart3, User } from 'lucide-react';
 import { BrandIcon } from './BrandIcon';
 import { Modal } from './Modal';
 import { Account, UsageCli, UsageDay, UsageRow, UsageStats } from '../types';
+import { t } from '../i18n';
 
 const CLI_LABELS: Record<UsageCli, string> = { claude: 'Claude Code', codex: 'Codex', agy: 'Antigravity', pi: 'Pi' };
-const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
+const weekdays = () => [t('一'), t('二'), t('三'), t('四'), t('五'), t('六'), t('日')];
 
 /** 方块颜色：0 次为底色，其余按当天请求数占范围内最大值的比例分 4 档（沿用主题的 success 色，随主题变化） */
 const LEVEL_CLASSES = ['bg-control', 'bg-success/25', 'bg-success/50', 'bg-success/75', 'bg-success'];
@@ -27,12 +28,12 @@ function dayLevel(requests: number, max: number): number {
 }
 
 function dayTitle(day: UsageDay, weekday: string, label: (key: string) => string): string {
-  if (day.requests === 0) return `${day.date}（周${weekday}）：无请求`;
+  if (day.requests === 0) return t('{date}（周{weekday}）：无请求', { date: day.date, weekday });
   const order = (key: string) => (Object.keys(CLI_LABELS) as string[]).indexOf(key.slice(0, key.indexOf(':')));
   const parts = Object.keys(day.by)
     .sort((a, b) => order(a) - order(b) || a.localeCompare(b))
     .map((key) => `${label(key)} ${day.by[key]}`);
-  return `${day.date}（周${weekday}）：${day.requests} 次请求（${parts.join('，')}）`;
+  return t('{date}（周{weekday}）：{n} 次请求（{parts}）', { date: day.date, weekday, n: day.requests, parts: parts.join(t('，')) });
 }
 
 interface UsageModalProps {
@@ -51,12 +52,12 @@ export const UsageModal: React.FC<UsageModalProps> = ({ isOpen, onClose, account
     if (!isOpen) return;
     let active = true;
     const load = window.electronAPI.getUsageStats;
-    if (!load) { setError('当前版本不支持用量统计'); return; }
+    if (!load) { setError(t('当前版本不支持用量统计')); return; }
     setLoading(true);
     setError('');
     load(accounts.map(({ id, name, cliId, configDir }) => ({ id, name, cliId, configDir })))
       .then((result) => { if (active) setStats(result); })
-      .catch((err) => { if (active) setError(err instanceof Error ? err.message : '读取用量失败'); })
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : t('读取用量失败')); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [isOpen]); // 账号列表只在每次打开时读取一次
@@ -116,17 +117,17 @@ export const UsageModal: React.FC<UsageModalProps> = ({ isOpen, onClose, account
       isOpen={isOpen}
       onClose={onClose}
       titleId="usage-title"
-      title="本周用量"
+      title={t('本周用量')}
       icon={<BarChart3 size={16} className="text-accent" />}
       widthClass="max-w-3xl"
     >
-      {loading && !stats && <p className="p-8 text-center text-sm text-fg-subtle">正在统计…</p>}
+      {loading && !stats && <p className="p-8 text-center text-sm text-fg-subtle">{t('正在统计…')}</p>}
       {error && <p role="alert" className="p-4 text-center text-sm text-danger">{error}</p>}
       {stats && view && (
         <div className="space-y-6">
-          <section aria-label="本周概览" className="flex flex-wrap items-end gap-x-8 gap-y-2" data-usage-summary>
+          <section aria-label={t('本周概览')} className="flex flex-wrap items-end gap-x-8 gap-y-2" data-usage-summary>
             <div>
-              <p className="text-2xs text-fg-faint">{`本周（${pad(new Date(stats.weekStart).getMonth() + 1)}-${pad(new Date(stats.weekStart).getDate())} 起）请求数`}</p>
+              <p className="text-2xs text-fg-faint">{t('本周（{date} 起）请求数', { date: `${pad(new Date(stats.weekStart).getMonth() + 1)}-${pad(new Date(stats.weekStart).getDate())}` })}</p>
               <p className="text-xl font-semibold tabular-nums text-fg">{view.requests.toLocaleString()}</p>
             </div>
             <div>
@@ -134,27 +135,27 @@ export const UsageModal: React.FC<UsageModalProps> = ({ isOpen, onClose, account
               <p className="text-xl font-semibold tabular-nums text-fg">{formatTokens(view.tokens)}</p>
             </div>
             <div>
-              <p className="text-2xs text-fg-faint">活跃天数</p>
+              <p className="text-2xs text-fg-faint">{t('活跃天数')}</p>
               <p className="text-xl font-semibold tabular-nums text-fg">{view.activeDays} / 7</p>
             </div>
           </section>
 
-          <section aria-label="各 CLI 的账号与模型用量">
-            <h3 className="mb-2 text-xs font-medium text-fg-muted">各 CLI 的账号与模型用量</h3>
+          <section aria-label={t('各 CLI 的账号与模型用量')}>
+            <h3 className="mb-2 text-xs font-medium text-fg-muted">{t('各 CLI 的账号与模型用量')}</h3>
             {stats.rows.length === 0 ? (
-              <p className="rounded-lg border border-line px-4 py-6 text-center text-sm text-fg-subtle" data-usage-empty>本周还没有用量记录</p>
+              <p className="rounded-lg border border-line px-4 py-6 text-center text-sm text-fg-subtle" data-usage-empty>{t('本周还没有用量记录')}</p>
             ) : (
               <div className="overflow-x-auto rounded-lg border border-line">
                 <table className="w-full min-w-[34rem] text-xs">
                   <thead className="bg-surface text-fg-faint">
                     <tr>
-                      <th className="px-3 py-1.5 text-left font-medium">CLI / 账号 / 模型</th>
-                      <th className={th}>请求</th>
-                      <th className={th}>会话</th>
-                      <th className={th}>输入</th>
-                      <th className={th}>输出</th>
-                      <th className={th}>缓存</th>
-                      <th className={th}>合计</th>
+                      <th className="px-3 py-1.5 text-left font-medium">{t('CLI / 账号 / 模型')}</th>
+                      <th className={th}>{t('请求')}</th>
+                      <th className={th}>{t('会话')}</th>
+                      <th className={th}>{t('输入')}</th>
+                      <th className={th}>{t('输出')}</th>
+                      <th className={th}>{t('缓存')}</th>
+                      <th className={th}>{t('合计')}</th>
                     </tr>
                   </thead>
                   {view.groups.map((group) => (
@@ -190,14 +191,14 @@ export const UsageModal: React.FC<UsageModalProps> = ({ isOpen, onClose, account
                               <td className={`py-2 pr-3 ${group.showAccounts ? 'pl-14' : 'pl-9'}`}>
                                 <span className="flex min-w-0 items-center gap-1.5">
                                   <span className={`truncate ${row.subagent ? 'text-fg-subtle' : 'text-fg'}`}>{row.model}</span>
-                                  {row.subagent && <span className="shrink-0 rounded-full border border-line-strong px-1.5 text-2xs text-fg-faint" title="Codex 自动审查等由 CLI 自动发起的子会话">子会话</span>}
+                                  {row.subagent && <span className="shrink-0 rounded-full border border-line-strong px-1.5 text-2xs text-fg-faint" title={t('Codex 自动审查等由 CLI 自动发起的子会话')}>{t('子会话')}</span>}
                                 </span>
                               </td>
                               <td className="px-2 py-2 text-right tabular-nums text-fg">{row.requests.toLocaleString()}</td>
                               <td className="px-2 py-2 text-right tabular-nums text-fg-muted">{row.sessions}</td>
                               <td className="px-2 py-2 text-right tabular-nums text-fg-muted">{formatTokens(row.input)}</td>
                               <td className="px-2 py-2 text-right tabular-nums text-fg-muted">{formatTokens(row.output)}</td>
-                              <td className="px-2 py-2 text-right tabular-nums text-fg-muted" title={`读 ${row.cacheRead.toLocaleString()} / 写 ${row.cacheWrite.toLocaleString()}`}>{formatTokens(row.cacheRead + row.cacheWrite)}</td>
+                              <td className="px-2 py-2 text-right tabular-nums text-fg-muted" title={t('读 {read} / 写 {write}', { read: row.cacheRead.toLocaleString(), write: row.cacheWrite.toLocaleString() })}>{formatTokens(row.cacheRead + row.cacheWrite)}</td>
                               <td className="px-2 py-2 text-right">
                                 <span className="block tabular-nums text-fg">{formatTokens(rowTokens(row))}</span>
                                 <span className="mt-1 block h-1 overflow-hidden rounded-full bg-control" aria-hidden="true">
@@ -215,12 +216,12 @@ export const UsageModal: React.FC<UsageModalProps> = ({ isOpen, onClose, account
             )}
           </section>
 
-          <section aria-label="每日使用频次">
-            <h3 className="mb-2 text-xs font-medium text-fg-muted">每日使用频次（近 {view.weeks.length} 周，按请求数）</h3>
+          <section aria-label={t('每日使用频次')}>
+            <h3 className="mb-2 text-xs font-medium text-fg-muted">{t('每日使用频次（近 {n} 周，按请求数）', { n: view.weeks.length })}</h3>
             <div className="overflow-x-auto pb-1">
-              <div className="inline-flex gap-2" role="group" aria-label="每日请求数方块图" data-usage-heatmap>
+              <div className="inline-flex gap-2" role="group" aria-label={t('每日请求数方块图')} data-usage-heatmap>
                 <div className="flex flex-col gap-1 pt-[19px] text-2xs leading-[14px] text-fg-faint" aria-hidden="true">
-                  {WEEKDAYS.map((name, index) => <span key={name} className="h-3.5">{index % 2 === 0 ? name : ''}</span>)}
+                  {weekdays().map((name, index) => <span key={name} className="h-3.5">{index % 2 === 0 ? name : ''}</span>)}
                 </div>
                 <div className="flex gap-1">
                   {view.weeks.map((week, column) => {
@@ -228,14 +229,14 @@ export const UsageModal: React.FC<UsageModalProps> = ({ isOpen, onClose, account
                     const showMonth = column === 0 || month !== Number(view.weeks[column - 1][0].date.slice(5, 7));
                     return (
                       <div key={week[0].date} className="flex flex-col gap-1">
-                        <span className="h-[15px] whitespace-nowrap text-2xs leading-[15px] text-fg-faint" aria-hidden="true">{showMonth ? `${month}月` : ''}</span>
+                        <span className="h-[15px] whitespace-nowrap text-2xs leading-[15px] text-fg-faint" aria-hidden="true">{showMonth ? t(`${month}月`) : ''}</span>
                         {week.map((day, row) => {
                           const future = day.date > today;
                           const level = dayLevel(day.requests, view.max);
                           return (
                             <span
                               key={day.date}
-                              title={future ? undefined : dayTitle(day, WEEKDAYS[row], view.label)}
+                              title={future ? undefined : dayTitle(day, weekdays()[row], view.label)}
                               data-usage-cell
                               data-date={day.date}
                               data-level={future ? 'future' : level}
@@ -250,14 +251,14 @@ export const UsageModal: React.FC<UsageModalProps> = ({ isOpen, onClose, account
               </div>
             </div>
             <div className="mt-2 flex items-center justify-end gap-1.5 text-2xs text-fg-faint" aria-hidden="true">
-              <span>少</span>
+              <span>{t('少')}</span>
               {LEVEL_CLASSES.map((cls) => <span key={cls} className={`h-3.5 w-3.5 rounded-[3px] ${cls}`} />)}
-              <span>多</span>
+              <span>{t('多')}</span>
             </div>
           </section>
 
           <p className="text-2xs leading-relaxed text-fg-faint">
-            统计本机 Claude Code、Codex、Antigravity、Pi 的会话记录，请求数为模型回复次数；Antigravity 记录不含模型字段，模型名按会话内的切换记录推断，且无法区分账号，统一归默认账号。暂不含 Kimi Code、OpenCode。
+            {t('统计本机 Claude Code、Codex、Antigravity、Pi 的会话记录，请求数为模型回复次数；Antigravity 记录不含模型字段，模型名按会话内的切换记录推断，且无法区分账号，统一归默认账号。暂不含 Kimi Code、OpenCode。')}
           </p>
         </div>
       )}

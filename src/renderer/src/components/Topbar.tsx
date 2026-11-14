@@ -5,6 +5,7 @@ import { SystemStatsText } from './SystemStatsText';
 import { QuotaData, TaskSession, CliDef } from '../types';
 import { TASK_STATUS_META } from '../taskStatus';
 import { BrandIcon } from './BrandIcon';
+import { getLanguage, t } from '../i18n';
 
 interface TopbarProps {
   isSidebarCollapsed: boolean;
@@ -17,6 +18,8 @@ interface TopbarProps {
   emptyFolder?: { name: string; branch?: string | null };
   quota: QuotaData | null;
   clockOffsetHours?: number;
+  /** 窗口最大化时是否在时钟里显示年月日（含农历）与星期，默认显示；设置 → 时间 里可关闭 */
+  dateVisible?: boolean;
   onRefreshQuota: () => Promise<void>;
   onOpenSearch?: () => void;
   onClearScreen?: () => void;
@@ -51,20 +54,21 @@ function getLunarStr(now: Date): string {
 }
 
 // offsetHours：顶栏时间相对系统时间增加的小时数，在设置的「时间」栏目中配置
-function getFormattedTime(maximized: boolean, offsetHours: number): string {
+function getFormattedTime(maximized: boolean, offsetHours: number, dateVisible: boolean): string {
   const now = new Date(Date.now() + (Number.isFinite(offsetHours) ? offsetHours : 0) * 60 * 60 * 1000);
-  const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  const weekdays = [t('周日'), t('周一'), t('周二'), t('周三'), t('周四'), t('周五'), t('周六')];
   const Y = now.getFullYear();
   const M = String(now.getMonth() + 1).padStart(2, '0');
   const D = String(now.getDate()).padStart(2, '0');
   const h = String(now.getHours()).padStart(2, '0');
   const m = String(now.getMinutes()).padStart(2, '0');
   const s = String(now.getSeconds()).padStart(2, '0');
-  if (!maximized) return `${h}:${m}:${s}`;
+  if (!maximized || !dateVisible) return `${h}:${m}:${s}`;
   const w = weekdays[now.getDay()];
-  const lunar = getLunarStr(now);
+  // 农历只在简体中文界面显示
+  const lunar = getLanguage() === 'zh-CN' ? getLunarStr(now) : '';
   const lunarPart = lunar ? `（${lunar}）` : '';
-  return `${Y}-${M}-${D}${lunarPart} ${h}:${m}:${s} （${w}）`;
+  return `${Y}-${M}-${D}${lunarPart} ${h}:${m}:${s} ${t('（{weekday}）', { weekday: w })}`;
 }
 
 export const Topbar: React.FC<TopbarProps> = ({
@@ -76,6 +80,7 @@ export const Topbar: React.FC<TopbarProps> = ({
   emptyFolder,
   quota,
   clockOffsetHours = 0,
+  dateVisible = true,
   onRefreshQuota,
   onOpenSearch,
   onClearScreen,
@@ -85,7 +90,7 @@ export const Topbar: React.FC<TopbarProps> = ({
   onOpenUsage,
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
-  const [currentTime, setCurrentTime] = useState<string>(() => getFormattedTime(false, clockOffsetHours));
+  const [currentTime, setCurrentTime] = useState<string>(() => getFormattedTime(false, clockOffsetHours, dateVisible));
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [action, setAction] = useState<{ text: string; ok: boolean } | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
@@ -105,12 +110,12 @@ export const Topbar: React.FC<TopbarProps> = ({
 
   // 每秒更新时钟，窗口状态或时间偏移变化时立即刷新
   useEffect(() => {
-    setCurrentTime(getFormattedTime(isMaximized, clockOffsetHours));
+    setCurrentTime(getFormattedTime(isMaximized, clockOffsetHours, dateVisible));
     const timer = setInterval(() => {
-      setCurrentTime(getFormattedTime(isMaximized, clockOffsetHours));
+      setCurrentTime(getFormattedTime(isMaximized, clockOffsetHours, dateVisible));
     }, 1000);
     return () => clearInterval(timer);
-  }, [isMaximized, clockOffsetHours]);
+  }, [isMaximized, clockOffsetHours, dateVisible]);
 
   // 点击外部或按 Esc 关闭导出下拉菜单
   useEffect(() => {
@@ -142,15 +147,15 @@ export const Topbar: React.FC<TopbarProps> = ({
   const handleCopyLogs = async () => {
     setIsExportMenuOpen(false);
     const result = await onExportLogs?.('copy');
-    if (result?.success) showAction('会话文本已复制', true);
-    else showAction(`复制失败：${result?.error || '操作未完成'}`, false);
+    if (result?.success) showAction(t('会话文本已复制'), true);
+    else showAction(t('复制失败：{reason}', { reason: result?.error || t('操作未完成') }), false);
   };
 
   const handleSaveLogs = async () => {
     setIsExportMenuOpen(false);
     const result = await onExportLogs?.('save');
-    if (result?.success) showAction('日志已保存', true);
-    else if (!result?.canceled) showAction(`保存失败：${result?.error || '操作未完成'}`, false);
+    if (result?.success) showAction(t('日志已保存'), true);
+    else if (!result?.canceled) showAction(t('保存失败：{reason}', { reason: result?.error || t('操作未完成') }), false);
   };
 
   const status = activeTask ? TASK_STATUS_META[activeTask.status] : null;
@@ -163,10 +168,10 @@ export const Topbar: React.FC<TopbarProps> = ({
         <button
           type="button"
           onClick={onToggleSidebar}
-          aria-label={isSidebarCollapsed ? '展开左侧导航栏' : '折叠左侧导航栏'}
+          aria-label={isSidebarCollapsed ? t('展开左侧导航栏') : t('折叠左侧导航栏')}
           aria-expanded={!isSidebarCollapsed}
           aria-controls="oneai-sidebar"
-          title={`${isSidebarCollapsed ? '展开左侧导航栏' : '折叠左侧导航栏'} (Ctrl+Shift+B)`}
+          title={`${isSidebarCollapsed ? t('展开左侧导航栏') : t('折叠左侧导航栏')} (Ctrl+Shift+B)`}
           className="icon-btn"
         >
           {isSidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
@@ -183,7 +188,7 @@ export const Topbar: React.FC<TopbarProps> = ({
                   {activeTask.title}
                 </span>
                 {accountName && (
-                  <span className="topbar-account max-w-[7rem] shrink-0 truncate rounded border border-line-strong px-1.5 py-px text-2xs text-fg-subtle" title={`账号：${accountName}`}>
+                  <span className="topbar-account max-w-[7rem] shrink-0 truncate rounded border border-line-strong px-1.5 py-px text-2xs text-fg-subtle" title={t('账号：{name}', { name: accountName })}>
                     {accountName}
                   </span>
                 )}
@@ -200,26 +205,26 @@ export const Topbar: React.FC<TopbarProps> = ({
         ) : (
           <div className="flex min-w-0 items-center gap-1.5 text-fg-faint">
             <FolderOpen size={14} className="shrink-0 text-accent" />
-            <span className="truncate font-medium text-fg-muted" data-empty-folder>{emptyFolder?.name ?? '无活动终端会话'}</span>
+            <span className="truncate font-medium text-fg-muted" data-empty-folder>{emptyFolder?.name ?? t('无活动终端会话')}</span>
             {emptyFolder?.branch && <span className="shrink-0 rounded-full border border-violet/30 bg-violet/10 px-1.5 text-2xs text-violet">{emptyFolder.branch}</span>}
-            {emptyFolder && <span className="truncate">· 选择 CLI 开始任务</span>}
+            {emptyFolder && <span className="truncate">{t('· 选择 CLI 开始任务')}</span>}
           </div>
         )}
 
         {/* 终端工具 */}
         {activeTask && (
-          <div id="oneai-terminal-tools" role="group" aria-label="终端工具" className="flex shrink-0 items-center gap-0.5 border-l border-line pl-2">
-            <button type="button" onClick={onOpenSearch} title="在终端中搜索关键词 (Ctrl+Shift+F)" aria-label="在终端中搜索" className="icon-btn">
+          <div id="oneai-terminal-tools" role="group" aria-label={t('终端工具')} className="flex shrink-0 items-center gap-0.5 border-l border-line pl-2">
+            <button type="button" onClick={onOpenSearch} title={t('在终端中搜索关键词 (Ctrl+Shift+F)')} aria-label={t('在终端中搜索')} className="icon-btn">
               <Search size={15} />
             </button>
-            <button type="button" onClick={onClearScreen} title="清空当前屏幕与历史缓存 (Ctrl+Shift+K)" aria-label="清空屏幕" className="icon-btn">
+            <button type="button" onClick={onClearScreen} title={t('清空当前屏幕与历史缓存 (Ctrl+Shift+K)')} aria-label={t('清空屏幕')} className="icon-btn">
               <Eraser size={15} />
             </button>
             <button
               type="button"
               onClick={onRestartSession}
-              title={activeTask.status === 'stopped' || activeTask.status === 'error' ? '启动当前终端' : activeTask.status === 'starting' ? '终端正在启动' : '重启当前终端（保持当前目录与配置）'}
-              aria-label="重启终端"
+              title={activeTask.status === 'stopped' || activeTask.status === 'error' ? t('启动当前终端') : activeTask.status === 'starting' ? t('终端正在启动') : t('重启当前终端（保持当前目录与配置）')}
+              aria-label={t('重启终端')}
               disabled={activeTask.status === 'starting'}
               className="icon-btn enabled:hover:text-warning"
             >
@@ -230,8 +235,8 @@ export const Topbar: React.FC<TopbarProps> = ({
               <button
                 type="button"
                 onClick={() => setIsExportMenuOpen((v) => !v)}
-                title="导出或复制会话日志"
-                aria-label="导出或复制会话日志"
+                title={t('导出或复制会话日志')}
+                aria-label={t('导出或复制会话日志')}
                 aria-haspopup="menu"
                 aria-expanded={isExportMenuOpen}
                 className={`icon-btn ${isExportMenuOpen ? 'bg-hover text-fg' : ''}`}
@@ -243,11 +248,11 @@ export const Topbar: React.FC<TopbarProps> = ({
                 <div role="menu" className="absolute left-0 z-50 mt-1.5 w-48 overflow-hidden rounded-lg border border-line-strong bg-elevated py-1 text-xs shadow-xl">
                   <button type="button" role="menuitem" autoFocus onClick={handleCopyLogs} className={menuItem}>
                     <Copy size={13} className="text-fg-subtle" />
-                    <span>复制最近会话文本</span>
+                    <span>{t('复制最近会话文本')}</span>
                   </button>
                   <button type="button" role="menuitem" onClick={handleSaveLogs} className={menuItem}>
                     <FileText size={13} className="text-fg-subtle" />
-                    <span>另存为日志文件…</span>
+                    <span>{t('另存为日志文件…')}</span>
                   </button>
                 </div>
               )}
@@ -280,8 +285,8 @@ export const Topbar: React.FC<TopbarProps> = ({
         <button
           type="button"
           onClick={onOpenUsage}
-          aria-label="查看本周用量"
-          title="本周各模型用量与每日使用频次 (Ctrl+Shift+U)"
+          aria-label={t('查看本周用量')}
+          title={t('本周各模型用量与每日使用频次 (Ctrl+Shift+U)')}
           className="icon-btn"
         >
           <BarChart3 size={16} />
@@ -292,8 +297,8 @@ export const Topbar: React.FC<TopbarProps> = ({
         <button
           type="button"
           onClick={onOpenHistory}
-          aria-label="查看历史会话"
-          title="查看所有 CLI 的历史会话 (Ctrl+Shift+H)"
+          aria-label={t('查看历史会话')}
+          title={t('查看所有 CLI 的历史会话 (Ctrl+Shift+H)')}
           className="icon-btn"
         >
           <History size={16} />

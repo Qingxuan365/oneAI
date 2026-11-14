@@ -1,4 +1,4 @@
-import { BUILTIN_CLIS, DEFAULT_WORKSPACE_PATH, seedTasks } from './clis';
+import { BUILTIN_CLIS, defaultWorkspacePath } from './clis';
 import { CliDef, FolderEntry, HistoryEntry, TaskSession } from './types';
 
 /** 渲染进程持有、持久化的全部任务与文件夹状态 */
@@ -97,7 +97,7 @@ function withTaskFolders(folders: FolderEntry[], tasks: TaskSession[]): FolderEn
 }
 
 /** 校验已保存的新格式状态；格式不符返回 null，由调用方回退到迁移 */
-export function normalizeState(raw: unknown, defaultFolder: string = DEFAULT_WORKSPACE_PATH): AppState | null {
+export function normalizeState(raw: unknown, defaultFolder: string = defaultWorkspacePath()): AppState | null {
   if (!isRecord(raw) || !Array.isArray(raw.tasks) || !Array.isArray(raw.folders)) return null;
   const seen = new Set<string>();
   const tasks: TaskSession[] = [];
@@ -136,7 +136,7 @@ export function migrateWorkspaces(input: {
   defaultFolder?: string;
   now?: number;
 }): AppState {
-  const defaultFolder = input.defaultFolder ?? DEFAULT_WORKSPACE_PATH;
+  const defaultFolder = input.defaultFolder ?? defaultWorkspacePath();
   const activeKey = input.activeWorkspace ? folderKey(input.activeWorkspace) : null;
   const entries: Array<[string, any]> = Object.entries(input.workspaces);
   if (!entries.some(([key]) => key === folderKey(defaultFolder)) && isRecord(input.legacy) && Array.isArray(input.legacy.groups)) {
@@ -169,10 +169,9 @@ export function migrateWorkspaces(input: {
     if (key === activeKey && typeof entry.activeTaskId === 'string' && seen.has(entry.activeTaskId)) activeTaskId = entry.activeTaskId;
   }
 
-  // 完全没有已保存数据：首次启动，默认文件夹里放示例任务
+  // 完全没有已保存数据：全新安装，没有任务也没有文件夹，进入后由空状态引导用户选择 CLI 并添加文件夹
   if (entries.length === 0) {
-    const seeds = seedTasks(input.now);
-    return { tasks: seeds, folders: [{ path: defaultFolder, isExpanded: true }], activeTaskId: 'codex-task-1', lastFolder: defaultFolder, extraClis: [] };
+    return { tasks: [], folders: [], activeTaskId: null, lastFolder: defaultFolder, extraClis: [] };
   }
 
   activeTaskId = activeTaskId ?? tasks[0]?.id ?? null;

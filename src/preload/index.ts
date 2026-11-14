@@ -4,6 +4,7 @@ export interface CreateSessionOptions {
   id: string;
   command?: string;
   cwd?: string;
+  shell?: boolean;
   account?: { cliId: 'codex' | 'claude' | 'kimi'; configDir: string; env?: Record<string, string> };
 }
 
@@ -33,7 +34,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listSessionHistory: () => ipcRenderer.invoke('history:list'),
   deleteSessionHistory: (items: Array<{ cliId: string; id: string }>) => ipcRenderer.invoke('history:delete', items),
   getUsageStats: (accounts: Array<{ id: string; name: string; cliId: string; configDir: string }>) => ipcRenderer.invoke('usage:stats', accounts),
-  detectClis: () => ipcRenderer.invoke('cli:detect'),
+  detectClis: (custom?: Array<{ id: string; command: string }>) => ipcRenderer.invoke('cli:detect', custom),
+  listKnownClis: () => ipcRenderer.invoke('cli:known'),
+  setLanguage: (language: string) => ipcRenderer.invoke('app:set-language', language),
+  getHomeDir: () => ipcRenderer.sendSync('app:home-dir') as string,
 
   // PTY 终端管理
   createSession: (options: CreateSessionOptions) =>

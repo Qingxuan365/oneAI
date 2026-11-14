@@ -1,6 +1,7 @@
 import { app, dialog, ipcMain, BrowserWindow } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+import { t } from './i18n';
 
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.opus']);
 const MAX_TRACK_BYTES = 200 * 1024 * 1024;
@@ -50,7 +51,7 @@ export function setupMusicLibrary(getWindow: () => BrowserWindow | null) {
     const win = getWindow();
     if (!win) return null;
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
-      title: '选择音乐目录',
+      title: t('选择音乐目录'),
       defaultPath: resolveDir(currentPath),
       properties: ['openDirectory'],
     });

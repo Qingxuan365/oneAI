@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
+import { t } from '../i18n';
 
 interface ModalProps {
   isOpen: boolean;
@@ -64,7 +65,7 @@ export const Modal: React.FC<ModalProps> = ({
             {icon}
             <span className="truncate">{title}</span>
           </h2>
-          <button type="button" onClick={onClose} disabled={closeDisabled} className="icon-btn" title="关闭 (Esc)" aria-label="关闭">
+          <button type="button" onClick={onClose} disabled={closeDisabled} className="icon-btn" title={t('关闭 (Esc)')} aria-label={t('关闭')}>
             <X size={16} />
           </button>
         </div>

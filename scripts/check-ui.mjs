@@ -21,8 +21,10 @@ await build({
     import { HistoryModal } from './src/renderer/src/components/HistoryModal';
     import { UsageModal } from './src/renderer/src/components/UsageModal';
     import { SettingsModal } from './src/renderer/src/components/SettingsModal';
+    import { OnboardingModal } from './src/renderer/src/components/OnboardingModal';
+    import { setLanguage } from './src/renderer/src/i18n';
     import { Terminal } from '@xterm/xterm';
-    window.electronAPI = { onWindowMaximizedChange: callback => { window.setMaximized = callback; return () => {}; }, isWindowMaximized: async () => false,
+    window.electronAPI = { getHomeDir: () => 'C:/Users/tester', onWindowMaximizedChange: callback => { window.setMaximized = callback; return () => {}; }, isWindowMaximized: async () => false,
       onSystemStats: callback => { window.pushStats = callback; return () => {}; },
       // 路径里带 logged 的账号视为已登录；账号相关桩不使用反斜杠，避免外层模板字符串转义
       checkAccountLogin: async account => ({ loggedIn: account.configDir.indexOf('logged') >= 0, detail: account.configDir.indexOf('logged') >= 0 ? 'me@example.com' : undefined }),
@@ -89,7 +91,7 @@ await build({
           onReorderFolder={() => {}} onNewTask={() => {}} onCloseTask={() => window.events.push('close')} onRenameTask={(_id, title) => window.events.push('rename:' + title)} />
         <div className="flex-1 min-w-0"><Topbar isSidebarCollapsed={false} onToggleSidebar={() => {}} currentGroup={group} activeTask={task} accountName={accountName}
           quota={{ status: 'online', cliName: 'Codex', model: 'gpt-5-codex', effort: 'high', tokens: 866_000, costUsd: 0.24, fiveHourPercent: 82, sevenDayPercent: 65, fiveHourResetsIn: '2h 45m', sevenDayResetsOn: 'Sun' }} onRefreshQuota={async () => {}} onOpenSearch={() => window.events.push('search')}
-          onClearScreen={() => {}} onRestartSession={async () => {}} onExportLogs={async () => ({ success: true })} onOpenHistory={() => {}} onOpenUsage={() => window.events.push('usage')} /></div>
+          dateVisible={!window.hideDate} onClearScreen={() => {}} onRestartSession={async () => {}} onExportLogs={async () => ({ success: true })} onOpenHistory={() => {}} onOpenUsage={() => window.events.push('usage')} /></div>
       </div>));
       window.pushStats?.(window.fakeStats);
     };
@@ -153,11 +155,22 @@ await build({
         onCreate={async (cli, title, command, cwd, accountId) => { window.events.push('create:' + cli + ':' + (accountId || 'default') + ':' + title + ':' + command + ':' + cwd); return { success: true }; }} /></div>));
     };
     function SettingsHarness() {
-      const [settings, setSettings] = React.useState({ theme: 'dark', voiceReminderEnabled: true, workReminderHours: 1, terminalFontSize: 15, terminalLineHeight: 1.3, uiScale: 'comfortable', terminalCursorStyle: 'bar', terminalCursorBlink: true, previewMinimap: true, musicDirectory: '', musicPlayerVisible: true, clockOffsetHours: 0, accounts: [] });
+      const [settings, setSettings] = React.useState({ theme: 'dark', voiceReminderEnabled: true, workReminderHours: 1, terminalFontSize: 15, terminalLineHeight: 1.3, uiScale: 'comfortable', terminalCursorStyle: 'bar', terminalCursorBlink: true, previewMinimap: true, musicDirectory: '', musicPlayerVisible: true, clockOffsetHours: 0, topbarDateVisible: true, language: 'zh-CN', onboardingDone: true, accounts: [], customClis: [] });
+      setLanguage(settings.language);
       window.currentSettings = () => settings;
+      window.currentCustomClis = () => settings.customClis;
       window.currentAccounts = () => settings.accounts;
-      return <SettingsModal isOpen onClose={() => {}} settings={settings} onUpdateSettings={setSettings} onResetDefault={() => {}} onLoginAccount={(a) => window.events.push('login:' + a.name)} />;
+      return <SettingsModal isOpen onClose={() => {}} settings={settings} onUpdateSettings={setSettings} onResetDefault={() => {}} onLoginAccount={(a) => window.events.push('login:' + a.name)}
+        fallbackKnownClis={[{ id: 'codex', name: 'Codex', command: 'codex' }, { id: 'claude', name: 'Claude Code', command: 'claude' }, { id: 'opencode', name: 'OpenCode', command: 'opencode' }, { id: 'grok', name: 'Grok Build', command: 'grok' }]} installed={{ codex: true, claude: true }}
+        onCustomClisChange={(list) => setSettings((prev) => ({ ...prev, customClis: list }))} onRedetectClis={() => window.events.push('redetect')} />;
     }
+    function OnboardingHarness({ clis }) {
+      const [language, setLang] = React.useState('en');
+      setLanguage(language);
+      return <OnboardingModal isOpen language={language} onLanguageChange={(l) => { window.events.push('lang:' + l); setLang(l); }} detectedClis={clis} defaultFolder="C:/Users/tester" onAddFolder={() => window.events.push('add-folder')} onFinish={() => window.events.push('onboarding-finish')} />;
+    }
+    window.setUiLanguage = setLanguage;
+    window.drawOnboarding = (clis) => flushSync(() => root.render(<div className="workbench-ui h-screen"><OnboardingHarness clis={clis} /></div>));
     window.drawSettings = () => flushSync(() => root.render(<div className="workbench-ui h-screen"><SettingsHarness /></div>));
     window.drawUsage = () => flushSync(() => root.render(<div className="workbench-ui h-screen"><UsageModal key={String(window.usageEmpty) + String(window.usageMany)} isOpen onClose={() => {}} accounts={[]} /></div>));
     window.drawHistory = (open) => flushSync(() => root.render(<div className="workbench-ui h-screen"><HistoryModal isOpen onClose={() => {}} onResume={(e) => window.events.push('resume:' + e.id)} openHistoryIds={new Set(open)} /></div>));
@@ -617,6 +630,100 @@ app.whenReady().then(async () => {
       check('delete asks for confirmation first', li().textContent.includes('确认删除') && window.currentAccounts().length === 2);
       [...li().querySelectorAll('button')].find(b => b.textContent.includes('确认删除')).click(); await tick();
       check('confirmed delete removes only that account', window.currentAccounts().length === 1 && window.currentAccounts()[0].cliId === 'kimi');
+      // 设置 → CLI：自动检测结果与自定义 CLI
+      const cliTab = [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.trim() === 'CLI');
+      check('settings has a CLI tab', Boolean(cliTab));
+      cliTab.click(); await tick();
+      const detectedRows = [...document.querySelectorAll('section[aria-label="自动检测的 CLI"] li')];
+      const rowOf = id => document.querySelector('li[data-cli-id="' + id + '"]');
+      check('CLI page lists the known CLIs without the system terminal', detectedRows.length === 4 && !rowOf('terminal') && rowOf('codex') && rowOf('grok'));
+      check('CLI page marks detected and missing CLIs', rowOf('codex').textContent.includes('已安装') && rowOf('opencode').textContent.includes('未检测到'));
+      [...document.querySelectorAll('section[aria-label="自动检测的 CLI"] button')].find(b => b.textContent.includes('重新检测')).click();
+      check('re-detect button asks the app to detect again', window.events.includes('redetect'));
+      const customAdd = () => [...document.querySelectorAll('section[aria-label="自定义 CLI"] button')].find(b => b.textContent.includes('添加 CLI'));
+      const customForm = () => document.querySelector('form[aria-label="添加自定义 CLI"], form[aria-label="编辑自定义 CLI"]');
+      const customRow = () => document.querySelector('li[data-custom-cli-id]');
+      const cliFill = async (name, command) => { setValue(document.getElementById('custom-cli-name'), name); setValue(document.getElementById('custom-cli-command'), command); await tick(); };
+      check('custom CLI section starts empty with a hint', !customRow() && document.querySelector('section[aria-label="自定义 CLI"]').textContent.includes('还没有自定义 CLI'));
+      customAdd().click(); await tick();
+      await cliFill('', 'mycli'); customForm().requestSubmit(); await tick();
+      check('custom CLI without a name is rejected', alertText().includes('名称'));
+      await cliFill('Codex', 'mycli'); customForm().requestSubmit(); await tick();
+      check('custom CLI cannot reuse a built-in name', alertText().includes('已被内置'));
+      await cliFill('My Agent', '   '); customForm().requestSubmit(); await tick();
+      check('custom CLI without a command is rejected', alertText().includes('启动命令'));
+      await cliFill('My Agent', 'mycli --model fast'); customForm().requestSubmit(); await tick(300);
+      const customSaved = window.currentCustomClis();
+      check('saved custom CLI keeps its name and full command under a custom- id', customSaved.length === 1 && customSaved[0].name === 'My Agent' && customSaved[0].command === 'mycli --model fast' && customSaved[0].id.startsWith('custom-'));
+      check('custom CLI row shows name, command and its detection state', customRow().textContent.includes('My Agent') && customRow().textContent.includes('mycli --model fast') && customRow().textContent.includes('未检测到'));
+      customAdd().click(); await tick();
+      await cliFill('my agent', 'other'); customForm().requestSubmit(); await tick();
+      check('duplicate custom CLI name is rejected case-insensitively', alertText().includes('同名'));
+      [...customForm().querySelectorAll('button')].find(b => b.textContent.trim() === '取消').click(); await tick();
+      customRow().querySelector('button[aria-label^="编辑"]').click(); await tick();
+      await cliFill('My Agent 2', 'mycli --model slow'); customForm().requestSubmit(); await tick(300);
+      check('editing a custom CLI keeps its id', window.currentCustomClis().length === 1 && window.currentCustomClis()[0].id === customSaved[0].id && window.currentCustomClis()[0].command === 'mycli --model slow');
+      customRow().querySelector('button[aria-label^="删除"]').click(); await tick();
+      check('deleting a custom CLI asks first and warns about its tasks', customRow().textContent.includes('确认删除') && customRow().textContent.includes('任务') && window.currentCustomClis().length === 1);
+      [...customRow().querySelectorAll('button')].find(b => b.textContent.includes('确认删除')).click(); await tick();
+      check('confirmed delete removes the custom CLI', window.currentCustomClis().length === 0 && !customRow());
+      // 设置 → 外观 → 语言：立即生效，设置页文案跟着切换
+      try {
+      const tabLabels = () => [...document.querySelectorAll('[role="tab"]')].map(t => t.textContent.trim()).join('|');
+      [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.includes('外观')).click(); await tick();
+      const langBtn = name => [...document.querySelectorAll('[aria-label="界面语言"] button, [aria-label="Interface language"] button')].find(b => b.textContent.trim() === name);
+      check('appearance page offers both languages with the current one pressed', langBtn('简体中文')?.getAttribute('aria-pressed') === 'true' && langBtn('English')?.getAttribute('aria-pressed') === 'false');
+      langBtn('English').click(); await tick(300);
+      check('choosing English stores the language setting', window.currentSettings().language === 'en');
+      check('settings tabs switch to English at once', tabLabels() === 'Appearance|Time|Terminal|Account|CLI|Reminders|Shortcuts');
+      check('theme names follow the language', [...document.querySelectorAll('[aria-label="Eye-care theme colors"] button')].map(b => b.textContent.trim()).join('|') === 'Bean Green|Parchment|Warm Night|Arctic Gray Blue');
+      [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.trim() === 'Time').click(); await tick();
+      const dateSwitch = () => document.querySelector('button[role="switch"][aria-label="Show date"]');
+      check('time page has the top bar date switch, on by default', dateSwitch()?.getAttribute('aria-checked') === 'true');
+      dateSwitch().click(); await tick(100);
+      check('the date switch turns the setting off', window.currentSettings().topbarDateVisible === false && dateSwitch().getAttribute('aria-checked') === 'false');
+      dateSwitch().click(); await tick(100);
+      check('the date switch turns it back on', window.currentSettings().topbarDateVisible === true);
+      [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.trim() === 'Account').click(); await tick(300);
+      check('accounts page shows the real home directory instead of a fixed path', document.body.textContent.includes('C:/Users/tester') && !document.body.textContent.includes('你'));
+      [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.trim() === 'Appearance').click(); await tick();
+      langBtn('简体中文').click(); await tick(300);
+      check('switching back to Simplified Chinese restores the Chinese labels', tabLabels() === '外观|时间|终端|账号|CLI|提醒|快捷键');
+      } catch (e) { check('settings language tests threw: ' + String(e.stack).split(String.fromCharCode(10)).slice(0, 3).join(' | '), false); }
+      return checks;
+    })()\`));
+    // 首次引导（选语言、欢迎页）与顶栏日期开关
+    result.push(...await win.webContents.executeJavaScript(\`(async () => {
+      const checks = [];
+      const check = (name, ok) => checks.push({ name, ok: Boolean(ok) });
+      const tick = (ms = 150) => new Promise(r => setTimeout(r, ms));
+      window.events.length = 0;
+      window.drawOnboarding([{ id: 'codex', name: 'Codex', icon: 'codex' }, { id: 'claude', name: 'Claude Code', icon: 'claude' }]); await tick();
+      const dialog = () => document.querySelector('[role="dialog"]');
+      const langButtons = () => [...dialog().querySelectorAll('[role="group"] button')];
+      check('onboarding opens on the language step with both languages', dialog().textContent.includes('Language') && langButtons().map(b => b.textContent.trim()).join('|') === '简体中文|English');
+      check('the preselected language is pressed', langButtons().find(b => b.textContent.trim() === 'English').getAttribute('aria-pressed') === 'true');
+      check('onboarding cannot be dismissed with the close button', dialog().querySelector('button[aria-label="Close"]')?.disabled === true);
+      langButtons().find(b => b.textContent.trim() === '简体中文').click(); await tick();
+      check('picking a language applies it to the dialog straight away', window.events.includes('lang:zh-CN') && dialog().querySelector('[data-onboarding-next]').textContent.trim() === '下一步');
+      dialog().querySelector('[data-onboarding-next]').click(); await tick();
+      check('the welcome step lists the CLIs detected on this machine', dialog().querySelector('[data-onboarding-step="welcome"]') && [...dialog().querySelectorAll('[data-onboarding-clis] li')].map(li => li.textContent.trim()).join('|') === 'Codex|Claude Code');
+      check('the welcome step shows the local default folder', dialog().textContent.includes('C:/Users/tester'));
+      [...dialog().querySelectorAll('button')].find(b => b.textContent.includes('添加文件夹')).click();
+      check('the add folder button asks the app to pick a folder', window.events.includes('add-folder'));
+      dialog().querySelector('[data-onboarding-finish]').click();
+      check('get started finishes the onboarding', window.events.includes('onboarding-finish'));
+      window.drawOnboarding([]); await tick();
+      check('with no CLI found the welcome step explains what to do', dialog().querySelector('[data-onboarding-no-cli]') && !dialog().querySelector('[data-onboarding-clis]'));
+      window.setUiLanguage('zh-CN');
+      // 顶栏日期：最大化时显示年月日与星期，设置里关闭后只显示时间
+      window.hideDate = false; window.draw(); await tick();
+      window.setMaximized(true); await tick(400);
+      const clock = () => document.getElementById('oneai-topbar-clock').textContent.trim();
+      check('maximized top bar shows the date by default', clock().indexOf('-') > 0 && clock().indexOf(':') > 0);
+      window.hideDate = true; window.draw(); await tick(400);
+      check('with the date switched off the top bar shows only the time', clock().indexOf('-') < 0 && clock().split(':').length === 3);
+      window.hideDate = false; window.setMaximized(false); window.draw(); await tick();
       return checks;
     })()\`));
     result.push(...await win.webContents.executeJavaScript(\`(async () => {

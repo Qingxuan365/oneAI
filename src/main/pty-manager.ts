@@ -3,11 +3,13 @@ import { BrowserWindow } from 'electron';
 import * as os from 'node:os';
 import fs from 'node:fs';
 import { buildAccountEnv, SessionAccount } from './account-env';
+import { t } from './i18n';
 
 interface CreateSessionOptions {
   id: string;
   command?: string;
   cwd?: string;
+  shell?: boolean; // 自定义 CLI：整条命令交给 PowerShell 解析，兼容 .cmd / .ps1 启动器与带参数的命令
   account?: SessionAccount; // 多账号：按账号的配置目录注入 CODEX_HOME / CLAUDE_CONFIG_DIR；重启时沿用
   cols?: number;
   rows?: number;
@@ -98,7 +100,7 @@ export class PtyManager {
       const rawCommand = (command || defaultShell).trim();
       let workDir = cwd || process.env.USERPROFILE || process.cwd();
       if (!fs.existsSync(workDir) || !fs.statSync(workDir).isDirectory()) {
-        return { success: false, error: `工作目录不存在或不是文件夹：${workDir}` };
+        return { success: false, error: t('工作目录不存在或不是文件夹：{dir}', { dir: workDir }) };
       }
 
       let accountEnv: Record<string, string> = {};
@@ -129,7 +131,7 @@ export class PtyManager {
             '-ExecutionPolicy',
             'Bypass',
             '-Command',
-            'if (Get-Command opencode -ErrorAction SilentlyContinue) { opencode } else { Write-Host "`n[OneAI 提示]: 本地尚未安装或配置 opencode 环境变量。当前已为您打开交互终端，可随时输入命令。" -ForegroundColor Yellow }',
+            'if (Get-Command opencode -ErrorAction SilentlyContinue) { opencode } else { Write-Host "`n' + t('[OneAI 提示]: 本地尚未安装或配置 opencode 环境变量。当前已为您打开交互终端，可随时输入命令。') + '" -ForegroundColor Yellow }',
           ];
         } else if (rawCommand.toLowerCase() === 'grok') {
           file = 'powershell.exe';
@@ -138,7 +140,7 @@ export class PtyManager {
             '-ExecutionPolicy',
             'Bypass',
             '-Command',
-            'if (Get-Command grok -ErrorAction SilentlyContinue) { grok } else { Write-Host "`n[OneAI 提示]: 本地尚未安装或配置 grok CLI 环境变量。当前已为您打开交互终端，可随时输入命令。" -ForegroundColor Yellow }',
+            'if (Get-Command grok -ErrorAction SilentlyContinue) { grok } else { Write-Host "`n' + t('[OneAI 提示]: 本地尚未安装或配置 grok CLI 环境变量。当前已为您打开交互终端，可随时输入命令。') + '" -ForegroundColor Yellow }',
           ];
         } else if (rawCommand.toLowerCase() === 'powershell' || rawCommand.toLowerCase() === 'powershell.exe') {
           file = 'powershell.exe';
@@ -146,7 +148,7 @@ export class PtyManager {
         } else if (rawCommand.toLowerCase() === 'cmd' || rawCommand.toLowerCase() === 'cmd.exe') {
           file = 'cmd.exe';
           args = [];
-        } else if (/^(kimi|codex|claude)\s/i.test(rawCommand)) {
+        } else if (resolvedOptions.shell || /^(kimi|codex|claude)\s/i.test(rawCommand)) {
           // 恢复历史会话：带参数的 CLI 命令交给 PowerShell 解析，兼容 .cmd/.ps1 启动器
           file = 'powershell.exe';
           args = ['-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', rawCommand];

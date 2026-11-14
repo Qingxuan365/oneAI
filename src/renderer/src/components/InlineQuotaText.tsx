@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { RotateCw } from 'lucide-react';
 import { QuotaData } from '../types';
+import { t } from '../i18n';
 
 interface InlineQuotaTextProps {
   quota: QuotaData | null;
@@ -63,7 +64,7 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = ({ quota, onRefre
         <span>5h --</span>
         <Divider />
         <span>7d --</span>
-        {refreshButton('刷新额度')}
+        {refreshButton(t('刷新额度'))}
       </div>
     );
   }
@@ -73,8 +74,8 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = ({ quota, onRefre
     return (
       <div className="flex items-center gap-2 text-ui text-fg-faint">
         <span className="rounded border border-line-strong bg-muted px-1.5 py-0.5 text-xs text-fg-muted">{quota.cliName}</span>
-        <span className="quota-detail">{quota.message || '未检测到本地 CLI 或配置'}</span>
-        {refreshButton(`刷新 ${quota.cliName} 状态`)}
+        <span className="quota-detail">{quota.message || t('未检测到本地 CLI 或配置')}</span>
+        {refreshButton(t('刷新 {name} 状态', { name: quota.cliName }))}
       </div>
     );
   }
@@ -86,19 +87,19 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = ({ quota, onRefre
   ];
 
   return (
-    <div className="flex items-center gap-2 font-mono text-ui text-fg-muted" title={quota.model ? (quota.effort ? `${quota.model} · 推理思考等级: ${quota.effort}` : quota.model) : undefined}>
+    <div className="flex items-center gap-2 font-mono text-ui text-fg-muted" title={quota.model ? (quota.effort ? t('{model} · 推理思考等级: {effort}', { model: quota.model, effort: quota.effort }) : quota.model) : undefined}>
       {/* 最近活跃会话的累计用量；没有数据的 CLI 不显示。空间不足时整段由 .quota-usage 收起 */}
       {(quota.tokens !== undefined || quota.costUsd !== undefined) && (
         <span className="quota-usage flex items-center gap-2 whitespace-nowrap">
           {quota.tokens !== undefined && (
-            <span title={`最近活跃会话累计 token（输入 + 输出 + 缓存读写）：${quota.tokens.toLocaleString('en-US')}`}>
+            <span title={t('最近活跃会话累计 token（输入 + 输出 + 缓存读写）：{tokens}', { tokens: quota.tokens.toLocaleString('en-US') })}>
               <span className="text-fg-subtle">Tokens: </span>
               <span className="font-semibold text-fg">{formatTokens(quota.tokens)}</span>
             </span>
           )}
           {quota.tokens !== undefined && quota.costUsd !== undefined && <Divider />}
           {quota.costUsd !== undefined && (
-            <span title="最近活跃会话累计费用（美元）">
+            <span title={t('最近活跃会话累计费用（美元）')}>
               <span className="text-fg-subtle">Cost: </span>
               <span className="font-semibold text-fg">${quota.costUsd.toFixed(2)}</span>
             </span>
@@ -110,7 +111,7 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = ({ quota, onRefre
       {windows.map(({ label, percent, reset }, index) => (
         <React.Fragment key={label}>
           {index > 0 && <Divider />}
-          <span className="whitespace-nowrap" title={`${label} 额度剩余 ${percent < 0 ? '未知' : `${percent}%`}${reset !== '--' ? `，${reset}` : ''}`}>
+          <span className="whitespace-nowrap" title={t('{label} 额度剩余 {percent}{reset}', { label, percent: percent < 0 ? t('未知') : `${percent}%`, reset: reset !== '--' ? t('，{reset}', { reset }) : '' })}>
             <span className="text-fg-subtle">{label}: </span>
             <span className={`font-semibold ${percentColor(percent)}`}>{percent < 0 ? '--' : `${percent}%`}</span>
             {reset !== '--' && <span className="quota-detail text-xs text-fg-subtle"> ({reset})</span>}
@@ -144,7 +145,7 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = ({ quota, onRefre
         </>
       )}
 
-      {refreshButton(`立即刷新 ${quota.cliName} 额度`)}
+      {refreshButton(t('立即刷新 {name} 额度', { name: quota.cliName }))}
     </div>
   );
 };

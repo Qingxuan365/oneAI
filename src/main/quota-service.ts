@@ -5,6 +5,7 @@ import os from 'node:os';
 import https from 'node:https';
 import { execFile } from 'node:child_process';
 import { isAccountCli, resolveConfigDir, AccountCliId } from './account-env';
+import { t } from './i18n';
 
 export interface QuotaData {
   cliId: string;
@@ -56,7 +57,7 @@ function formatDuration(diffMs: number): string {
 }
 
 function formatResetDay(targetMs: number): string {
-  if (!targetMs || targetMs <= Date.now()) return '已重置';
+  if (!targetMs || targetMs <= Date.now()) return t('已重置');
   const date = new Date(targetMs);
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const dayName = days[date.getDay()];
@@ -139,7 +140,7 @@ export class QuotaService {
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'normal',
-        message: '无额度接口',
+        message: t('无额度接口'),
       },
       pi: {
         cliId: 'pi',
@@ -152,7 +153,7 @@ export class QuotaService {
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'normal',
-        message: '无额度接口',
+        message: t('无额度接口'),
       },
       agy: {
         cliId: 'agy',
@@ -165,7 +166,7 @@ export class QuotaService {
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'normal',
-        message: '无额度接口',
+        message: t('无额度接口'),
       },
       grok: {
         cliId: 'grok',
@@ -182,7 +183,7 @@ export class QuotaService {
       },
       terminal: {
         cliId: 'terminal',
-        cliName: '系统终端',
+        cliName: t('系统终端'),
         model: 'PowerShell / CMD',
         planType: 'Local Shell',
         fiveHourPercent: 100,
@@ -689,7 +690,7 @@ export class QuotaService {
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'offline',
-        message: '未找到 Kimi 凭证文件',
+        message: t('未找到 Kimi 凭证文件'),
       };
     }
 
@@ -697,7 +698,7 @@ export class QuotaService {
       const cred = JSON.parse(fs.readFileSync(credPath, 'utf8'));
       const token = cred.access_token;
       if (!token) {
-        throw new Error('access_token 不存在');
+        throw new Error(t('access_token 不存在'));
       }
 
       const resData = await new Promise<any>((resolve, reject) => {
@@ -741,14 +742,14 @@ export class QuotaService {
       const fiveHourPercent = toRemaining(limit5h);
       const sevenDayPercent = toRemaining(limit7d);
 
-      let fiveHourResetsIn = fiveHourPercent < 0 ? '--' : '已就绪';
+      let fiveHourResetsIn = fiveHourPercent < 0 ? '--' : t('已就绪');
       if (limit5h.reset_time) {
         const resetMs = new Date(limit5h.reset_time).getTime();
         const diff = resetMs - Date.now();
         if (diff > 0) fiveHourResetsIn = formatDuration(diff);
       }
 
-      let sevenDayResetsOn = sevenDayPercent < 0 ? '--' : '近期重置';
+      let sevenDayResetsOn = sevenDayPercent < 0 ? '--' : t('近期重置');
       if (limit7d.reset_time) {
         const resetMs = new Date(limit7d.reset_time).getTime();
         sevenDayResetsOn = formatResetDay(resetMs);
@@ -784,7 +785,7 @@ export class QuotaService {
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'normal',
-        message: isAccount ? `额度读取失败：${err.message}` : undefined,
+        message: isAccount ? t('额度读取失败：{reason}', { reason: err.message }) : undefined,
       };
     }
   }
@@ -810,7 +811,7 @@ export class QuotaService {
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'normal',
-        message: isAccount ? '该账号暂无会话记录' : undefined,
+        message: isAccount ? t('该账号暂无会话记录') : undefined,
       };
     }
 
@@ -942,14 +943,14 @@ export class QuotaService {
         const fiveHourPercent = remaining(primary);
         const sevenDayPercent = remaining(secondary);
 
-        let fiveHourResetsIn = '已就绪';
+        let fiveHourResetsIn = t('已就绪');
         if (primary.resets_at) {
           const resetMs = primary.resets_at * 1000;
           const diff = resetMs - Date.now();
           if (diff > 0) fiveHourResetsIn = formatDuration(diff);
         }
 
-        let sevenDayResetsOn = '近期重置';
+        let sevenDayResetsOn = t('近期重置');
         if (secondary.resets_at) {
           const resetMs = secondary.resets_at * 1000;
           sevenDayResetsOn = formatResetDay(resetMs);
@@ -987,7 +988,7 @@ export class QuotaService {
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'normal',
-        message: isAccount ? '该账号暂无额度记录' : undefined,
+        message: isAccount ? t('该账号暂无额度记录') : undefined,
       };
     } catch (err: any) {
       console.warn('[QuotaService] Error parsing Codex sessions:', err.message);
@@ -1060,14 +1061,14 @@ export class QuotaService {
       status: 'normal',
     };
 
-    if (configDir) return { ...base, message: '非默认账号暂无额度数据' };
+    if (configDir) return { ...base, message: t('非默认账号暂无额度数据') };
 
     // 额度来源：~/.claude/oneai-statusline.js 通过 Claude Code statusLine 写入的快照
     let data: any;
     try {
       data = JSON.parse(fs.readFileSync(CLAUDE_STATUS_FILE, 'utf8'));
     } catch {
-      return { ...base, message: '等待 Claude Code 会话数据' };
+      return { ...base, message: t('等待 Claude Code 会话数据') };
     }
 
     const rl = data.rate_limits || {};
@@ -1108,7 +1109,7 @@ export class QuotaService {
       sevenDayResetsOn: '--',
       lastUpdated: Date.now(),
       status: 'normal',
-      message: '无额度接口',
+      message: t('无额度接口'),
     };
   }
 
@@ -1126,7 +1127,7 @@ export class QuotaService {
       sevenDayResetsOn: '--',
       lastUpdated: Date.now(),
       status: 'normal',
-      message: '无额度接口',
+      message: t('无额度接口'),
     };
   }
 
@@ -1171,7 +1172,7 @@ export class QuotaService {
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'normal',
-        message: this.agyUsageError ? `额度读取失败：${this.agyUsageError}` : '额度读取中',
+        message: this.agyUsageError ? t('额度读取失败：{reason}', { reason: this.agyUsageError }) : t('额度读取中'),
       };
     }
 
@@ -1198,12 +1199,12 @@ export class QuotaService {
       ...base,
       planType: prev?.planType,
       fiveHourPercent: five.pct,
-      fiveHourResetsIn: five.pct < 0 ? '--' : fiveReset > 0 ? formatDuration(fiveReset) : '已就绪',
+      fiveHourResetsIn: five.pct < 0 ? '--' : fiveReset > 0 ? formatDuration(fiveReset) : t('已就绪'),
       sevenDayPercent: seven.pct,
-      sevenDayResetsOn: seven.pct < 0 ? '--' : seven.resetMs ? formatResetDay(seven.resetMs) : '近期重置',
+      sevenDayResetsOn: seven.pct < 0 ? '--' : seven.resetMs ? formatResetDay(seven.resetMs) : t('近期重置'),
       lastUpdated: this.agyUsageAt,
       status: minPct < 15 ? 'critical' : minPct < 40 ? 'warning' : 'normal',
-      message: this.agyUsageError ? `额度刷新失败：${this.agyUsageError}` : undefined,
+      message: this.agyUsageError ? t('额度刷新失败：{reason}', { reason: this.agyUsageError }) : undefined,
     };
   }
 
@@ -1213,7 +1214,7 @@ export class QuotaService {
     return new Promise((resolve, reject) => {
       execFile(bin, ['-p', '/usage'], { cwd: os.homedir(), windowsHide: true, timeout: 30000 }, (err, stdout) => {
         if (err) return reject(new Error(err.message.split('\n')[0]));
-        if (!stdout.includes('\t')) return reject(new Error('输出中没有额度数据'));
+        if (!stdout.includes('\t')) return reject(new Error(t('输出中没有额度数据')));
         resolve(stdout);
       });
     });

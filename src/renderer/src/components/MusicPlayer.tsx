@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Music, Pause, Play, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-react';
+import { t } from '../i18n';
 
 interface Track {
   name: string;
@@ -83,7 +84,7 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory }) => {
       const count = tracksRef.current.length;
       if (count > 0) loadTrack((indexRef.current + 1) % count, true);
     });
-    audio.addEventListener('error', () => setError('无法播放该文件'));
+    audio.addEventListener('error', () => setError(t('无法播放该文件')));
     audio.addEventListener('timeupdate', () => { if (!seekingRef.current) setTime(audio.currentTime); });
     const syncDuration = () => setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
     audio.addEventListener('loadedmetadata', syncDuration);
@@ -107,20 +108,20 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory }) => {
     setIndex(next);
     setError('');
     const bytes = await window.electronAPI?.readMusic?.(list[next].path);
-    if (!bytes) { setError('读取音频失败'); return; }
+    if (!bytes) { setError(t('读取音频失败')); return; }
     if (indexRef.current !== next) return; // 期间已切换到其他曲目
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     urlRef.current = URL.createObjectURL(new Blob([bytes as BlobPart]));
     setTime(0);
     setDuration(0);
     audio.src = urlRef.current;
-    if (autoPlay) audio.play().catch(() => setError('无法播放该文件'));
+    if (autoPlay) audio.play().catch(() => setError(t('无法播放该文件')));
   }, [ensureAudio]);
 
   const toggle = () => {
     const audio = ensureAudio();
     if (!audio.src) { loadTrack(index, true); return; }
-    if (audio.paused) audio.play().catch(() => setError('无法播放该文件'));
+    if (audio.paused) audio.play().catch(() => setError(t('无法播放该文件')));
     else audio.pause();
   };
 
@@ -155,7 +156,7 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory }) => {
   const title = error || tracks[index]?.name || '';
 
   return (
-    <div role="group" aria-label="音乐播放器" className="space-y-1.5 border-t border-line px-3 py-2 text-xs text-fg-muted">
+    <div role="group" aria-label={t('音乐播放器')} className="space-y-1.5 border-t border-line px-3 py-2 text-xs text-fg-muted">
       {/* 第一行：曲名与播放控制 */}
       <div className="flex items-center gap-1.5">
         {playing ? (
@@ -173,18 +174,18 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory }) => {
           <Music size={14} className="w-[18px] shrink-0 text-fg-subtle" aria-hidden="true" />
         )}
         <span className={`min-w-0 flex-1 truncate ${error ? 'text-danger' : ''}`} title={title}>{title}</span>
-        <button type="button" className="icon-btn" onClick={() => step(-1)} title="上一首" aria-label="上一首"><SkipBack size={14} /></button>
-        <button type="button" className="icon-btn text-fg" onClick={toggle} title={playing ? '暂停' : '播放'} aria-label={playing ? '暂停' : '播放'}>
+        <button type="button" className="icon-btn" onClick={() => step(-1)} title={t('上一首')} aria-label={t('上一首')}><SkipBack size={14} /></button>
+        <button type="button" className="icon-btn text-fg" onClick={toggle} title={playing ? t('暂停') : t('播放')} aria-label={playing ? t('暂停') : t('播放')}>
           {playing ? <Pause size={15} /> : <Play size={15} />}
         </button>
-        <button type="button" className="icon-btn" onClick={() => step(1)} title="下一首" aria-label="下一首"><SkipForward size={14} /></button>
+        <button type="button" className="icon-btn" onClick={() => step(1)} title={t('下一首')} aria-label={t('下一首')}><SkipForward size={14} /></button>
       </div>
       {/* 第二行：进度与音量 */}
       <div className="flex items-center gap-1.5">
         <span className="w-8 shrink-0 text-2xs tabular-nums text-fg-subtle">{fmt(time)}</span>
         <input
           type="range"
-          aria-label="播放进度"
+          aria-label={t('播放进度')}
           className="slim min-w-0 flex-1"
           min={0}
           max={duration || 0}
@@ -197,12 +198,12 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory }) => {
           onKeyUp={commitSeek}
         />
         <span className="w-8 shrink-0 text-right text-2xs tabular-nums text-fg-subtle">{fmt(duration)}</span>
-        <button type="button" className="icon-btn" onClick={() => changeVolume(volume === 0 ? 1 : 0)} title={volume === 0 ? '取消静音' : '静音'} aria-label={volume === 0 ? '取消静音' : '静音'}>
+        <button type="button" className="icon-btn" onClick={() => changeVolume(volume === 0 ? 1 : 0)} title={volume === 0 ? t('取消静音') : t('静音')} aria-label={volume === 0 ? t('取消静音') : t('静音')}>
           {volume === 0 ? <VolumeX size={14} /> : <Volume2 size={14} />}
         </button>
         <input
           type="range"
-          aria-label="音量"
+          aria-label={t('音量')}
           className="slim w-12 shrink-0"
           min={0}
           max={1}

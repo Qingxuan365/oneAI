@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { t } from './i18n';
 
 export interface HistoryEntry {
   id: string;
@@ -133,7 +134,7 @@ async function listCodex(): Promise<HistoryEntry[]> {
       const id = head.match(/"id":"([^"]+)"/)?.[1];
       const cwd = decodeJsonString(head.match(/"cwd":"((?:[^"\\]|\\.)*)"/)?.[1]);
       if (!id || !SAFE_ID.test(id) || !cwd) return null;
-      const title = names.get(id) || path.basename(cwd) || 'Codex 会话';
+      const title = names.get(id) || path.basename(cwd) || t('Codex 会话');
       deleteTargets.set(targetKey('codex', id), [file]);
       return { id, cliId: 'codex', title: clip(title), cwd, updatedAt: mtime, command: `codex resume ${id}` };
     } catch { return null; }

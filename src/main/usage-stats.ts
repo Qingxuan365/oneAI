@@ -5,6 +5,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { Decompress as ZstdDecompress } from 'fzstd';
 import { formatClaudeModel, quotaService } from './quota-service';
 import { isAccountCli, resolveConfigDir } from './account-env';
+import { t } from './i18n';
 
 export type UsageCli = 'claude' | 'codex' | 'agy' | 'pi';
 
@@ -141,8 +142,9 @@ async function parseClaude(file: string): Promise<Entry[]> {
 }
 
 /** codex-auto-review 是 Codex 自动审查（guardian）子会话使用的内部模型 id，加上中文说明避免被误认为主模型 */
-const AUTO_REVIEW_LABEL = '自动审查 (codex-auto-review)';
-const codexModelLabel = (model: string) => (model === 'codex-auto-review' ? AUTO_REVIEW_LABEL : model);
+const AUTO_REVIEW_MODEL = 'codex-auto-review';
+// 缓存里保留原始模型 id，显示名在汇总时按当前语言生成
+const modelLabel = (model: string) => (model === AUTO_REVIEW_MODEL ? t('自动审查 (codex-auto-review)') : model);
 
 // Codex：turn_context 给出模型，token_count 给出每次请求的用量；总量没有增长的重复事件不计
 async function parseCodex(file: string, fallbackModel: () => string): Promise<Entry[]> {
@@ -169,7 +171,7 @@ async function parseCodex(file: string, fallbackModel: () => string): Promise<En
       const cached = num(last.cached_input_tokens);
       entries.push({
         ts,
-        model: codexModelLabel(model || fallbackModel()),
+        model: model || fallbackModel(),
         input: Math.max(0, num(last.input_tokens) - cached),
         output: num(last.output_tokens),
         cacheRead: cached,
@@ -213,7 +215,7 @@ async function parseAgy(file: string, fallbackModel: () => string): Promise<Entr
   return entries;
 }
 
-const DEFAULT_ACCOUNT = { id: 'default', name: '默认账号' };
+const DEFAULT_ACCOUNT = { id: 'default', get name() { return t('默认账号'); } };
 
 interface DirAccount { dir: string; id: string; name: string }
 
@@ -362,7 +364,7 @@ export async function getUsageStats(accounts: unknown): Promise<UsageStats> {
       const rowKey = `${accountKey}\t${entry.model}`;
       let row = rows.get(rowKey);
       if (!row) {
-        row = { cliId: source.cliId, accountId: source.accountId, accountName: source.accountName, model: entry.model, ...(entry.model === AUTO_REVIEW_LABEL ? { subagent: true } : {}), requests: 0, sessions: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+        row = { cliId: source.cliId, accountId: source.accountId, accountName: source.accountName, model: modelLabel(entry.model), ...(entry.model === AUTO_REVIEW_MODEL ? { subagent: true } : {}), requests: 0, sessions: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
         rows.set(rowKey, row);
       }
       row.requests += 1;

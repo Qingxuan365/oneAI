@@ -20,5 +20,5 @@
       "@/*": ["src/renderer/src/*"]
     }
   },
-  "include": ["src/renderer", "src/preload", "src/main"]
+  "include": ["src/renderer", "src/preload", "src/main", "src/shared"]
 }

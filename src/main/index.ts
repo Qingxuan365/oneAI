@@ -10,10 +10,11 @@ import { setupGitBranch } from './git-branch';
 import { setupTaskSummary } from './task-summary';
 import { listSessionHistory, deleteSessionHistory } from './session-history';
 import { getUsageStats } from './usage-stats';
-import { detectInstalledClis } from './cli-detect';
+import { detectInstalledClis, listKnownClis } from './cli-detect';
 import { setupWorkspaceStore } from './workspace-store';
 import { setupMusicLibrary } from './music-library';
 import { setupFilePreview } from './file-preview';
+import { setLanguage, t } from './i18n';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,7 +39,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     backgroundColor: '#0e1117',
-    title: 'OneAI 全栈工作台',
+    title: 'OneAI',
     icon: appIcon,
     webPreferences: {
       preload: preloadPath,
@@ -116,12 +117,15 @@ function setupIPC() {
   ipcMain.handle('history:list', () => listSessionHistory());
   ipcMain.handle('history:delete', (_event, items) => deleteSessionHistory(Array.isArray(items) ? items : []));
   ipcMain.handle('usage:stats', (_event, accounts) => getUsageStats(accounts));
-  ipcMain.handle('cli:detect', () => detectInstalledClis());
+  ipcMain.handle('app:set-language', (_event, language) => { setLanguage(language); });
+  ipcMain.on('app:home-dir', (event) => { event.returnValue = app.getPath('home'); });
+  ipcMain.handle('cli:known', () => listKnownClis());
+  ipcMain.handle('cli:detect', (_event, custom) => detectInstalledClis(Array.isArray(custom) ? custom : []));
   ipcMain.handle('window:is-maximized', () => mainWindow?.isMaximized() ?? false);
   ipcMain.handle('workspace:select-directory', async (_event, currentPath?: string) => {
     if (!mainWindow) return null;
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-      title: '选择工作目录',
+      title: t('选择工作目录'),
       defaultPath: currentPath && fs.existsSync(currentPath) ? currentPath : app.getPath('home'),
       properties: ['openDirectory'],
     });
@@ -265,12 +269,12 @@ function setupIPC() {
     try {
       if (!mainWindow) return { success: false, error: 'No main window' };
       const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-        title: '导出终端会话完整日志',
+        title: t('导出终端会话完整日志'),
         defaultPath: defaultName || `terminal-log-${Date.now()}.txt`,
         filters: [
-          { name: 'Markdown 文档 (*.md)', extensions: ['md'] },
-          { name: '文本文件 (*.txt)', extensions: ['txt'] },
-          { name: '所有文件 (*.*)', extensions: ['*'] },
+          { name: t('Markdown 文档 (*.md)'), extensions: ['md'] },
+          { name: t('文本文件 (*.txt)'), extensions: ['txt'] },
+          { name: t('所有文件 (*.*)'), extensions: ['*'] },
         ],
       });
       if (canceled || !filePath) {

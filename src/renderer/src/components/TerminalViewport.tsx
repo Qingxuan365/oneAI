@@ -6,6 +6,7 @@ import { SearchAddon } from '@xterm/addon-search';
 import '@xterm/xterm/css/xterm.css';
 import { TaskSession, ThemeId } from '../types';
 import { TerminalSearchBar } from './TerminalSearchBar';
+import { t } from '../i18n';
 
 export interface TerminalViewportRef {
   openSearch: () => void;
@@ -482,9 +483,9 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
   };
 
   const searchResultText = searchInvalid
-    ? '正则无效'
+    ? t('正则无效')
     : searchResult
-      ? searchResult.count === 0 ? '无结果' : searchResult.index >= 0 ? `${searchResult.index + 1}/${searchResult.count}` : `${searchResult.count}+`
+      ? searchResult.count === 0 ? t('无结果') : searchResult.index >= 0 ? `${searchResult.index + 1}/${searchResult.count}` : `${searchResult.count}+`
       : '';
 
   const handleSearchChange = (query: string) => {
@@ -543,17 +544,17 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
     const instance = instancesRef.current.get(taskId);
     if (instance) {
       instance.term.clear();
-      instance.term.write('\r\n\x1b[33m[OneAI] 正在重启 CLI 会话进程...\x1b[0m\r\n');
+      instance.term.write(`\r\n\x1b[33m[OneAI] ${t('正在重启 CLI 会话进程...')}\x1b[0m\r\n`);
       const result = await window.electronAPI?.restartSession?.(taskId);
       if (taskId === activeTaskIdRef.current) instance.term.focus();
-      return result || { success: false, error: '重启接口不可用' };
+      return result || { success: false, error: t('重启接口不可用') };
     }
-    return { success: false, error: '终端实例不存在' };
+    return { success: false, error: t('终端实例不存在') };
   };
 
   // 导出或复制当前会话最近约 2 MiB 的文本
   const exportActiveTerminalLog = async (mode: 'copy' | 'save') => {
-    if (!activeTaskId) return { success: false, error: '无活动会话' };
+    if (!activeTaskId) return { success: false, error: t('无活动会话') };
     // 导出终端里实际渲染的文字。原始输出流里有 CLI 反复重绘的每一帧，直接去控制码会得到重复、错乱的文本；
     // 只有终端实例不存在时才回退到原始流。
     const instance = instancesRef.current.get(activeTaskId);
@@ -571,7 +572,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
       try {
         if (window.electronAPI?.writeClipboardText) {
           const copied = await window.electronAPI.writeClipboardText(plainText);
-          if (!copied) return { success: false, error: '系统剪贴板拒绝写入' };
+          if (!copied) return { success: false, error: t('系统剪贴板拒绝写入') };
         } else {
           await navigator.clipboard.writeText(plainText);
         }
@@ -584,7 +585,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
       const safeTitle = (activeTask?.title || 'session').replace(/[^a-zA-Z0-9_\u4e00-\u9fa5-]/g, '_');
       const defaultName = `${safeTitle}-log-${Date.now()}.md`;
       const res = await window.electronAPI?.saveLogFile?.(defaultName, plainText);
-      return res || { success: false, error: '保存失败' };
+      return res || { success: false, error: t('保存失败') };
     }
   };
 
@@ -709,7 +710,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
 
         // 链接需按住 Ctrl 单击才打开，避免点终端聚焦或划选时误触；悬停时给出提示
         const linkHover = {
-          hover: () => { termContainer.title = '按住 Ctrl 单击打开'; },
+          hover: () => { termContainer.title = t('按住 Ctrl 单击打开'); },
           leave: () => { termContainer.title = ''; },
         };
 
@@ -1027,7 +1028,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
       if (task.status === 'error' && task.errorMessage) {
         if (printedErrorsRef.current.get(task.id) === task.errorMessage) return;
         printedErrorsRef.current.set(task.id, task.errorMessage);
-        instance.term.write(`\r\n\x1b[31m[OneAI] 启动失败：${task.errorMessage}\x1b[0m\r\n`);
+        instance.term.write(`\r\n\x1b[31m[OneAI] ${t('启动失败：{reason}', { reason: task.errorMessage ?? '' })}\x1b[0m\r\n`);
       } else if (task.status !== 'error') {
         printedErrorsRef.current.delete(task.id);
       }
@@ -1107,7 +1108,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
       const instance = instancesRef.current.get(id);
       if (instance) {
         instance.term.write(
-          `\r\n\x1b[90m[OneAI] 终端进程已退出 (退出码: ${exitCode})。可点击顶栏的重启按钮重新启动。\x1b[0m\r\n`
+          `\r\n\x1b[90m[OneAI] ${t('终端进程已退出 (退出码: {code})。可点击顶栏的重启按钮重新启动。', { code: exitCode })}\x1b[0m\r\n`
         );
       }
     });
@@ -1183,7 +1184,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
       {/* 没有可显示的活动任务时（含任务都在隐藏分组、或未选中任何任务）显示启动引导，避免中间空白 */}
       {!tasks.some((task) => task.id === activeTaskId) && (
         <div className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto p-6 select-none">
-          {emptyState || <p className="text-sm text-fg-faint">暂无运行中的 CLI 任务</p>}
+          {emptyState || <p className="text-sm text-fg-faint">{t('暂无运行中的 CLI 任务')}</p>}
         </div>
       )}
     </main>

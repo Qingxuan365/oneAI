@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { SystemStats } from '../types';
+import { t } from '../i18n';
 
 function formatRate(bytesPerSec: number | null): string {
   if (bytesPerSec === null) return '--';
@@ -29,7 +30,7 @@ export const SystemStatsText: React.FC = () => {
     <div
       id="oneai-topbar-sys"
       className="topbar-sys flex shrink-0 items-center gap-2 whitespace-nowrap border-l border-line px-2.5 font-mono text-xs text-fg-muted"
-      title={`整机 CPU ${stats.cpuPercent}%，内存已用 ${memGb} / ${(stats.memTotalBytes / 1024 ** 3).toFixed(1)} GB，网络上行 ${formatRate(stats.netUpBytesPerSec)}、下行 ${formatRate(stats.netDownBytesPerSec)}`}
+      title={t('整机 CPU {cpu}%，内存已用 {used} / {total} GB，网络上行 {up}、下行 {down}', { cpu: stats.cpuPercent, used: memGb, total: (stats.memTotalBytes / 1024 ** 3).toFixed(1), up: formatRate(stats.netUpBytesPerSec), down: formatRate(stats.netDownBytesPerSec) })}
     >
       <span className="topbar-sys-cpu">
         {label('CPU:')}
