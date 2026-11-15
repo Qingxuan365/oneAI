@@ -190,7 +190,8 @@ export interface ElectronTerminalAPI {
   detectClis: (custom?: Array<{ id: string; command: string }>) => Promise<Array<{ id: string; name: string; command: string }>>;
   createSession: (options: { id: string; command?: string; cwd?: string; shell?: boolean; account?: SessionAccount }) => Promise<{ success: boolean; buffer?: string; error?: string }>;
   getSessionBuffer: (id: string) => Promise<string>;
-  writeSession: (id: string, data: string) => Promise<void>;
+  /** 会话不存在（已退出或尚未启动）时返回 false */
+  writeSession: (id: string, data: string) => Promise<boolean>;
   resizeSession: (id: string, cols: number, rows: number) => Promise<void>;
   killSession: (id: string) => Promise<void>;
   restartSession?: (id: string) => Promise<{ success: boolean; buffer?: string; error?: string }>;

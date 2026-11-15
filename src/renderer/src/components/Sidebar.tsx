@@ -54,8 +54,9 @@ interface SidebarProps {
   showMusicPlayer?: boolean;
 }
 
-function getGreeting(): { text: string; period: 'day' | 'evening' | 'midnight' } {
-  const hour = new Date().getHours();
+/** 按顶栏时钟的小时数（含设置里的时钟偏移）选择问候语，与顶栏和「新会话 · 时间」一致 */
+function getGreeting(offsetHours = 0): { text: string; period: 'day' | 'evening' | 'midnight' } {
+  const hour = new Date(Date.now() + (Number.isFinite(offsetHours) ? offsetHours : 0) * 3_600_000).getHours();
   if (hour < 5) return { text: T('午夜好，早休息。'), period: 'midnight' };
   if (hour < 11) return { text: T('早上好，你最棒。'), period: 'day' };
   if (hour < 13) return { text: T('中午好，你最棒。'), period: 'day' };
@@ -107,7 +108,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   musicStreams = NO_STREAMS,
   showMusicPlayer = true,
 }) => {
-  const [greeting, setGreeting] = useState(getGreeting);
+  const [greeting, setGreeting] = useState(() => getGreeting(clockOffsetHours));
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
   const [openRecent, setOpenRecent] = useState<ReadonlySet<string>>(() => new Set());
   // 文件夹拖拽排序：以手柄拖动整行；任务拖拽排序：只在所属文件夹内
@@ -120,9 +121,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const finishingRef = useRef(false);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setGreeting(getGreeting()), 60_000);
+    setGreeting(getGreeting(clockOffsetHours));
+    const timer = window.setInterval(() => setGreeting(getGreeting(clockOffsetHours)), 60_000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [clockOffsetHours]);
 
   // 结束重命名：Esc 取消、Enter / 失焦保存；键盘结束时把焦点还给任务行，避免落到 body
   const finishRename = (save: boolean, refocus: boolean) => {
@@ -174,7 +176,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const menuItemClass = 'flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-hover';
   const accountedClis = (cliId: string) => accounts.filter((account) => account.cliId === cliId);
   const newItemCount = clis.length + clis.reduce((sum, cli) => sum + accountedClis(cli.id).length, 0) + (onCustomNewTask ? 1 : 0);
-  const menuHeight = menu?.kind === 'task' ? 184 : menu?.kind === 'folder' ? 32 * (newItemCount + 3) + 16 : 32 * newItemCount + 16;
+  // 估算高度用于贴底时上移；超过窗口高度时菜单以 max-height 限高并滚动，这里同样封顶，保证菜单从顶部 8px 起完整可见
+  const menuHeight = Math.min(window.innerHeight - 16, menu?.kind === 'task' ? 184 : menu?.kind === 'folder' ? 32 * (newItemCount + 3) + 16 : 32 * newItemCount + 16);
 
   const openNewMenu = (e: React.MouseEvent, folderPath: string) => {
     e.stopPropagation();
@@ -274,12 +277,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div
             role="menu"
             style={{ left: Math.min(menu.x, window.innerWidth - 232), top: Math.max(8, Math.min(menu.y, window.innerHeight - menuHeight)) }}
-            className="fixed z-50 w-56 rounded-md border border-line-strong bg-elevated py-1 text-ui text-fg shadow-xl"
+            className="fixed z-50 max-h-[calc(100vh-16px)] w-56 overflow-y-auto rounded-md border border-line-strong bg-elevated py-1 text-ui text-fg shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             {newTaskItems(menu.folderPath)}
           </div>
         )}
+        {/* 与展开状态使用同一个 key：两种状态的根都是同一个 aside，React 会复用这个播放器实例，折叠时只隐藏、播放不中断 */}
+        {showMusicPlayer && <MusicPlayer key="music-player" directory={musicDirectory} streams={musicStreams} hidden />}
       </aside>
     );
   }
@@ -355,7 +360,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       : `hover:bg-hover hover:text-fg ${hasActiveChild ? 'text-fg' : 'text-fg-muted'}`
                   }`}
                 >
-                  <button type="button" draggable
+                  <button type="button" draggable data-keep-focus
                     onDragStart={(e) => {
                       e.dataTransfer.effectAllowed = 'move';
                       e.dataTransfer.setData('text/plain', key);
@@ -506,6 +511,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           {isActive && <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-accent" aria-hidden="true" />}
                           <button
                             type="button"
+                            data-keep-focus
                             ref={(node) => { if (node) taskButtons.current.set(task.id, node); else taskButtons.current.delete(task.id); }}
                             onClick={() => onSelectTask(task.id)}
                             onDoubleClick={() => onRenameTask && setEditing({ id: task.id, draft: task.title })}
@@ -635,7 +641,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      {showMusicPlayer && <MusicPlayer directory={musicDirectory} streams={musicStreams} />}
+      {showMusicPlayer && <MusicPlayer key="music-player" directory={musicDirectory} streams={musicStreams} />}
 
       {/* 侧边栏底部：添加文件夹与设置 */}
       <div className="flex shrink-0 items-center gap-1 border-t border-line bg-panel p-2">
@@ -662,7 +668,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div
           role="menu"
           style={{ left: Math.min(menu.x, window.innerWidth - 232), top: Math.max(8, Math.min(menu.y, window.innerHeight - menuHeight)) }}
-          className="fixed z-50 w-56 rounded-md border border-line-strong bg-elevated py-1 text-ui text-fg shadow-xl"
+          className="fixed z-50 max-h-[calc(100vh-16px)] w-56 overflow-y-auto rounded-md border border-line-strong bg-elevated py-1 text-ui text-fg shadow-xl"
           onClick={(e) => e.stopPropagation()}
         >
           {menu.kind !== 'task' && menu.folderPath && newTaskItems(menu.folderPath)}

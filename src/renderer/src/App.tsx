@@ -175,21 +175,28 @@ export const App: React.FC = () => {
 
   const workReminderHours = Number.isFinite(settings.workReminderHours) ? Math.max(1, Math.min(12, Math.trunc(settings.workReminderHours))) : 1;
 
-  // 从应用启动起算，满设定小时数时提醒一次；改小到已经过去的时长时不补弹
+  // 从应用启动起算，每满设定的小时数提醒一次（第 N 次提醒时已工作 N × 设定小时）；改动时长后按新间隔排到下一个整倍数时刻，不补弹
+  const [workedHours, setWorkedHours] = useState(workReminderHours);
   useEffect(() => {
-    const remaining = appOpenedAt + workReminderHours * 60 * 60 * 1000 - Date.now();
-    if (remaining <= 0) return;
-    const timer = window.setTimeout(() => {
-      setWorkReminderVisible(true);
-      if (voiceReminderEnabledRef.current && 'speechSynthesis' in window) {
-        const utterance = new SpeechSynthesisUtterance(workReminderText(workReminderHours));
-        utterance.lang = getLanguage() === 'en' ? 'en-US' : 'zh-CN';
-        window.speechSynthesis.speak(utterance);
-      }
-    }, remaining);
-    return () => {
-      window.clearTimeout(timer);
+    const interval = workReminderHours * 60 * 60 * 1000;
+    let timer = 0;
+    const schedule = () => {
+      const elapsed = Date.now() - appOpenedAt;
+      const nextCount = Math.floor(elapsed / interval) + 1;
+      timer = window.setTimeout(() => {
+        const hours = nextCount * workReminderHours;
+        setWorkedHours(hours);
+        setWorkReminderVisible(true);
+        if (voiceReminderEnabledRef.current && 'speechSynthesis' in window) {
+          const utterance = new SpeechSynthesisUtterance(workReminderText(hours));
+          utterance.lang = getLanguage() === 'en' ? 'en-US' : 'zh-CN';
+          window.speechSynthesis.speak(utterance);
+        }
+        schedule();
+      }, appOpenedAt + nextCount * interval - Date.now());
     };
+    schedule();
+    return () => window.clearTimeout(timer);
   }, [workReminderHours]);
 
   const [systemPrefersDark, setSystemPrefersDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -256,10 +263,12 @@ export const App: React.FC = () => {
     try { localStorage.setItem('oneai_sidebar_collapsed', String(isSidebarCollapsed)); } catch {}
   }, [isSidebarCollapsed]);
 
-  // 全局快捷键缩放终端字体（Ctrl + / Ctrl - / Ctrl 0）
+  // 全局快捷键缩放终端字体（Ctrl + / Ctrl - / Ctrl 0）。在捕获阶段处理并阻止继续传播：
+  // 冒泡阶段时 xterm 已把 Ctrl+- 转成 \x1f（Ctrl+_，多数 CLI 的「撤销」）发给 CLI。排除 Alt，避免 AltGr 组合被误判
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey) {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && ['=', '+', '-', '0'].includes(e.key)) e.stopPropagation();
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
         if (e.key === '=' || e.key === '+') {
           e.preventDefault();
           setSettings((prev) => ({
@@ -281,8 +290,8 @@ export const App: React.FC = () => {
         }
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, []);
 
   const allTasks = tasks;
@@ -315,8 +324,12 @@ export const App: React.FC = () => {
       window.electronAPI.getAllQuotas().then((all) => {
         if (all) setQuotas(all);
       });
+      // 主进程每次刷新都会推送（Claude statusLine 快照一更新就推），多数时候只有 lastUpdated 变化；
+      // 内容未变时保留原对象，避免整个界面重渲染
+      const contentKey = (all: Record<string, QuotaData>) => JSON.stringify(all, (key, value) => (key === 'lastUpdated' ? undefined : value));
       const unsub = window.electronAPI.onQuotaUpdate((updatedQuotas) => {
-        if (updatedQuotas) setQuotas(updatedQuotas);
+        if (!updatedQuotas) return;
+        setQuotas((prev) => (contentKey(prev) === contentKey(updatedQuotas) ? prev : updatedQuotas));
       });
       return () => unsub();
     } else {
@@ -1007,12 +1020,21 @@ ${entry.cwd}`}
         onClose={() => setIsSettingsOpen(false)}
         settings={settings}
         onUpdateSettings={setSettings}
-        onResetDefault={() => setSettings((prev) => ({ ...DEFAULT_SETTINGS, accounts: prev.accounts, customClis: prev.customClis, musicStreams: prev.musicStreams, language: prev.language, onboardingDone: prev.onboardingDone }))}
+        onResetDefault={async () => {
+          if (!await askConfirm({
+            title: t('恢复默认设置'),
+            message: t('将还原外观、终端、时间、提醒与音乐播放器的设置（含音乐目录）。账号、自定义 CLI、在线音乐和界面语言保留。'),
+            confirmLabel: t('恢复默认'),
+            danger: true,
+          })) return;
+          setSettings((prev) => ({ ...DEFAULT_SETTINGS, accounts: prev.accounts, customClis: prev.customClis, musicStreams: prev.musicStreams, language: prev.language, onboardingDone: prev.onboardingDone }));
+        }}
         onLoginAccount={(account) => void handleLoginAccount(account)}
         fallbackKnownClis={[...BUILTIN_CLIS, ...extraClis].filter((cli) => cli.id !== 'terminal').map((cli) => ({ id: cli.id, name: cli.name, command: cli.defaultCommand }))}
         installed={installed}
         onCustomClisChange={handleCustomClisChange}
         onRedetectClis={redetectClis}
+        accountTaskCounts={tasks.reduce<Record<string, number>>((counts, task) => { if (task.accountId) counts[task.accountId] = (counts[task.accountId] ?? 0) + 1; return counts; }, {})}
       />
       <Modal
         isOpen={workReminderVisible}
@@ -1022,7 +1044,7 @@ ${entry.cwd}`}
         widthClass="max-w-sm"
         footer={<button type="button" autoFocus onClick={() => setWorkReminderVisible(false)} className="btn-primary">{t('知道了')}</button>}
       >
-        <p className="text-ui leading-relaxed text-fg-muted">{workReminderText(workReminderHours)}</p>
+        <p className="text-ui leading-relaxed text-fg-muted">{workReminderText(workedHours)}</p>
       </Modal>
       <ConfirmDialog options={confirmOptions} onResolve={resolveConfirm} />
     </div>

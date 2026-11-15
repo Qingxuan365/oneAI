@@ -24,6 +24,8 @@ await build({
     import { OnboardingModal } from './src/renderer/src/components/OnboardingModal';
     import { setLanguage, t } from './src/renderer/src/i18n';
     import { Terminal } from '@xterm/xterm';
+    import { installDropGuard } from './src/renderer/src/dropGuard';
+    installDropGuard();
     window.electronAPI = { getHomeDir: () => 'C:/Users/tester', onWindowMaximizedChange: callback => { window.setMaximized = callback; return () => {}; }, isWindowMaximized: async () => false,
       onSystemStats: callback => { window.pushStats = callback; return () => {}; },
       // 路径里带 logged 的账号视为已登录；账号相关桩不使用反斜杠，避免外层模板字符串转义
@@ -121,7 +123,9 @@ await build({
     // 侧栏交互：OneAI 文件夹里 a 为当前任务、b 为后台待查看任务；sports 里有一个 Claude 任务；empty 没有任务
     const keyOf = (p) => p.toLowerCase().split('/').join(String.fromCharCode(92));
     const mkTask = (id, groupId, cwd, extra = {}) => ({ id, groupId, title: id, status: 'idle', cwd, createdAt: 1, ...extra });
-    window.drawSidebar = (isCollapsed = false, clockOffset = 0) => {
+    // withMusic：带一条在线音乐，用于检查折叠侧栏时播放器不被卸载
+    const MUSIC_STREAMS = [{ id: 'm1', name: 'Test radio', url: 'https://example.com/test.mp3' }];
+    window.drawSidebar = (isCollapsed = false, clockOffset = 0, withMusic = false) => {
       const tasks = [mkTask('side-a', 'codex', 'D:/GitHub/OneAI', { title: 'Side a' }), mkTask('side-b', 'codex', 'D:/GitHub/OneAI', { title: 'Side b' }), mkTask('side-c', 'claude', 'D:/sports', { title: 'Side c' }), mkTask('side-d', 'claude', 'D:/sports', { title: 'Side d' }), mkTask('side-t', 'terminal', 'D:/sports', { title: 'Side t' })];
       const folders = [{ path: 'D:/GitHub/OneAI', isExpanded: true }, { path: 'D:/sports', isExpanded: true }, { path: 'D:/empty', isExpanded: true }];
       const entry = (id, cliId, title, ago) => ({ id, cliId, title, cwd: 'D:/plan', updatedAt: Date.now() - ago, command: cliId + ' resume ' + id });
@@ -136,7 +140,8 @@ await build({
           onCloseTask={(id) => window.events.push('close:' + id)} onRenameTask={() => {}}
           onReorderTask={(s, t) => window.events.push('reorder:' + s + '>' + t)}
           onRestartTask={(id) => window.events.push('restart:' + id)} onOpenFolder={(p) => window.events.push('open:' + p)} onRemoveFolder={(p) => window.events.push('remove:' + p)}
-          onResumeHistory={(e) => window.events.push('resume:' + e.id)} onOpenHistory={() => window.events.push('history')} />
+          onResumeHistory={(e) => window.events.push('resume:' + e.id)} onOpenHistory={() => window.events.push('history')}
+          musicStreams={withMusic ? MUSIC_STREAMS : undefined} />
       </div>));
     };
     // 多账号：侧栏徽标与菜单、新建任务弹窗、设置页账号管理
@@ -179,8 +184,22 @@ await build({
       flushSync(() => root.render(<div className="workbench-ui flex h-screen"><TerminalViewport theme="dark" tasks={tasks} activeTaskId={'many-' + active} /></div>));
     };
     window.termRef = React.createRef();
-    window.drawTerm = (id, groupId = 'codex') => {
-      const tasks = [{ id, groupId, title: id, status: 'running', cwd: 'D:/GitHub/OneAI', createdAt: 1 }];
+    // 记录 xterm 的每次写入（内容与时间），用来检查回显是否立即写入、隐藏终端是否延后写入
+    window.xtermWrites = [];
+    const originalWrite = Terminal.prototype.write;
+    Terminal.prototype.write = function (data, callback) {
+      if (typeof data === 'string' && data) window.xtermWrites.push({ data, at: performance.now() });
+      return originalWrite.call(this, data, callback);
+    };
+    // 卸载当前界面：TerminalViewport 在挂载时订阅数据流，换掉 onSessionData 桩后需重新挂载
+    window.clearRoot = () => flushSync(() => root.render(<div />));
+    // 两个任务：active 可见，另一个隐藏；用于检查隐藏终端的合并写入
+    window.drawTermPair = (active) => {
+      const tasks = ['pair-a', 'pair-b'].map((id) => ({ id, groupId: 'codex', title: id, status: 'running', cwd: 'D:/GitHub/OneAI', createdAt: 1 }));
+      flushSync(() => root.render(<div className="workbench-ui flex h-screen"><TerminalViewport theme="dark" tasks={tasks} activeTaskId={active} /></div>));
+    };
+    window.drawTerm = (id, groupId = 'codex', status = 'running') => {
+      const tasks = [{ id, groupId, title: id, status, cwd: 'D:/GitHub/OneAI', createdAt: 1 }];
       flushSync(() => root.render(<div className="workbench-ui flex h-screen">
         <button id="outside-button" type="button">outside</button>
         <TerminalViewport ref={window.termRef} theme="dark" tasks={tasks} activeTaskId={id} />
@@ -881,6 +900,150 @@ app.whenReady().then(async () => {
     await key(' ', 'Space', 32, ' ');
     await new Promise(r => setTimeout(r, 100));
     result.push({ name: 'Space on a focused button stays on the button', ok: await win.webContents.executeJavaScript("document.activeElement.id === 'outside-button' && window.ptyWrites.length === 1") });
+    // 终端输入交互：回显立即写入、隐藏终端延后合并、Shift+Enter 例外、AltGr、连点粘贴、点按钮后焦点、停止的任务
+    result.push(...await win.webContents.executeJavaScript(\`(async () => {
+      const checks = [];
+      const check = (name, ok) => checks.push({ name, ok: Boolean(ok) });
+      const wait = (ms = 150) => new Promise(r => setTimeout(r, ms));
+      const textarea = () => [...document.querySelectorAll('.xterm-helper-textarea')].find(t => t.offsetParent);
+      const press = (init) => { const e = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }); textarea().dispatchEvent(e); return e; };
+      const ESC_CR = String.fromCharCode(27, 13);
+      let emit = null;
+      window.electronAPI.onSessionData = (callback) => { emit = callback; return () => { emit = null; }; };
+      window.clearRoot(); window.drawTermPair('pair-a'); await wait(300);
+      const written = (text) => window.xtermWrites.filter(w => w.data.includes(text));
+      window.xtermWrites = [];
+      emit({ id: 'pair-a', data: 'echo-1' });
+      check('active terminal writes a lone echo immediately', written('echo-1').length === 1);
+      emit({ id: 'pair-a', data: 'burst-1' }); emit({ id: 'pair-a', data: 'burst-2' });
+      const burstSync = written('burst-1').length;
+      await wait(60);
+      check('output arriving within a frame is merged into one write', burstSync === 0 && window.xtermWrites.filter(w => w.data === 'burst-1burst-2').length === 1);
+      // 激活一次 pair-b 让它创建实例，再切回 pair-a，使 pair-b 成为隐藏终端
+      window.drawTermPair('pair-b'); await wait(200); window.drawTermPair('pair-a'); await wait(200);
+      window.xtermWrites = [];
+      emit({ id: 'pair-b', data: 'hidden-1' }); emit({ id: 'pair-b', data: 'hidden-2' });
+      await wait(100);
+      const hiddenEarly = written('hidden-1').length;
+      await wait(300);
+      check('hidden terminal defers and merges its output', hiddenEarly === 0 && window.xtermWrites.filter(w => w.data === 'hidden-1hidden-2').length === 1);
+      emit({ id: 'pair-b', data: 'hidden-3' });
+      window.drawTermPair('pair-b');
+      check('switching to a hidden terminal writes its pending output right away', written('hidden-3').length === 1);
+      window.clearRoot();
+      window.electronAPI.onSessionData = () => () => {};
+
+      window.ptyWrites = [];
+      window.electronAPI.writeSession = async (id, text) => { window.ptyWrites.push({ id, text }); return true; };
+      window.drawTerm('custom-shift', 'custom-ab12cd34'); await wait(300);
+      press({ key: 'Enter', code: 'Enter', keyCode: 13, shiftKey: true }); await wait(100);
+      check('Shift+Enter is left alone in custom CLI tasks', !window.ptyWrites.some(w => w.text === ESC_CR));
+      window.clearRoot(); window.drawTerm('ime-shift'); await wait(300);
+      window.ptyWrites = [];
+      press({ key: 'Enter', code: 'Enter', keyCode: 229, shiftKey: true, isComposing: true }); await wait(100);
+      check('Shift+Enter during IME composition is not rewritten', !window.ptyWrites.some(w => w.text === ESC_CR));
+
+      let reads = 0;
+      window.electronAPI.readPasteContent = async () => { reads++; await wait(80); return { content: 'pasted-once' }; };
+      press({ key: 'v', code: 'KeyV', keyCode: 86, ctrlKey: true, altKey: true }); await wait(150);
+      check('AltGr+V (Ctrl+Alt+V) is not treated as paste', reads === 0);
+      window.ptyWrites = [];
+      const host = textarea().closest('.xterm').parentElement;
+      host.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      host.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      await wait(250);
+      check('double right-click pastes only once', reads === 1 && window.ptyWrites.filter(w => w.text.includes('pasted-once')).length === 1);
+
+      window.clearRoot(); window.drawTerm('focus-click'); await wait(300);
+      const button = document.getElementById('outside-button');
+      button.focus(); button.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); await wait(50);
+      check('mouse click on a button hands focus back to the terminal', document.activeElement === textarea());
+      button.focus(); button.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 })); await wait(50);
+      check('keyboard-activated button keeps focus', document.activeElement === button);
+
+      window.clearRoot();
+      window.electronAPI.writeSession = async () => false;
+      window.drawTerm('stopped-a', 'codex', 'stopped'); await wait(300);
+      window.xtermWrites = [];
+      textarea().focus();
+      // 回车在 keydown 时就产生输入（可打印字符要等 keypress / input），用它模拟两次输入
+      press({ key: 'Enter', code: 'Enter', keyCode: 13 }); await wait(50);
+      press({ key: 'Enter', code: 'Enter', keyCode: 13 }); await wait(100);
+      check('typing into a stopped task shows the restart hint once', written('进程已停止').length === 1);
+      window.clearRoot();
+      window.electronAPI.writeSession = async (id, text) => { window.ptyWrites.push({ id, text }); return true; };
+      return checks;
+    })()\`));
+    // 设置页选项卡：方向键 / Home / End 切换，只有当前页可 Tab 聚焦，内容区由当前选项卡标注
+    result.push(...await win.webContents.executeJavaScript(\`(async () => {
+      const checks = [];
+      const check = (name, ok) => checks.push({ name, ok: Boolean(ok) });
+      const wait = (ms = 100) => new Promise(r => setTimeout(r, ms));
+      window.clearRoot(); window.drawSettings(); await wait(200);
+      const tabs = () => [...document.querySelectorAll('[role="tab"]')];
+      const selected = () => tabs().find(t => t.getAttribute('aria-selected') === 'true');
+      const press = (key) => selected().dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      selected().focus();
+      press('ArrowDown'); await wait();
+      check('settings tabs: ArrowDown selects and focuses the next tab', selected() === tabs()[1] && document.activeElement === tabs()[1]);
+      press('ArrowUp'); await wait(); press('ArrowUp'); await wait();
+      check('settings tabs: ArrowUp wraps to the last tab', selected() === tabs().at(-1));
+      press('Home'); await wait();
+      check('settings tabs: Home goes to the first tab', selected() === tabs()[0]);
+      check('settings tabs: only the selected tab is in the Tab order', tabs().filter(t => t.tabIndex === 0).length === 1 && selected().tabIndex === 0);
+      const panel = document.querySelector('[role="tabpanel"]');
+      check('settings tab panel is labelled by the selected tab', panel.getAttribute('aria-labelledby') === selected().id && selected().getAttribute('aria-controls') === panel.id);
+      window.clearRoot();
+      return checks;
+    })()\`));
+    // 左侧区域：拖放不跳转、折叠不卸载播放器、任务行保留焦点、菜单限高、问候语跟随时钟偏移
+    result.push(...await win.webContents.executeJavaScript(\`(async () => {
+      const checks = [];
+      const check = (name, ok) => checks.push({ name, ok: Boolean(ok) });
+      const wait = (ms = 200) => new Promise(r => setTimeout(r, ms));
+      window.clearRoot(); window.drawSidebar(); await wait();
+      const dropOn = (target, types) => {
+        const dataTransfer = new DataTransfer();
+        if (types.includes('Files')) dataTransfer.items.add(new File(['x'], 'a.txt', { type: 'text/plain' }));
+        else dataTransfer.setData('text/plain', 'dragged text');
+        const e = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer });
+        target.dispatchEvent(e);
+        return e.defaultPrevented;
+      };
+      check('dropping a file on the sidebar does not navigate the window', dropOn(document.getElementById('oneai-sidebar'), ['Files']));
+      const field = document.body.appendChild(document.createElement('input'));
+      check('dropping text into an input keeps the default insert', !dropOn(field, ['text/plain']));
+      check('dropping a file onto an input still does not navigate', dropOn(field, ['Files']));
+      field.remove();
+
+      window.electronAPI.resolveMusicStream = async (url) => [{ name: '', url }];
+      window.drawSidebar(false, 0, true); await wait(300);
+      const player = () => document.querySelector('[role="group"][aria-label="音乐播放器"]');
+      const before = player();
+      window.drawSidebar(true, 0, true); await wait(300);
+      check('collapsing the sidebar keeps the music player mounted (hidden)', before && player() === before && player().hidden);
+      window.drawSidebar(false, 0, true); await wait(300);
+      check('expanding again shows the same player instance', player() === before && !player().hidden);
+
+      window.drawSidebar(); await wait();
+      const row = document.querySelector('[data-task-id="side-a"] button[data-keep-focus]');
+      row.focus(); row.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); await wait(80);
+      check('mouse click on a task row keeps focus for F2 / Alt+arrows', document.activeElement === row);
+
+      document.querySelector('[data-folder-row] button[aria-haspopup="menu"]').click(); await wait(100);
+      const menu = document.querySelector('[role="menu"]');
+      const menuStyle = menu && getComputedStyle(menu);
+      check('sidebar context menu is capped to the window and scrolls', menuStyle && menuStyle.maxHeight !== 'none' && menuStyle.overflowY === 'auto');
+      document.body.click(); await wait(100);
+
+      const hour = new Date().getHours();
+      window.drawSidebar(false, (26 - hour) % 24); await wait();
+      check('greeting follows the clock offset', document.getElementById('oneai-sidebar').textContent.includes('午夜好'));
+      window.drawSidebar(false, (15 - hour + 24) % 24); await wait();
+      check('greeting updates when the clock offset changes', document.getElementById('oneai-sidebar').textContent.includes('下午好'));
+      window.clearRoot();
+      return checks;
+    })()\`));
     result.push(...await win.webContents.executeJavaScript(\`(async () => {
       const checks = [];
       const check = (name, ok) => checks.push({ name, ok });

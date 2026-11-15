@@ -89,7 +89,14 @@ export function matchToLinkRange(logical: LogicalLine, start: number, length: nu
  * Chromium 同时只允许约 16 个 WebGL 上下文，超出时最早的会被强制丢弃（往往就是当前终端）。
  * 只给最近显示过的终端保留 WebGL，当前终端一定有；更早的隐藏终端释放后退回 DOM 渲染，切回来时再挂上。
  */
+// 终端字体；设置页的字号预览也用它，保证预览与终端一致
+export const TERMINAL_FONT_FAMILY = 'Consolas, "Cascadia Code", "Fira Code", monospace';
 const MAX_WEBGL_TERMINALS = 8;
+// 隐藏终端的合并写入间隔与积压上限
+const HIDDEN_FLUSH_DELAY_MS = 250;
+const HIDDEN_FLUSH_MAX_LENGTH = 1024 * 1024;
+// 活动终端立即写入的输出上限：超过时多半是整屏重绘，仍按帧合并
+const ECHO_FLUSH_MAX_LENGTH = 4 * 1024;
 
 const SEARCH_DECORATIONS = {
   matchBackground: '#b58900',
@@ -186,6 +193,7 @@ interface TerminalInstance {
   container: HTMLDivElement;
   pendingData: string;
   flushTimer: NodeJS.Timeout | null;
+  lastFlushAt: number;
   flush: () => void;
 }
 
@@ -415,6 +423,8 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
   const [useRegex, setUseRegex] = useState(false);
   const [searchResult, setSearchResult] = useState<{ index: number; count: number } | null>(null);
   const [searchInvalid, setSearchInvalid] = useState(false);
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
   const activeTaskIdRef = useRef(activeTaskId);
   activeTaskIdRef.current = activeTaskId;
 
@@ -430,8 +440,26 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
       const taskId = activeTaskIdRef.current;
       if (taskId) instancesRef.current.get(taskId)?.term.focus();
     };
+    // 上面的兜底在 keydown 时才转移焦点，输入法的组字可能已在按钮上开始，首个字会丢。
+    // 因此鼠标点完按钮（非键盘聚焦）后就把焦点交还终端；打开了弹窗或菜单、焦点去了输入框时不干预。
+    const onClick = (e: MouseEvent) => {
+      if (e.detail === 0) return; // 键盘触发的 click（回车 / 空格），保留按钮焦点以便键盘操作
+      window.setTimeout(() => {
+        const active = document.activeElement;
+        if (!active || active.tagName !== 'BUTTON') return;
+        // 带 data-keep-focus 的按钮点完后还有键盘操作（如侧栏任务行的 F2 重命名、Alt+方向键排序），保留焦点
+        if (active.closest('[data-keep-focus]')) return;
+        if (document.querySelector('[role="dialog"], [role="menu"]')) return;
+        const taskId = activeTaskIdRef.current;
+        if (taskId) instancesRef.current.get(taskId)?.term.focus();
+      }, 0);
+    };
     window.addEventListener('keydown', onKeyDown, true);
-    return () => window.removeEventListener('keydown', onKeyDown, true);
+    window.addEventListener('click', onClick, true);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('click', onClick, true);
+    };
   }, []);
 
   // 搜索栏跨任务共用：切换任务时清掉旧终端的高亮，并在新终端重新搜索当前关键字
@@ -671,7 +699,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
 
         const term = new Terminal({
           theme: TERMINAL_THEMES[theme],
-          fontFamily: 'Consolas, "Cascadia Code", "Fira Code", monospace',
+          fontFamily: TERMINAL_FONT_FAMILY,
           fontSize,
           lineHeight,
           cursorBlink,
@@ -794,8 +822,16 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
         });
 
         // 绑定键盘输入并发送到 Electron 主进程
+        // 进程已停止时输入会被丢弃：提示一次如何重启，之后再打字不重复提示，直到重新写入成功
+        let stoppedHintShown = false;
         term.onData((data) => {
-          window.electronAPI?.writeSession(task.id, data);
+          void window.electronAPI?.writeSession(task.id, data).then((written) => {
+            if (written !== false) { stoppedHintShown = false; return; }
+            const status = tasksRef.current.find((item) => item.id === task.id)?.status;
+            if (stoppedHintShown || (status !== 'stopped' && status !== 'error')) return;
+            stoppedHintShown = true;
+            term.write(`\r\n\x1b[90m[OneAI] ${t('进程已停止，输入未发送。请点击顶栏的重启按钮重新启动。')}\x1b[0m\r\n`);
+          });
         });
 
         // 监听终端尺寸变更并同步 PTY
@@ -838,7 +874,19 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
           return false;
         };
 
+        // 右键 / 快捷键粘贴是异步的：上一次还没写完时忽略新的请求，避免快速连点粘贴两次
+        let pasting = false;
         const handlePaste = async () => {
+          if (pasting) return;
+          pasting = true;
+          try {
+            await pasteFromClipboard();
+          } finally {
+            pasting = false;
+          }
+        };
+
+        const pasteFromClipboard = async () => {
           try {
             if (window.electronAPI?.readPasteContent) {
               const res = await window.electronAPI.readPasteContent();
@@ -877,8 +925,10 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
 
           // 0. Shift+Enter 换行：xterm 对 Enter 只区分 Alt，Shift+Enter 会和 Enter 一样直接提交。
           // 改发 ESC+CR（等同 Alt+Enter），多数 CLI 把它当作输入框内换行。
-          // 纯系统终端（PowerShell / cmd）不认这个序列，保持原样。
-          if (task.groupId !== 'terminal' && e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+          // 纯系统终端（PowerShell / cmd）和自定义 CLI（可能是 REPL 或普通脚本）不一定认这个序列，保持原样；
+          // 输入法组字时回车交给输入法上屏。
+          if (task.groupId !== 'terminal' && !task.groupId.startsWith('custom-') && !e.isComposing
+            && e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
             e.preventDefault();
             window.electronAPI?.writeSession(task.id, '\x1b\r');
             return false;
@@ -921,7 +971,8 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
           // - Ctrl+V / Ctrl+Shift+V
           // - Shift+Insert（传统终端粘贴）
           if (
-            (e.ctrlKey && (e.key === 'v' || e.key === 'V')) ||
+            // 排除 Alt：部分键盘布局的 AltGr 等同 Ctrl+Alt，AltGr+V 不应当作粘贴
+            (e.ctrlKey && !e.altKey && (e.key === 'v' || e.key === 'V')) ||
             (e.shiftKey && e.key === 'Insert')
           ) {
             // xterm 返回 false 时不会阻止默认行为，浏览器仍会触发原生 paste 事件，
@@ -979,11 +1030,13 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
           container: termContainer,
           pendingData: '',
           flushTimer: null,
+          lastFlushAt: 0,
           flush: () => {
             if (instance.flushTimer) {
               clearTimeout(instance.flushTimer);
               instance.flushTimer = null;
             }
+            instance.lastFlushAt = performance.now();
             if (instance.pendingData) {
               const sanitized = sanitizeTerminalData(instance.pendingData);
               instance.pendingData = '';
@@ -1070,6 +1123,8 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
       instance.container.style.display = isCurrent ? 'block' : 'none';
 
       if (isCurrent) {
+        // 隐藏期间攒下的输出先写入，再 fit
+        instance.flush();
         setTimeout(() => {
           try {
             instance.fitAddon.fit();
@@ -1092,9 +1147,25 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
       if (instance) {
         instance.pendingData += data;
 
+        // 隐藏的终端不需要逐帧呈现：攒 250ms 再写入，减少后台高输出任务的写入与解析调度；
+        // 积压超过 1 MiB 时立即写入，避免字符串无限增长。切换显示时会立即写入剩余数据。
+        if (id !== activeTaskIdRef.current) {
+          if (instance.pendingData.length > HIDDEN_FLUSH_MAX_LENGTH) instance.flush();
+          else if (!instance.flushTimer) instance.flushTimer = setTimeout(() => instance.flush(), HIDDEN_FLUSH_DELAY_MS);
+          return;
+        }
+
         const inSync =
           instance.pendingData.includes('\x1b[?2026h') && !instance.pendingData.includes('\x1b[?2026l');
         const delay = inSync ? 25 : 16;
+
+        // 先写一次再合并：距上次写入已超过一帧的小块输出（典型是打字回显）立即写入，不额外等 16ms；
+        // 一帧内连续到达的输出和同步输出（?2026h 未闭合）仍按原来的延时合并，避免半帧重绘
+        if (!instance.flushTimer && !inSync && instance.pendingData.length <= ECHO_FLUSH_MAX_LENGTH
+          && performance.now() - instance.lastFlushAt >= delay) {
+          instance.flush();
+          return;
+        }
 
         if (!instance.flushTimer) {
           instance.flushTimer = setTimeout(() => {

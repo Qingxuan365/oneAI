@@ -6,6 +6,11 @@ import https from 'node:https';
 import { execFile } from 'node:child_process';
 import { isAccountCli, resolveConfigDir, AccountCliId } from './account-env';
 import { t } from './i18n';
+import { formatClaudeModel } from './model-format';
+
+async function exists(file: string): Promise<boolean> {
+  try { await fs.promises.access(file); return true; } catch { return false; }
+}
 
 export interface QuotaData {
   cliId: string;
@@ -32,13 +37,6 @@ const AGY_SETTINGS_FILE = path.join(os.homedir(), '.gemini', 'antigravity-cli', 
 const PI_SETTINGS_FILE = path.join(os.homedir(), '.pi', 'agent', 'settings.json');
 const PI_MODELS_FILE = path.join(os.homedir(), '.pi', 'agent', 'models.json');
 const PI_SESSIONS_DIR = path.join(os.homedir(), '.pi', 'agent', 'sessions');
-
-// claude-sonnet-5-5 -> Sonnet 5.5；别名 sonnet/opus/haiku 首字母大写
-export function formatClaudeModel(id: string): string {
-  const m = id.match(/^claude-([a-z]+)-(\d+)(?:-(\d+))?/i);
-  if (m) return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? '.' + m[3] : ''}`;
-  return /^[a-z]+$/.test(id) ? id[0].toUpperCase() + id.slice(1) : id;
-}
 
 function formatDuration(diffMs: number): string {
   if (diffMs <= 0) return '0m';
@@ -81,13 +79,13 @@ export class QuotaService {
   private accounts = new Map<string, { cliId: AccountCliId; dir: string }>();
 
   constructor() {
-    const kimiInfo = this.getKimiInfo();
-    const codexInfo = this.getCodexInfo();
-    const claudeInfo = this.getClaudeInfo();
-    const grokInfo = this.getGrokInfo();
-    const opencodeInfo = this.getOpenCodeInfo();
-    const agyInfo = this.getAgyInfo();
-    const piInfo = this.getPiInfo();
+    const kimiInfo: { model: string; effort?: string } = { model: 'K3' };
+    const codexInfo: { model: string; effort?: string } = { model: 'Auto' };
+    const claudeInfo: { model: string; effort?: string } = { model: 'Claude' };
+    const grokInfo: { model: string; effort?: string } = { model: 'Grok 4.7' };
+    const opencodeInfo: { model: string; effort?: string } = { model: 'Auto' };
+    const agyInfo: { model: string; effort?: string } = { model: 'Auto' };
+    const piInfo: { model: string; effort?: string } = { model: 'Auto' };
 
     this.quotasCache = {
       kimi: {
@@ -196,10 +194,19 @@ export class QuotaService {
       },
     };
 
-    this.setupFileWatchers();
+    for (const [id, info] of [
+      ['kimi', this.getKimiInfo()], ['codex', this.getCodexInfo()],
+      ['claude', this.getClaudeInfo()], ['grok', this.getGrokInfo()],
+      ['opencode', this.getOpenCodeInfo()], ['agy', this.getAgyInfo()], ['pi', this.getPiInfo()],
+    ] as const) {
+      void info.then((value) => {
+        if (!this.cacheExpiry[id]) Object.assign(this.quotasCache[id], value);
+      });
+    }
+    void this.setupFileWatchers();
   }
 
-  private setupFileWatchers(): void {
+  private async setupFileWatchers(): Promise<void> {
     const watchList: Array<{ filePath: string; cliId: string }> = [
       { filePath: path.join(os.homedir(), '.kimi-code', 'config.toml'), cliId: 'kimi' },
       { filePath: path.join(os.homedir(), '.codex', 'config.toml'), cliId: 'codex' },
@@ -217,26 +224,32 @@ export class QuotaService {
 
     const debounceMap = new Map<string, NodeJS.Timeout>();
 
+    const directories = new Map<string, typeof watchList>();
     for (const item of watchList) {
+      const dir = path.dirname(item.filePath);
+      const items = directories.get(dir) ?? [];
+      items.push(item);
+      directories.set(dir, items);
+    }
+    for (const [dir, items] of directories) {
       try {
-        if (fs.existsSync(item.filePath)) {
-          fs.watch(item.filePath, () => {
+        fs.watch(dir, (_event, filename) => {
+          const name = filename?.toString().toLowerCase();
+          for (const item of items) {
+            if (name != null && name !== path.basename(item.filePath).toLowerCase()) continue;
             const prev = debounceMap.get(item.cliId);
             if (prev) clearTimeout(prev);
-            const t = setTimeout(() => {
-              this.refreshQuota(item.cliId);
-            }, 300);
-            debounceMap.set(item.cliId, t);
-          });
-        }
+            debounceMap.set(item.cliId, setTimeout(() => { void this.refreshQuota(item.cliId); }, 300));
+          }
+        });
       } catch (err) {
-        console.warn(`[QuotaService] Failed to watch ${item.filePath}:`, err);
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') console.warn('[QuotaService] Failed to watch directory:', dir, err);
       }
     }
 
     // pi 切换模型只追加会话 jsonl，监听会话目录以便即时刷新
     try {
-      if (fs.existsSync(PI_SESSIONS_DIR)) {
+      if (await exists(PI_SESSIONS_DIR)) {
         fs.watch(PI_SESSIONS_DIR, { recursive: true }, () => {
           const prev = debounceMap.get('pi');
           if (prev) clearTimeout(prev);
@@ -335,7 +348,7 @@ export class QuotaService {
           data = await this.fetchOpenCodeQuota();
           break;
         case 'pi':
-          data = this.fetchPiQuota();
+          data = await this.fetchPiQuota();
           break;
         case 'agy':
           data = await this.fetchAgyQuota();
@@ -354,9 +367,9 @@ export class QuotaService {
     }
   }
 
-  public getKimiInfo(home: string = KIMI_HOME_DEFAULT): { model: string; effort?: string } {
+  public async getKimiInfo(home: string = KIMI_HOME_DEFAULT): Promise<{ model: string; effort?: string }> {
     const configPath = path.join(home, 'config.toml');
-    if (!fs.existsSync(configPath)) {
+    if (!await exists(configPath)) {
       return { model: 'K3', effort: undefined };
     }
 
@@ -364,7 +377,7 @@ export class QuotaService {
     let effort: string | undefined = undefined;
 
     try {
-      const content = fs.readFileSync(configPath, 'utf8');
+      const content = await fs.promises.readFile(configPath, 'utf8');
       const defaultModelMatch = content.match(/default_model\s*=\s*["']([^"']+)["']/);
       const defaultModelKey = defaultModelMatch ? defaultModelMatch[1] : '';
 
@@ -408,13 +421,13 @@ export class QuotaService {
     return { model, effort };
   }
 
-  public getCodexInfo(home: string = CODEX_HOME_DEFAULT): { model: string; effort?: string } {
+  public async getCodexInfo(home: string = CODEX_HOME_DEFAULT): Promise<{ model: string; effort?: string }> {
     let model = 'Auto';
     let effort: string | undefined = undefined;
     const configPath = path.join(home, 'config.toml');
-    if (fs.existsSync(configPath)) {
+    if (await exists(configPath)) {
       try {
-        const content = fs.readFileSync(configPath, 'utf8');
+        const content = await fs.promises.readFile(configPath, 'utf8');
         const mm = content.match(/model\s*=\s*["']([^"']+)["']/);
         if (mm && mm[1]) model = mm[1];
         const me = content.match(/model_reasoning_effort\s*=\s*["']([^"']+)["']/);
@@ -432,21 +445,21 @@ export class QuotaService {
     return { model, effort };
   }
 
-  public getClaudeInfo(configDir?: string): { model: string; effort?: string } {
+  public async getClaudeInfo(configDir?: string): Promise<{ model: string; effort?: string }> {
     let modelId = '';
     let settings: any = null;
 
     // 非默认账号只读它自己的 settings.json：statusLine 快照与 ~/.claude.json 都属于默认账号
     const settingsPath = path.join(configDir ?? CLAUDE_HOME_DEFAULT, 'settings.json');
-    if (fs.existsSync(settingsPath)) {
-      try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch {}
+    if (await exists(settingsPath)) {
+      try { settings = JSON.parse(await fs.promises.readFile(settingsPath, 'utf8')); } catch {}
     }
 
     // 1. statusLine 落盘文件：会话内 /model、推理等级切换后立即更新，是唯一实时来源
     let statusEffort: string | undefined;
     if (!configDir) {
       try {
-        const d = JSON.parse(fs.readFileSync(CLAUDE_STATUS_FILE, 'utf8'));
+        const d = JSON.parse(await fs.promises.readFile(CLAUDE_STATUS_FILE, 'utf8'));
         modelId = d.model?.id || d.model?.display_name || '';
         if (typeof d.effort?.level === 'string') statusEffort = d.effort.level;
       } catch {}
@@ -462,7 +475,7 @@ export class QuotaService {
     // 3. 兜底：~/.claude.json 中最近启动项目的 lastModelUsage。它是上一个已结束会话的用量统计，不随 /model 变化
     if (!modelId && !configDir) {
       try {
-        const c = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8'));
+        const c = JSON.parse(await fs.promises.readFile(path.join(os.homedir(), '.claude.json'), 'utf8'));
         const projs = Object.values(c.projects || {})
           .filter((v: any) => v && v.lastModelUsage && Object.keys(v.lastModelUsage).length > 0)
           .sort((x: any, y: any) => (y.lastStartTime || 0) - (x.lastStartTime || 0));
@@ -479,16 +492,16 @@ export class QuotaService {
     return { model: modelId ? formatClaudeModel(modelId) : 'Claude', effort };
   }
 
-  public getGrokInfo(): { model: string; effort?: string } {
+  public async getGrokInfo(): Promise<{ model: string; effort?: string }> {
     let model = 'Grok 4.7';
     let effort: string | undefined = undefined;
 
     // 1. 优先读取 ~/.grok/config.toml 中用户的自定义配置与推理等级
     const grokConfig = path.join(os.homedir(), '.grok', 'config.toml');
     let configDefaultModel: string | undefined = undefined;
-    if (fs.existsSync(grokConfig)) {
+    if (await exists(grokConfig)) {
       try {
-        const content = fs.readFileSync(grokConfig, 'utf8');
+        const content = await fs.promises.readFile(grokConfig, 'utf8');
         const mm = content.match(/default\s*=\s*["']([^"']+)["']/);
         if (mm && mm[1]) configDefaultModel = mm[1];
         const me = content.match(/(?:default_)?reasoning_effort\s*=\s*["']([^"']+)["']/);
@@ -499,9 +512,9 @@ export class QuotaService {
     // 2. 读取 ~/.grok/settings_cache.json
     const grokSettings = path.join(os.homedir(), '.grok', 'settings_cache.json');
     let defaultModelId = configDefaultModel || 'grok-4.7';
-    if (fs.existsSync(grokSettings)) {
+    if (await exists(grokSettings)) {
       try {
-        const raw = JSON.parse(fs.readFileSync(grokSettings, 'utf8'));
+        const raw = JSON.parse(await fs.promises.readFile(grokSettings, 'utf8'));
         const payload = typeof raw.payload === 'string' ? JSON.parse(raw.payload) : raw.payload;
         if (!configDefaultModel && payload?.settings?.default_model) {
           defaultModelId = payload.settings.default_model;
@@ -513,9 +526,9 @@ export class QuotaService {
 
     // 3. 查看 models_cache.json 获取友好名称与兜底 reasoning_effort
     const modelsCache = path.join(os.homedir(), '.grok', 'models_cache.json');
-    if (fs.existsSync(modelsCache)) {
+    if (await exists(modelsCache)) {
       try {
-        const mc = JSON.parse(fs.readFileSync(modelsCache, 'utf8'));
+        const mc = JSON.parse(await fs.promises.readFile(modelsCache, 'utf8'));
         const targetModel = mc.models?.[defaultModelId] || Object.values(mc.models || {})[0];
         if (targetModel?.info) {
           if (targetModel.info.name) model = targetModel.info.name;
@@ -533,15 +546,15 @@ export class QuotaService {
     return { model, effort };
   }
 
-  public getOpenCodeInfo(): { model: string; effort?: string } {
+  public async getOpenCodeInfo(): Promise<{ model: string; effort?: string }> {
     let model = 'Auto';
     let effort: string | undefined = undefined;
     if (process.env.OPENCODE_MODEL) model = process.env.OPENCODE_MODEL;
     if (process.env.OPENCODE_EFFORT) effort = process.env.OPENCODE_EFFORT;
     const opencodeConfig = path.join(os.homedir(), '.opencode', 'config.json');
-    if (fs.existsSync(opencodeConfig)) {
+    if (await exists(opencodeConfig)) {
       try {
-        const c = JSON.parse(fs.readFileSync(opencodeConfig, 'utf8'));
+        const c = JSON.parse(await fs.promises.readFile(opencodeConfig, 'utf8'));
         if (c.model) model = c.model;
         if (c.effort || c.reasoning_effort) effort = c.effort || c.reasoning_effort;
       } catch {}
@@ -552,36 +565,43 @@ export class QuotaService {
   private piSessionCache: { file: string; offset: number; pending: Buffer; state: { provider?: string; modelId?: string; thinkingLevel?: string } } | null = null;
 
   /** 找到最近修改的 pi 会话文件，取其中最后一条 model_change / thinking_level_change；pi 的 /model 只写会话文件，不改 settings.json。 */
-  private readPiSessionState(): { provider?: string; modelId?: string; thinkingLevel?: string } {
+  private piSessionPending: Promise<{ provider?: string; modelId?: string; thinkingLevel?: string }> | null = null;
+
+  private readPiSessionState() {
+    if (!this.piSessionPending) this.piSessionPending = this.loadPiSessionState().finally(() => { this.piSessionPending = null; });
+    return this.piSessionPending;
+  }
+
+  private async loadPiSessionState(): Promise<{ provider?: string; modelId?: string; thinkingLevel?: string }> {
     try {
       let latest: { file: string; mtime: number } | null = null;
-      for (const dir of fs.readdirSync(PI_SESSIONS_DIR)) {
+      for (const dir of await fs.promises.readdir(PI_SESSIONS_DIR)) {
         const dirPath = path.join(PI_SESSIONS_DIR, dir);
         let names: string[];
-        try { names = fs.readdirSync(dirPath); } catch { continue; }
+        try { names = await fs.promises.readdir(dirPath); } catch { continue; }
         for (const name of names) {
           if (!name.endsWith('.jsonl')) continue;
           const file = path.join(dirPath, name);
-          const mtime = fs.statSync(file).mtimeMs;
+          const mtime = (await fs.promises.stat(file)).mtimeMs;
           if (!latest || mtime > latest.mtime) latest = { file, mtime };
         }
       }
       if (!latest) return {};
       // 会话文件只追加：记住已读到的位置，之后只读新增的部分，避免长会话每次刷新都整份重读
       let cache = this.piSessionCache;
-      const size = fs.statSync(latest.file).size;
+      const size = (await fs.promises.stat(latest.file)).size;
       if (!cache || cache.file !== latest.file || size < cache.offset) {
         cache = { file: latest.file, offset: 0, pending: Buffer.alloc(0), state: {} };
         this.piSessionCache = cache;
       }
       if (size > cache.offset) {
         const chunk = Buffer.alloc(size - cache.offset);
-        const fd = fs.openSync(latest.file, 'r');
+        const fd = await fs.promises.open(latest.file, 'r');
         let read = 0;
         try {
-          read = fs.readSync(fd, chunk, 0, chunk.length, cache.offset);
+          ({ bytesRead: read } = await fd.read(chunk, 0, chunk.length, cache.offset));
         } finally {
-          fs.closeSync(fd);
+          await fd.close();
         }
         cache.offset += read;
         const data = Buffer.concat([cache.pending, chunk.subarray(0, read)]);
@@ -606,23 +626,23 @@ export class QuotaService {
   }
 
   /** 读取 pi 当前模型：优先取最近会话里的实际模型，没有会话时回退 settings.json 的 defaultModel；显示名取自 models.json。 */
-  public getPiInfo(): { model: string; effort?: string } {
+  public async getPiInfo(): Promise<{ model: string; effort?: string }> {
     let model = 'Auto';
     let effort: string | undefined = undefined;
     let provider: string | undefined;
     let modelId: string | undefined;
     try {
-      const s = JSON.parse(fs.readFileSync(PI_SETTINGS_FILE, 'utf8'));
+      const s = JSON.parse(await fs.promises.readFile(PI_SETTINGS_FILE, 'utf8'));
       if (typeof s.defaultModel === 'string' && s.defaultModel) { modelId = s.defaultModel; provider = s.defaultProvider; }
       if (typeof s.defaultThinkingLevel === 'string' && s.defaultThinkingLevel) effort = s.defaultThinkingLevel;
     } catch {}
-    const session = this.readPiSessionState();
+    const session = await this.readPiSessionState();
     if (session.modelId) { modelId = session.modelId; provider = session.provider; }
     if (session.thinkingLevel) effort = session.thinkingLevel;
     if (modelId) {
       model = modelId;
       try {
-        const providers = JSON.parse(fs.readFileSync(PI_MODELS_FILE, 'utf8')).providers || {};
+        const providers = JSON.parse(await fs.promises.readFile(PI_MODELS_FILE, 'utf8')).providers || {};
         const list: any[] = (provider && providers[provider]?.models) || [];
         const hit = list.find((m) => m.id === modelId);
         if (hit?.name) model = hit.name;
@@ -632,11 +652,11 @@ export class QuotaService {
   }
 
   /** 读取 agy 当前模型，settings.json 中形如 "Gemini 4 Hydrogen (Medium)"，括号内为推理等级。 */
-  public getAgyInfo(): { model: string; effort?: string } {
+  public async getAgyInfo(): Promise<{ model: string; effort?: string }> {
     let model = 'Auto';
     let effort: string | undefined = undefined;
     try {
-      const raw = JSON.parse(fs.readFileSync(AGY_SETTINGS_FILE, 'utf8')).model;
+      const raw = JSON.parse(await fs.promises.readFile(AGY_SETTINGS_FILE, 'utf8')).model;
       if (typeof raw === 'string' && raw.trim()) {
         const m = raw.trim().match(/^(.*?)\s*\(([^)]+)\)$/);
         if (m) {
@@ -650,35 +670,35 @@ export class QuotaService {
     return { model, effort };
   }
 
-  private getKimiCurrentModel(): string {
-    return this.getKimiInfo().model;
+  private async getKimiCurrentModel(): Promise<string> {
+    return (await this.getKimiInfo()).model;
   }
 
-  private getCodexCurrentModel(): string {
-    return this.getCodexInfo().model;
+  private async getCodexCurrentModel(): Promise<string> {
+    return (await this.getCodexInfo()).model;
   }
 
-  private getClaudeCurrentModel(): string {
-    return this.getClaudeInfo().model;
+  private async getClaudeCurrentModel(): Promise<string> {
+    return (await this.getClaudeInfo()).model;
   }
 
-  private getGrokCurrentModel(): string {
-    return this.getGrokInfo().model;
+  private async getGrokCurrentModel(): Promise<string> {
+    return (await this.getGrokInfo()).model;
   }
 
-  private getOpenCodeCurrentModel(): string {
-    return this.getOpenCodeInfo().model;
+  private async getOpenCodeCurrentModel(): Promise<string> {
+    return (await this.getOpenCodeInfo()).model;
   }
 
   /** key 为缓存键（默认账号是 'kimi'），home 为该账号的 KIMI_CODE_HOME；账号读取失败时额度记为未知，不借用默认账号的缓存 */
   private async fetchKimiQuota(key: string = 'kimi', home: string = KIMI_HOME_DEFAULT): Promise<QuotaData> {
     const isAccount = home !== KIMI_HOME_DEFAULT;
     const credPath = path.join(home, 'credentials', 'kimi-code.json');
-    const kimiInfo = this.getKimiInfo(home);
+    const kimiInfo = await this.getKimiInfo(home);
     const currentModel = kimiInfo.model;
     const currentEffort = kimiInfo.effort;
 
-    if (!fs.existsSync(credPath)) {
+    if (!await exists(credPath)) {
       return {
         cliId: 'kimi',
         cliName: 'Kimi Code',
@@ -695,7 +715,7 @@ export class QuotaService {
     }
 
     try {
-      const cred = JSON.parse(fs.readFileSync(credPath, 'utf8'));
+      const cred = JSON.parse(await fs.promises.readFile(credPath, 'utf8'));
       const token = cred.access_token;
       if (!token) {
         throw new Error(t('access_token 不存在'));
@@ -794,11 +814,11 @@ export class QuotaService {
   private async fetchCodexQuota(key: string = 'codex', home: string = CODEX_HOME_DEFAULT): Promise<QuotaData> {
     const isAccount = home !== CODEX_HOME_DEFAULT;
     const unknownPct = isAccount ? -1 : 100;
-    const codexInfo = this.getCodexInfo(home);
+    const codexInfo = await this.getCodexInfo(home);
     const currentModel = codexInfo.model;
     const currentEffort = codexInfo.effort;
     const codexSessionsDir = path.join(home, 'sessions');
-    if (!fs.existsSync(codexSessionsDir)) {
+    if (!await exists(codexSessionsDir)) {
       return {
         cliId: 'codex',
         cliName: 'Codex',
@@ -818,11 +838,11 @@ export class QuotaService {
     try {
       // 会话按 YYYY/MM/DD 目录存放：由新到旧遍历，凑够 10 个文件即停，避免每次全量扫描
       const MAX_SESSION_FILES = 10;
-      const findRecentJsonl = (dir: string, depth = 0): string[] => {
+      const findRecentJsonl = async (dir: string, depth = 0): Promise<string[]> => {
         if (depth > 4) return [];
         let entries: fs.Dirent[];
         try {
-          entries = fs.readdirSync(dir, { withFileTypes: true });
+          entries = await fs.promises.readdir(dir, { withFileTypes: true });
         } catch {
           return [];
         }
@@ -833,36 +853,16 @@ export class QuotaService {
         const subDirs = entries.filter((e) => e.isDirectory()).map((e) => e.name).sort().reverse();
         for (const name of subDirs) {
           if (res.length >= MAX_SESSION_FILES) break;
-          res.push(...findRecentJsonl(path.join(dir, name), depth + 1));
+          res.push(...await findRecentJsonl(path.join(dir, name), depth + 1));
         }
         return res;
       };
 
-      // 额度信息位于文件末尾，只读取尾部 256 KiB，避免整文件读入
-      const TAIL_BYTES = 256 * 1024;
-      const readTail = (file: string): string => {
-        const fd = fs.openSync(file, 'r');
-        try {
-          const size = fs.fstatSync(fd).size;
-          const length = Math.min(size, TAIL_BYTES);
-          const buf = Buffer.alloc(length);
-          fs.readSync(fd, buf, 0, length, size - length);
-          return buf.toString('utf8');
-        } finally {
-          fs.closeSync(fd);
-        }
-      };
-
-      const files = findRecentJsonl(codexSessionsDir);
-      const filesWithStats = files
-        .map((f) => {
-          try {
-            return { path: f, mtime: fs.statSync(f).mtimeMs };
-          } catch {
-            return { path: f, mtime: 0 };
-          }
-        })
-        .sort((a, b) => b.mtime - a.mtime);
+      const files = await findRecentJsonl(codexSessionsDir);
+      const filesWithStats = (await Promise.all(files.map(async (file) => {
+        try { const stat = await fs.promises.stat(file); return { path: file, mtime: stat.mtimeMs, size: stat.size }; }
+        catch { return { path: file, mtime: 0, size: 0 }; }
+      }))).sort((a, b) => b.mtime - a.mtime);
 
       let foundRateLimits: any = null;
       let turnContext: { model?: string; effort?: string; at: number } | null = null;
@@ -870,34 +870,11 @@ export class QuotaService {
 
       for (const item of filesWithStats.slice(0, 10)) {
         try {
-          const content = readTail(item.path);
-          const lines = content.split('\n');
-          for (let i = lines.length - 1; i >= 0; i--) {
-            const line = lines[i].trim();
-            if (!line) continue;
-            if (line.includes('"turn_context"') && !turnContext) {
-              try {
-                const parsed = JSON.parse(line);
-                if (parsed?.payload?.model) {
-                  turnContext = {
-                    model: parsed.payload.model,
-                    effort: typeof parsed.payload.effort === 'string' ? parsed.payload.effort : undefined,
-                    at: Date.parse(parsed.timestamp) || item.mtime,
-                  };
-                }
-              } catch {}
-            }
-            if (line.includes('"rate_limits"') && !foundRateLimits) {
-              try {
-                const parsed = JSON.parse(line);
-                const rl = parsed?.payload?.rate_limits;
-                if (rl && (rl.primary || rl.secondary)) {
-                  foundRateLimits = rl;
-                  if (rl.plan_type) planType = rl.plan_type.toUpperCase();
-                }
-              } catch {}
-            }
-            if (foundRateLimits && turnContext) break;
+          const tail = await this.readCodexTail(item.path, item.mtime, item.size);
+          if (!turnContext) turnContext = tail.context;
+          if (!foundRateLimits && tail.rateLimits) {
+            foundRateLimits = tail.rateLimits;
+            if (foundRateLimits.plan_type) planType = foundRateLimits.plan_type.toUpperCase();
           }
           if (foundRateLimits && turnContext) break;
         } catch {}
@@ -907,13 +884,8 @@ export class QuotaService {
       let tokens: number | undefined;
       if (filesWithStats[0]) {
         try {
-          for (const line of readTail(filesWithStats[0].path).split('\n').reverse()) {
-            if (!line.includes('"total_token_usage"')) continue;
-            try {
-              const total = JSON.parse(line)?.payload?.info?.total_token_usage?.total_tokens;
-              if (typeof total === 'number') { tokens = total; break; }
-            } catch {}
-          }
+          const item = filesWithStats[0];
+          tokens = (await this.readCodexTail(item.path, item.mtime, item.size)).tokens;
         } catch {}
       }
 
@@ -923,7 +895,7 @@ export class QuotaService {
       let effort = currentEffort;
       if (turnContext) {
         let configMtime = 0;
-        try { configMtime = fs.statSync(path.join(home, 'config.toml')).mtimeMs; } catch {}
+        try { configMtime = (await fs.promises.stat(path.join(home, 'config.toml'))).mtimeMs; } catch {}
         if (turnContext.at > configMtime || model === 'Auto') {
           model = turnContext.model || model;
           effort = turnContext.effort || effort;
@@ -996,6 +968,46 @@ export class QuotaService {
     }
   }
 
+  private codexTailCache = new Map<string, {
+    mtimeMs: number; size: number; tokens?: number; rateLimits: any;
+    context: { model?: string; effort?: string; at: number } | null;
+  }>();
+
+  private async readCodexTail(file: string, mtimeMs: number, size: number) {
+    const cached = this.codexTailCache.get(file);
+    if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
+      this.codexTailCache.delete(file);
+      this.codexTailCache.set(file, cached);
+      return cached;
+    }
+    const result: NonNullable<typeof cached> = { mtimeMs, size, rateLimits: null, context: null };
+    const handle = await fs.promises.open(file, 'r');
+    let content: string;
+    try {
+      const length = Math.min(size, 256 * 1024);
+      const buffer = Buffer.alloc(length);
+      const { bytesRead } = await handle.read(buffer, 0, length, size - length);
+      content = buffer.subarray(0, bytesRead).toString('utf8');
+    } finally { await handle.close(); }
+    for (const line of content.split('\n').reverse()) {
+      if (!line.includes('"turn_context"') && !line.includes('"rate_limits"') && !line.includes('"total_token_usage"')) continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (!result.context && line.includes('"turn_context"') && parsed?.payload?.model) {
+          result.context = { model: parsed.payload.model, effort: typeof parsed.payload.effort === 'string' ? parsed.payload.effort : undefined, at: Date.parse(parsed.timestamp) || mtimeMs };
+        }
+        const limits = parsed?.payload?.rate_limits;
+        if (!result.rateLimits && limits && (limits.primary || limits.secondary)) result.rateLimits = limits;
+        const tokens = parsed?.payload?.info?.total_token_usage?.total_tokens;
+        if (result.tokens === undefined && typeof tokens === 'number') result.tokens = tokens;
+      } catch {}
+    }
+    this.codexTailCache.delete(file);
+    this.codexTailCache.set(file, result);
+    while (this.codexTailCache.size > 50) this.codexTailCache.delete(this.codexTailCache.keys().next().value!);
+    return result;
+  }
+
   private claudeTokenCache: { file: string; offset: number; pending: Buffer; perMessage: Map<string, number>; total: number } | null = null;
 
   /**
@@ -1003,20 +1015,31 @@ export class QuotaService {
    * 同一条 assistant 消息会按内容块写成多行（usage 相同或递增），按 message.id + requestId 去重并以最后一行为准。
    * 只统计主会话记录，不含子代理的独立记录；会话文件只追加，按偏移增量读取并分片，避免大文件一次读入。
    */
-  private readClaudeSessionTokens(file: string): number | undefined {
+  private claudeTokenPending: Promise<number | undefined> | null = null;
+
+  private readClaudeSessionTokens(file: string): Promise<number | undefined> {
+    if (this.claudeTokenPending) {
+      return this.claudeTokenPending.then(() => this.claudeTokenCache?.file === file
+        ? this.claudeTokenCache.total : this.readClaudeSessionTokens(file));
+    }
+    this.claudeTokenPending = this.loadClaudeSessionTokens(file).finally(() => { this.claudeTokenPending = null; });
+    return this.claudeTokenPending;
+  }
+
+  private async loadClaudeSessionTokens(file: string): Promise<number | undefined> {
     try {
-      const size = fs.statSync(file).size;
+      const size = (await fs.promises.stat(file)).size;
       let cache = this.claudeTokenCache;
       if (!cache || cache.file !== file || size < cache.offset) {
         cache = { file, offset: 0, pending: Buffer.alloc(0), perMessage: new Map(), total: 0 };
         this.claudeTokenCache = cache;
       }
-      const SLICE = 8 * 1024 * 1024;
-      const fd = fs.openSync(file, 'r');
+      const SLICE = 1024 * 1024;
+      const fd = await fs.promises.open(file, 'r');
       try {
         while (cache.offset < size) {
           const chunk = Buffer.alloc(Math.min(SLICE, size - cache.offset));
-          const read = fs.readSync(fd, chunk, 0, chunk.length, cache.offset);
+          const { bytesRead: read } = await fd.read(chunk, 0, chunk.length, cache.offset);
           if (read <= 0) break;
           cache.offset += read;
           const data = Buffer.concat([cache.pending, chunk.subarray(0, read)]);
@@ -1037,7 +1060,7 @@ export class QuotaService {
           }
         }
       } finally {
-        fs.closeSync(fd);
+        await fd.close();
       }
       return cache.total;
     } catch {
@@ -1047,7 +1070,7 @@ export class QuotaService {
 
   /** configDir 缺省为默认账号；非默认账号只显示模型与推理等级，额度来自共用的 statusLine 快照，无法区分账号，故显示「--」 */
   private async fetchClaudeQuota(configDir?: string): Promise<QuotaData> {
-    const { model, effort } = this.getClaudeInfo(configDir);
+    const { model, effort } = await this.getClaudeInfo(configDir);
     const base: QuotaData = {
       cliId: 'claude',
       cliName: 'Claude Code',
@@ -1066,7 +1089,7 @@ export class QuotaService {
     // 额度来源：~/.claude/oneai-statusline.js 通过 Claude Code statusLine 写入的快照
     let data: any;
     try {
-      data = JSON.parse(fs.readFileSync(CLAUDE_STATUS_FILE, 'utf8'));
+      data = JSON.parse(await fs.promises.readFile(CLAUDE_STATUS_FILE, 'utf8'));
     } catch {
       return { ...base, message: t('等待 Claude Code 会话数据') };
     }
@@ -1085,7 +1108,7 @@ export class QuotaService {
 
     return {
       ...base,
-      tokens: typeof data.transcript_path === 'string' ? this.readClaudeSessionTokens(data.transcript_path) : undefined,
+      tokens: typeof data.transcript_path === 'string' ? await this.readClaudeSessionTokens(data.transcript_path) : undefined,
       costUsd: typeof data.cost?.total_cost_usd === 'number' ? data.cost.total_cost_usd : undefined,
       fiveHourPercent: five.pct,
       fiveHourResetsIn: five.resetMs ? formatDuration(five.resetMs - now) : '--',
@@ -1097,7 +1120,7 @@ export class QuotaService {
   }
 
   private async fetchOpenCodeQuota(): Promise<QuotaData> {
-    const opencodeInfo = this.getOpenCodeInfo();
+    const opencodeInfo = await this.getOpenCodeInfo();
     return {
       cliId: 'opencode',
       cliName: 'OpenCode',
@@ -1114,8 +1137,8 @@ export class QuotaService {
   }
 
   // pi 是通用客户端，没有 5h / 7d 额度，只展示当前默认模型。
-  private fetchPiQuota(): QuotaData {
-    const piInfo = this.getPiInfo();
+  private async fetchPiQuota(): Promise<QuotaData> {
+    const piInfo = await this.getPiInfo();
     return {
       cliId: 'pi',
       cliName: 'Pi',
@@ -1136,7 +1159,7 @@ export class QuotaService {
    * 不读取 agy 的凭据。单次约 5 秒，故独立节流并避免并发重复调用。
    */
   private async fetchAgyQuota(): Promise<QuotaData> {
-    const agyInfo = this.getAgyInfo();
+    const agyInfo = await this.getAgyInfo();
     const base = {
       cliId: 'agy',
       cliName: 'Antigravity',
@@ -1208,9 +1231,9 @@ export class QuotaService {
     };
   }
 
-  private runAgyUsage(): Promise<string> {
+  private async runAgyUsage(): Promise<string> {
     const local = path.join(os.homedir(), '.local', 'bin', 'agy.exe');
-    const bin = fs.existsSync(local) ? local : 'agy';
+    const bin = await exists(local) ? local : 'agy';
     return new Promise((resolve, reject) => {
       execFile(bin, ['-p', '/usage'], { cwd: os.homedir(), windowsHide: true, timeout: 30000 }, (err, stdout) => {
         if (err) return reject(new Error(err.message.split('\n')[0]));
@@ -1222,11 +1245,11 @@ export class QuotaService {
 
   private async fetchGrokQuota(): Promise<QuotaData> {
     try {
-      const grokInfo = this.getGrokInfo();
+      const grokInfo = await this.getGrokInfo();
       const hasApiKey = !!(process.env.XAI_API_KEY || process.env.GROK_API_KEY);
       const xaiDir = path.join(os.homedir(), '.xai');
       const grokDir = path.join(os.homedir(), '.grok');
-      const hasConfig = fs.existsSync(xaiDir) || fs.existsSync(grokDir);
+      const hasConfig = await exists(xaiDir) || await exists(grokDir);
 
       return {
         cliId: 'grok',

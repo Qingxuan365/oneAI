@@ -53,6 +53,11 @@ function createWindow() {
     autoHideMenuBar: true,
   });
 
+  // 应用只有一个页面：文件拖到终端以外的区域时 Chromium 会把窗口导航到该文件，整个界面被替换。
+  // 一律拦截页面跳转（重新加载不经过 will-navigate，不受影响），新窗口也不打开（链接由 shell:open-external 处理）
+  mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
   mainWindow.on('maximize', () => mainWindow?.webContents.send('window:maximized-change', true));
   mainWindow.on('unmaximize', () => mainWindow?.webContents.send('window:maximized-change', false));
 
@@ -145,9 +150,7 @@ function setupIPC() {
     return ptyManager.getSessionBuffer(id);
   });
 
-  ipcMain.handle('terminal:write', async (_event, { id, data }) => {
-    ptyManager.writeSession(id, data);
-  });
+  ipcMain.handle('terminal:write', async (_event, { id, data }) => ptyManager.writeSession(id, data));
 
   ipcMain.handle('terminal:resize', async (_event, { id, cols, rows }) => {
     ptyManager.resizeSession(id, cols, rows);
@@ -294,7 +297,23 @@ function setupIPC() {
   });
 }
 
+/** 粘贴截图时存入临时目录的 paste_<时间戳>.png 只在粘贴当下有用：启动时删掉 7 天前的，只动这个命名格式的文件 */
+async function cleanupPastedImages(): Promise<void> {
+  const dir = path.join(app.getPath('temp'), 'OneAI_Images');
+  const cutoff = Date.now() - 7 * 24 * 3600_000;
+  let names: string[];
+  try { names = await fs.promises.readdir(dir); } catch { return; }
+  for (const name of names) {
+    if (!/^paste_\d+\.png$/.test(name)) continue;
+    const file = path.join(dir, name);
+    try {
+      if ((await fs.promises.stat(file)).mtimeMs < cutoff) await fs.promises.unlink(file);
+    } catch { /* 文件正被占用或已删除时跳过 */ }
+  }
+}
+
 app.whenReady().then(() => {
+  void cleanupPastedImages();
   // 去掉 Electron 默认菜单：它的 Ctrl+W 关窗、Ctrl+R 刷新与 CLI 常用键冲突，按 Alt 还会弹出菜单栏抢走焦点。
   // 开发模式保留，方便用 Ctrl+Shift+I 打开开发者工具。
   if (!process.env.VITE_DEV_SERVER_URL) Menu.setApplicationMenu(null);

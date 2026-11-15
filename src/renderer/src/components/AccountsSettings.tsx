@@ -9,6 +9,8 @@ interface AccountsSettingsProps {
   accounts: Account[];
   onChange: (accounts: Account[]) => void;
   onLogin: (account: Account) => void;
+  /** 各账号当前的任务数，删除确认时提示 */
+  taskCounts?: Record<string, number>;
 }
 
 type StatusEntry = LoginStatus | { error: string } | 'checking';
@@ -37,7 +39,7 @@ function StatusBadge({ entry }: { entry: StatusEntry | undefined }) {
 }
 
 /** 设置 → 账号：为 Codex / Claude Code 维护多个账号。每个账号是一个独立的配置目录，登录由 CLI 自己完成。 */
-export const AccountsSettings: React.FC<AccountsSettingsProps> = ({ isActive, accounts, onChange, onLogin }) => {
+export const AccountsSettings: React.FC<AccountsSettingsProps> = ({ isActive, accounts, onChange, onLogin, taskCounts = {} }) => {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -155,7 +157,7 @@ export const AccountsSettings: React.FC<AccountsSettingsProps> = ({ isActive, ac
                   </span>
                   {confirmDeleteId === account.id ? (
                     <span className="flex shrink-0 items-center gap-1.5">
-                      <span className="text-xs text-danger">{t('只删除此配置，目录与凭据保留')}</span>
+                      <span className="text-xs text-danger">{taskCounts[account.id] ? t('只删除此配置，目录与凭据保留；使用此账号的 {n} 个任务将无法再启动', { n: taskCounts[account.id] }) : t('只删除此配置，目录与凭据保留')}</span>
                       <button type="button" onClick={() => remove(account)} className="btn-danger px-2.5 py-1 text-xs">{t('确认删除')}</button>
                       <button type="button" onClick={() => setConfirmDeleteId(null)} className="btn-secondary px-2.5 py-1 text-xs">{t('取消')}</button>
                     </span>

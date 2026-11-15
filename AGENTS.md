@@ -38,6 +38,7 @@ d:/GitHub/OneAI/
 │   │   ├── quota-service.ts   # 大模型配额、模型与推理等级、会话累计 Tokens / Cost 读取及配置热监听
 │   │   ├── system-stats.ts    # 整机 CPU / 内存 / 网速采样（网速读物理网卡，常驻 PowerShell），每 2 秒推送给顶栏
 │   │   ├── task-summary.ts    # 读取任务对应会话（Claude / Codex / Kimi 的本机会话文件）里最近一条用户消息，供侧栏任务行第二行
+│   │   ├── model-format.ts    # Claude 模型 id 转显示名（无副作用，额度与用量共用）
 │   │   ├── usage-stats.ts     # 本周用量：流式解析 Claude Code / Codex（含 archived_sessions 与 .jsonl.zst，用 fzstd 解压）/ Antigravity / Pi 本机会话记录，按 CLI × 账号 × 模型汇总请求数与 Tokens（账号来自设置里的账号配置目录，默认目录归「默认账号」），并给出近 26 周每日请求数（按文件 mtime + 大小缓存解析结果）
 │   │   ├── git-branch.ts      # 读取文件夹所在 Git 仓库的当前分支（只读 .git/HEAD，不执行 git）
 │   │   ├── account-env.ts     # 多账号：各 CLI 的配置目录环境变量、路径校验与目录创建，只创建目录不读凭据
@@ -57,6 +58,7 @@ d:/GitHub/OneAI/
 │   └── renderer/              # React 前端渲染进程
 │       └── src/
 │           ├── main.tsx
+│           ├── dropGuard.ts              # 拦截拖到终端以外区域的文件，避免窗口被导航到该文件
 │           ├── App.tsx                   # 全局状态、工作区持久化与会话调度
 │           ├── index.css                 # 语义颜色 token、各主题配色变量、通用控件类（icon-btn / btn-* / input / option）与顶栏容器查询断点
 │           ├── themes.ts                 # 主题明暗基调与设置页主题选项（浅 / 深、护眼、编辑器三组）；新增主题须同步 index.css、index.html 首帧脚本的主题白名单与 TerminalViewport 终端配色

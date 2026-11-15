@@ -97,10 +97,20 @@ async function lastClaudePrompt(file: string, size: number): Promise<string | nu
   return null;
 }
 
+const claudeDirectoryCache = new Map<string, { mtimeMs: number; names: string[] }>();
+
 async function claudeSessions(home: string, cwd: string): Promise<SessionInfo[]> {
   const dir = path.join(home, 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'));
   let names: string[];
-  try { names = (await fs.promises.readdir(dir)).filter((name) => name.endsWith('.jsonl')); } catch { return []; }
+  try {
+    const stat = await fs.promises.stat(dir);
+    const cached = claudeDirectoryCache.get(dir);
+    if (cached && cached.mtimeMs === stat.mtimeMs) names = cached.names;
+    else {
+      names = (await fs.promises.readdir(dir)).filter((name) => name.endsWith('.jsonl'));
+      claudeDirectoryCache.set(dir, { mtimeMs: stat.mtimeMs, names });
+    }
+  } catch { claudeDirectoryCache.delete(dir); return []; }
   const stats = (await Promise.all(names.map(async (name) => ({ name, stat: await statOf(path.join(dir, name)) }))))
     .filter((item): item is { name: string; stat: fs.Stats } => item.stat !== null)
     .sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs)
@@ -145,7 +155,7 @@ async function codexSessions(home: string, cwd: string, earliest: number): Promi
     }
   }
   const found: SessionInfo[] = [];
-  for (const file of files.slice(-200)) {
+  for (const file of files.slice(0, 200)) {
     const stat = await statOf(file);
     if (!stat || stat.mtimeMs < earliest - SKEW_MS) continue;
     const meta = await cached(`${file}#meta`, stat, async () => {

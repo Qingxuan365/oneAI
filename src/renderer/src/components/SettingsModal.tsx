@@ -7,6 +7,7 @@ import { LANGUAGES, T, dateLocale, t } from '../i18n';
 import { AccountsSettings } from './AccountsSettings';
 import { CliSettings } from './CliSettings';
 import { MusicStreamsSettings } from './MusicStreamsSettings';
+import { TERMINAL_FONT_FAMILY } from './TerminalViewport';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -21,6 +22,8 @@ interface SettingsModalProps {
   installed: Record<string, boolean> | null;
   onCustomClisChange: (customClis: CustomCli[]) => void;
   onRedetectClis: () => void | Promise<void>;
+  /** 各账号当前的任务数（键为账号 id） */
+  accountTaskCounts?: Record<string, number>;
 }
 
 type TabId = 'appearance' | 'terminal' | 'general' | 'accounts' | 'clis' | 'time' | 'shortcuts';
@@ -79,11 +82,13 @@ const SHORTCUTS: { title: string; items: [string, string][] }[] = [
     items: [
       ['Ctrl + Shift + F', T('搜索终端内容')],
       ['Ctrl + Shift + K', T('清空屏幕与历史缓存')],
-      ['Shift + Enter', T('在 AI CLI 输入框内换行')],
+      ['Shift + Enter', T('在 AI CLI 输入框内换行（系统终端与自定义 CLI 不改写）')],
       [T('Ctrl + 单击'), T('打开终端里的网址或文件路径')],
       ['Ctrl + + / - / 0', T('放大 / 缩小 / 还原终端字号')],
       ['Ctrl + C', T('有选中文本时复制，否则中断命令')],
-      [T('Ctrl + V / 右键'), T('粘贴文本或图片路径')],
+      ['Ctrl + Shift + C / Ctrl + Insert', T('复制选中文本')],
+      ['Ctrl + V / Shift + Insert', T('粘贴文本或图片路径')],
+      [T('右键'), T('有选中文本时复制，否则粘贴')],
     ],
   },
 ];
@@ -170,6 +175,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   installed,
   onCustomClisChange,
   onRedetectClis,
+  accountTaskCounts,
 }) => {
   const [tab, setTab] = useState<TabId>('appearance');
   const update = (patch: Partial<AppSettings>) => onUpdateSettings({ ...settings, ...patch });
@@ -196,7 +202,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             type="button"
             onClick={onResetDefault}
             className="mr-auto flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-fg-subtle transition-colors hover:bg-hover hover:text-fg"
-            title={t('还原为：主题随系统、终端 15px、竖线光标、舒适缩放；账号、自定义 CLI 与在线音乐保留')}
+            title={t('还原外观、终端、时间、提醒与音乐播放器的设置；账号、自定义 CLI、在线音乐和界面语言保留')}
           >
             <RotateCcw size={12} />
             <span>{t('恢复默认设置')}</span>
@@ -206,13 +212,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       )}
     >
       <div className="flex h-[60vh] min-h-0 select-none">
-        <div role="tablist" aria-label={t('设置分类')} aria-orientation="vertical" className="w-36 shrink-0 space-y-0.5 border-r border-line bg-surface p-2">
+        {/* 竖向选项卡：只有当前页可 Tab 聚焦，上下方向键与 Home / End 切换（WAI-ARIA tabs 模式） */}
+        <div role="tablist" aria-label={t('设置分类')} aria-orientation="vertical" className="w-36 shrink-0 space-y-0.5 border-r border-line bg-surface p-2"
+          onKeyDown={(e) => {
+            const index = TABS.findIndex((item) => item.id === tab);
+            const next = e.key === 'ArrowDown' ? (index + 1) % TABS.length
+              : e.key === 'ArrowUp' ? (index - 1 + TABS.length) % TABS.length
+                : e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : -1;
+            if (next < 0) return;
+            e.preventDefault();
+            setTab(TABS[next].id);
+            document.getElementById(`settings-tab-${TABS[next].id}`)?.focus();
+          }}>
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
+              id={`settings-tab-${id}`}
               type="button"
               role="tab"
               aria-selected={tab === id}
+              aria-controls="settings-tabpanel"
+              tabIndex={tab === id ? 0 : -1}
               onClick={() => setTab(id)}
               className={`flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-ui transition-colors ${tab === id ? 'bg-selected font-medium text-fg' : 'text-fg-subtle hover:bg-hover hover:text-fg'}`}
             >
@@ -222,7 +242,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           ))}
         </div>
 
-        <div role="tabpanel" className="min-w-0 flex-1 space-y-6 overflow-y-auto p-5">
+        <div role="tabpanel" id="settings-tabpanel" aria-labelledby={`settings-tab-${tab}`} className="min-w-0 flex-1 space-y-6 overflow-y-auto p-5">
           {tab === 'appearance' && (
             <>
               <Section title={t('语言')} hint="Language">
@@ -333,7 +353,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     style={{
                       fontSize: `${settings.terminalFontSize}px`,
                       lineHeight: settings.terminalLineHeight,
-                      fontFamily: 'Consolas, "Fira Code", monospace',
+                      fontFamily: TERMINAL_FONT_FAMILY,
                     }}
                     className="select-text text-fg-muted"
                   >
@@ -400,7 +420,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div className={row}>
                   <span>
                     <span className="block">{t('提醒时长')}</span>
-                    <span className="block text-xs text-fg-faint">{t('从打开应用起算，默认 1 小时；可填 1 到 12 的整数')}</span>
+                    <span className="block text-xs text-fg-faint">{t('从打开应用起算，每隔设定的小时数提醒一次，默认 1 小时；可填 1 到 12 的整数')}</span>
                   </span>
                   <span className="flex shrink-0 items-center gap-1.5">
                     <button type="button" onClick={() => setReminderHours(reminderHours - 1)} disabled={reminderHours <= 1} className="icon-btn border border-line-strong bg-canvas" title={t('减少 1 小时')} aria-label={t('提醒时长减少 1 小时')}>
@@ -462,6 +482,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               accounts={settings.accounts}
               onChange={(accounts) => update({ accounts })}
               onLogin={onLoginAccount}
+              taskCounts={accountTaskCounts}
             />
           )}
 

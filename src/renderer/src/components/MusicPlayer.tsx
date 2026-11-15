@@ -13,6 +13,8 @@ interface Track {
 interface MusicPlayerProps {
   directory: string;
   streams: MusicStream[];
+  /** 侧栏折叠时隐藏但不卸载，播放不中断 */
+  hidden?: boolean;
 }
 
 // 声波：BAR_COUNT 根竖条以中间为轴左右对称，高度从中心向两侧衰减；BAR_HEIGHT 为竖条最大高度（px）
@@ -21,7 +23,7 @@ const BAR_HEIGHT = 16;
 const BAR_MIN = 2.5;
 const BAR_MID = (BAR_COUNT - 1) / 2;
 
-export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams }) => {
+export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams, hidden = false }) => {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -93,6 +95,8 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams }) 
   }, []);
 
   const drawBars = useCallback(() => {
+    // 切歌时 play 可能连续触发而中间没有 pause：先停掉上一轮，保证同一时间只有一个动画循环
+    cancelAnimationFrame(rafRef.current);
     const analyser = audioRef.current === localAudioRef.current ? analyserRef.current : null;
     const data = new Uint8Array(analyser ? analyser.frequencyBinCount : 0);
     const step = () => {
@@ -237,7 +241,7 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams }) 
   if (tracks.length === 0) return null;
 
   return (
-    <div role="group" aria-label={t('音乐播放器')} className="space-y-1.5 border-t border-line px-3 py-2 text-xs text-fg-muted">
+    <div role="group" aria-label={t('音乐播放器')} hidden={hidden} className="space-y-1.5 border-t border-line px-3 py-2 text-xs text-fg-muted">
       {/* 第一行：曲名与播放控制 */}
       <div className="flex items-center gap-1.5">
         {playing ? (

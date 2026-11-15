@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { Decompress as ZstdDecompress } from 'fzstd';
-import { formatClaudeModel, quotaService } from './quota-service';
+import { quotaService } from './quota-service';
+import { formatClaudeModel } from './model-format';
 import { isAccountCli, resolveConfigDir } from './account-env';
 import { t } from './i18n';
 
@@ -259,7 +260,10 @@ async function parsePi(file: string): Promise<Entry[]> {
   return entries;
 }
 
+/** 额度服务读取模型名是异步的：统计开始前先读出各 Codex 配置目录与 agy 的当前模型，作为缺少模型字段时的兜底 */
 async function collectSources(accounts: UsageAccountRef[]): Promise<FileSource[]> {
+  const codexModels = new Map<string, string>();
+  const agyModel = (await quotaService.getAgyInfo()).model;
   const valid = accounts.filter((account) => isAccountCli(account?.cliId));
   const sources: FileSource[] = [];
   for (const { dir, id, name } of accountDirs(path.join(home, '.claude'), 'claude', valid)) {
@@ -268,10 +272,11 @@ async function collectSources(accounts: UsageAccountRef[]): Promise<FileSource[]
     }
   }
   for (const { dir, id, name } of accountDirs(path.join(home, '.codex'), 'codex', valid)) {
+    codexModels.set(dir, (await quotaService.getCodexInfo(dir)).model);
     // Codex 桌面应用的会话在 archived_sessions；sessions 里较新的主要是自动审查子会话，较旧的已压缩为 .zst
     for (const sub of ['sessions', 'archived_sessions']) {
       for (const file of await listJsonl(path.join(dir, sub))) {
-        sources.push({ cliId: 'codex', accountId: id, accountName: name, file, fallbackModel: () => quotaService.getCodexInfo(dir).model });
+        sources.push({ cliId: 'codex', accountId: id, accountName: name, file, fallbackModel: () => codexModels.get(dir) ?? 'Auto' });
       }
     }
   }
@@ -285,7 +290,7 @@ async function collectSources(accounts: UsageAccountRef[]): Promise<FileSource[]
       accountId: DEFAULT_ACCOUNT.id,
       accountName: DEFAULT_ACCOUNT.name,
       file: path.join(AGY_ROOT, 'brain', entry.name, '.system_generated', 'logs', 'transcript_full.jsonl'),
-      fallbackModel: () => stripEffort(quotaService.getAgyInfo().model),
+      fallbackModel: () => stripEffort(agyModel),
     });
   }
   // Pi 没有多账号，统一归默认账号

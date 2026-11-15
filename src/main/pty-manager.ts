@@ -23,11 +23,74 @@ interface SessionBuffer {
 const MAX_SESSION_BUFFER_LENGTH = 2 * 1024 * 1024;
 const TARGET_BUFFER_CHUNK_LENGTH = 8 * 1024;
 
+const BATCH_WINDOW_MS = 8;
+
+/**
+ * 按会话合并 PTY 输出再发 IPC。先发一次再合并：距上次发送已超过合并窗口的数据立即发出，
+ * 打字回显不额外等待；只有窗口内连续到达的数据才攒成一条，减少大量输出时的 IPC 次数。
+ */
+export class PtyOutputBatcher {
+  private pending = new Map<string, { chunks: string[]; bytes: number; timer: NodeJS.Timeout }>();
+  private lastSent = new Map<string, number>();
+
+  constructor(private send: (id: string, data: string) => void) {}
+
+  public push(id: string, data: string): void {
+    const limit = 256 * 1024;
+    const now = Date.now();
+    if (!this.pending.has(id) && now - (this.lastSent.get(id) ?? 0) >= BATCH_WINDOW_MS && data.length <= 64 * 1024) {
+      this.lastSent.set(id, now);
+      this.send(id, data);
+      return;
+    }
+    for (let offset = 0; offset < data.length;) {
+      let end = Math.min(offset + 64 * 1024, data.length);
+      // Keep UTF-16 surrogate pairs intact when splitting a large PTY callback.
+      if (end < data.length && /[\uD800-\uDBFF]/.test(data[end - 1])) end--;
+      const chunk = data.slice(offset, end);
+      offset = end;
+      const bytes = Buffer.byteLength(chunk);
+      let batch = this.pending.get(id);
+      if (batch && batch.bytes + bytes > limit) {
+        this.flush(id);
+        batch = undefined;
+      }
+      if (!batch) {
+        batch = { chunks: [], bytes: 0, timer: setTimeout(() => this.flush(id), BATCH_WINDOW_MS) };
+        this.pending.set(id, batch);
+      }
+      batch.chunks.push(chunk);
+      batch.bytes += bytes;
+      if (batch.bytes >= limit) this.flush(id);
+    }
+  }
+
+  public flush(id: string): void {
+    const batch = this.pending.get(id);
+    if (!batch) return;
+    clearTimeout(batch.timer);
+    this.pending.delete(id);
+    this.lastSent.set(id, Date.now());
+    this.send(id, batch.chunks.join(''));
+  }
+
+  /** 会话结束后丢弃发送时间记录 */
+  public forget(id: string): void {
+    this.flush(id);
+    this.lastSent.delete(id);
+  }
+}
+
 export class PtyManager {
   private sessions: Map<string, pty.IPty> = new Map();
   private sessionOptions: Map<string, CreateSessionOptions> = new Map();
   private dataBuffers: Map<string, SessionBuffer> = new Map();
   private mainWindow: BrowserWindow | null = null;
+  private output = new PtyOutputBatcher((id, data) => {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('terminal:data', { id, data });
+    }
+  });
 
   constructor() {}
 
@@ -45,6 +108,7 @@ export class PtyManager {
   }
 
   public clearSessionBuffer(id: string) {
+    this.output.flush(id);
     this.dataBuffers.set(id, { chunks: [], length: 0 });
   }
 
@@ -191,15 +255,13 @@ export class PtyManager {
       ptyProcess.onData((data: string) => {
         if (this.sessions.get(id) !== ptyProcess) return;
         this.appendSessionBuffer(id, data);
-
-        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-          this.mainWindow.webContents.send('terminal:data', { id, data });
-        }
+        this.output.push(id, data);
       });
 
       // 监听进程退出
       ptyProcess.onExit(({ exitCode }) => {
         if (this.sessions.get(id) !== ptyProcess) return;
+        this.output.forget(id);
         console.log(`[PTY] Session ${id} exited with code ${exitCode}`);
         this.sessions.delete(id);
         if (this.mainWindow && !this.mainWindow.isDestroyed()) {
@@ -214,11 +276,12 @@ export class PtyManager {
     }
   }
 
-  public writeSession(id: string, data: string) {
+  /** 返回是否写入成功；会话不存在（已退出或尚未启动）时返回 false，由界面提示用户 */
+  public writeSession(id: string, data: string): boolean {
     const session = this.sessions.get(id);
-    if (session) {
-      session.write(data);
-    }
+    if (!session) return false;
+    session.write(data);
+    return true;
   }
 
   public resizeSession(id: string, cols: number, rows: number) {
@@ -238,6 +301,7 @@ export class PtyManager {
   }
 
   public killSession(id: string) {
+    this.output.flush(id);
     const session = this.sessions.get(id);
     this.sessions.delete(id);
     if (session) {
@@ -252,6 +316,7 @@ export class PtyManager {
   }
 
   public restartSession(id: string): { success: boolean; buffer?: string; error?: string } {
+    this.output.flush(id);
     const options = this.sessionOptions.get(id);
     const session = this.sessions.get(id);
     this.sessions.delete(id);
@@ -271,6 +336,7 @@ export class PtyManager {
 
   public destroyAll() {
     for (const [id, session] of this.sessions) {
+      this.output.flush(id);
       try {
         session.kill();
       } catch {
