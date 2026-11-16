@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Preview syntax colors follow every theme's semantic palette. */
+.preview-code .hljs-keyword, .preview-code .hljs-selector-tag, .preview-code .hljs-selector-class, .preview-code .hljs-selector-id, .preview-code .hljs-selector-pseudo, .preview-code .hljs-selector-attr { color: rgb(var(--color-violet)); }
+.preview-code .hljs-string, .preview-code .hljs-regexp, .preview-code .hljs-addition, .preview-code .hljs-code { color: rgb(var(--color-success)); }
+.preview-code .hljs-number, .preview-code .hljs-literal, .preview-code .hljs-attr, .preview-code .hljs-attribute, .preview-code .hljs-variable, .preview-code .hljs-template-variable, .preview-code .hljs-bullet { color: rgb(var(--color-warning)); }
+.preview-code .hljs-title, .preview-code .hljs-built_in, .preview-code .hljs-type, .preview-code .hljs-name, .preview-code .hljs-section, .preview-code .hljs-link { color: rgb(var(--color-accent)); }
+.preview-code .hljs-comment, .preview-code .hljs-quote, .preview-code .hljs-doctag { color: rgb(var(--color-fg-subtle)); font-style: italic; }
+.preview-code .hljs-meta, .preview-code .hljs-symbol, .preview-code .hljs-deletion { color: rgb(var(--color-danger)); }
+.preview-code .hljs-section, .preview-code .hljs-strong { font-weight: 600; }
+.preview-code .hljs-emphasis { font-style: italic; }
+
 /*
  * 语义颜色 token（RGB 通道，供 tailwind.config.js 以 rgb(var() / alpha) 引用）。
  * 默认深色；data-theme 由 index.html 内联脚本在首帧前写入，并由 App.tsx 随设置更新。
@@ -711,7 +721,8 @@ html, body, #root {
   85%, 100% { transform: translateX(calc(var(--marquee-dist) * -1)); }
 }
 @media (prefers-reduced-motion: no-preference) {
-  .marquee-text.is-overflow { animation: marquee-slide var(--marquee-duration) linear infinite alternate; }
+  .marquee-text.is-overflow.is-playing { animation: marquee-slide var(--marquee-duration) linear infinite alternate; }
+  .marquee-title-box:hover .marquee-text.is-overflow.is-playing { animation-play-state: paused; }
   .drawer-panel { animation: drawer-in 180ms ease-out; }
   .modal-overlay { animation: overlay-in 120ms ease-out; }
   .modal-panel { animation: dialog-in 160ms ease-out; }

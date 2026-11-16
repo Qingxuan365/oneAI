@@ -3,6 +3,7 @@ import { RefreshCw, X } from 'lucide-react';
 import { FilePreviewResult } from '../types';
 import { PreviewMinimap } from './PreviewMinimap';
 import { t } from '../i18n';
+import { highlightPreview } from '../previewHighlight';
 
 interface FilePreviewPanelProps {
   cwd: string;
@@ -31,7 +32,9 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ cwd, filePat
   const [reloadCount, setReloadCount] = useState(0);
   const targetLineRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const lines = useMemo(() => (result?.kind === 'text' ? result.content.split('\n') : []), [result]);
+  const textContent = useMemo(() => (result?.kind === 'text' ? result.content.replace(/\r\n?/g, '\n') : ''), [result]);
+  const lines = useMemo(() => (result?.kind === 'text' ? textContent.split('\n') : []), [result, textContent]);
+  const highlightedLines = useMemo(() => (result?.kind === 'text' ? highlightPreview(textContent, result.path || filePath) : null), [result, textContent, filePath]);
 
   // 内容加载完成或目标行变化后，把目标行滚动到视野中央
   useEffect(() => {
@@ -65,11 +68,11 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ cwd, filePat
   let body: React.ReactNode = notice(t('读取中…'));
   if (result?.kind === 'text') {
     body = (
-      <pre className="m-0 min-h-full select-text whitespace-pre-wrap break-all p-3 font-mono text-xs leading-relaxed text-fg">
+      <pre className="preview-code m-0 min-h-full select-text whitespace-pre-wrap break-all p-3 font-mono text-xs leading-relaxed text-fg">
         {lines.map((text, index) => {
           const isTarget = index + 1 === line;
           return (
-            <div key={index} ref={isTarget ? targetLineRef : undefined} className={isTarget ? 'bg-accent/20' : undefined}>{text || ' '}</div>
+            <div key={index} ref={isTarget ? targetLineRef : undefined} className={isTarget ? 'bg-accent/20' : undefined}>{highlightedLines?.[index]?.length ? highlightedLines[index].map((token, i) => (token.className ? <span key={i} className={token.className}>{token.text}</span> : token.text)) : text || ' '}</div>
           );
         })}
       </pre>

@@ -69,6 +69,7 @@ d:/GitHub/OneAI/
 │           ├── musicStreams.ts           # 在线音乐：id 生成、读取过滤与添加前校验
 │           ├── workspaceState.ts         # 文件夹树的状态：folderKey、排序、旧数据迁移、状态校验、最近任务归类与读写
 │           ├── accounts.ts               # 多账号：支持的 CLI 与登录命令、环境变量文本解析、账号校验
+│           ├── previewHighlight.ts       # 文件预览语法高亮：按扩展名或文件名调用 highlight.js 分词并保留跨行作用域，跳过压缩单行与 > 1 MB 文件
 │           ├── components/
 │           │   ├── Sidebar.tsx           # 左侧品牌头部（Logo、标语、版本号）、文件夹树（Git 分支、任务）与最近任务
 │           │   ├── Topbar.tsx            # 顶部导航栏（嵌入单行额度、系统资源与全局操作）

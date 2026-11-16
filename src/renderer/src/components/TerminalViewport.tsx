@@ -478,7 +478,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
     if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
     noticeTimerRef.current = window.setTimeout(() => setNotice(null), 1200);
   };
-  const [scrollState, setScrollState] = useState<{ up: boolean; fresh: boolean; canTop: boolean }>({ up: false, fresh: false, canTop: false });
+  const [scrollState, setScrollState] = useState<{ up: boolean; fresh: boolean; canTop: boolean; altTop: boolean }>({ up: false, fresh: false, canTop: false, altTop: false });
   // 只关心当前显示的终端；回到底部时重置新输出标记
   const syncScrollState = (id: string) => {
     if (id !== activeTaskIdRef.current) return;
@@ -489,8 +489,15 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
     if (!up) instance.bottomMark = buf.baseY;
     // 内容超过一屏（有回滚区）且当前不在最顶部时可一键回到顶部
     const canTop = buf.type === 'normal' && buf.baseY > 0 && buf.viewportY > 0;
-    const next = { up, fresh: up && buf.baseY > instance.bottomMark, canTop };
-    setScrollState((prev) => (prev.up === next.up && prev.fresh === next.fresh && prev.canTop === next.canTop ? prev : next));
+    // Claude Code 全屏模式画在备用屏里、自己管理滚动，xterm 没有回滚区；此时改为向它发送 Ctrl+Home
+    const altTop = buf.type === 'alternate' && tasksRef.current.find((task) => task.id === id)?.groupId === 'claude';
+    const next = { up, fresh: up && buf.baseY > instance.bottomMark, canTop, altTop };
+    setScrollState((prev) => (prev.up === next.up && prev.fresh === next.fresh && prev.canTop === next.canTop && prev.altTop === next.altTop ? prev : next));
+  };
+  const scrollToTopInCli = () => {
+    if (!activeTaskId) return;
+    void window.electronAPI?.writeSession(activeTaskId, '\x1b[1;5H');
+    instancesRef.current.get(activeTaskId)?.term.focus();
   };
   const scrollToTop = () => {
     const instance = activeTaskId ? instancesRef.current.get(activeTaskId) : null;
@@ -528,7 +535,9 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
       if (e.detail === 0) return; // 键盘触发的 click（回车 / 空格），保留按钮焦点以便键盘操作
       window.setTimeout(() => {
         const active = document.activeElement;
-        if (!active || active.tagName !== 'BUTTON') return;
+        if (!active) return;
+        const isMusicRange = active.tagName === 'INPUT' && (active as HTMLInputElement).type === 'range' && Boolean(active.closest('[data-music-player]'));
+        if (active.tagName !== 'BUTTON' && !isMusicRange) return;
         // 带 data-keep-focus 的按钮点完后还有键盘操作（如侧栏任务行的 F2 重命名、Alt+方向键排序），保留焦点
         if (active.closest('[data-keep-focus]')) return;
         if (document.querySelector('[role="dialog"], [role="menu"]')) return;
@@ -1245,7 +1254,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
       }
     }
     if (activeTaskId) syncScrollState(activeTaskId);
-    else setScrollState({ up: false, fresh: false, canTop: false });
+    else setScrollState({ up: false, fresh: false, canTop: false, altTop: false });
     instancesRef.current.forEach((instance, id) => {
       const isCurrent = id === activeTaskId;
       instance.container.style.display = isCurrent ? 'block' : 'none';
@@ -1257,7 +1266,9 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
         setTimeout(() => {
           try {
             instance.fitAddon.fit();
-            instance.term.focus();
+            // 鼠标刚点中目标任务行时保留其焦点以便 F2 重命名 / Alt+方向键排序；通过快捷键从别处切来时聚焦终端
+            const keepOnTarget = document.activeElement?.closest(`[data-task-id="${CSS.escape(id)}"]`)?.querySelector('[data-keep-focus]') === document.activeElement;
+            if (!keepOnTarget) instance.term.focus();
             instance.term.refresh(0, instance.term.rows - 1);
             const { cols, rows } = instance.term;
             window.electronAPI?.resizeSession(id, cols, rows);
@@ -1387,7 +1398,18 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
           onClick={scrollToTop}
           title={t('回到顶部')}
           aria-label={t('回到顶部')}
-          className={`absolute right-8 z-20 flex h-7 w-7 items-center justify-center rounded-full border border-line-strong bg-elevated/95 text-fg-muted shadow-lg backdrop-blur hover:text-fg ${scrollState.up ? 'bottom-14' : 'bottom-4'}`}
+          className={`absolute right-8 z-20 flex h-7 w-7 items-center justify-center rounded-full border border-line-strong bg-elevated/95 text-fg-muted shadow-lg backdrop-blur transition-colors hover:border-accent hover:bg-control-hover hover:text-accent ${scrollState.up ? 'bottom-14' : 'bottom-4'}`}
+        >
+          <ArrowUp size={14} />
+        </button>
+      )}
+      {scrollState.altTop && (
+        <button
+          type="button"
+          onClick={scrollToTopInCli}
+          title={t('回到顶部')}
+          aria-label={t('回到顶部')}
+          className="absolute right-8 top-3 z-20 flex h-7 w-7 items-center justify-center rounded-full border border-line-strong bg-elevated/95 text-fg-muted shadow-lg backdrop-blur transition-colors hover:border-accent hover:bg-control-hover hover:text-accent"
         >
           <ArrowUp size={14} />
         </button>

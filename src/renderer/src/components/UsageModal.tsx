@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BarChart3, User } from 'lucide-react';
+import { BarChart3, ChevronRight, User } from 'lucide-react';
 import { BrandIcon } from './BrandIcon';
 import { Modal } from './Modal';
 import { Account, UsageCli, UsageDay, UsageRow, UsageStats } from '../types';
@@ -47,6 +47,14 @@ export const UsageModal: React.FC<UsageModalProps> = ({ isOpen, onClose, account
   const [stats, setStats] = useState<UsageStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [collapsedClis, setCollapsedClis] = useState<ReadonlySet<UsageCli>>(() => new Set());
+  const toggleCli = (cliId: UsageCli) => {
+    setCollapsedClis((prev) => {
+      const next = new Set(prev);
+      if (next.has(cliId)) next.delete(cliId); else next.add(cliId);
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -158,59 +166,77 @@ export const UsageModal: React.FC<UsageModalProps> = ({ isOpen, onClose, account
                       <th className={th}>{t('合计')}</th>
                     </tr>
                   </thead>
-                  {view.groups.map((group) => (
-                    <tbody key={group.cliId} data-usage-group={group.cliId}>
-                      <tr className="border-t border-line-strong bg-surface" data-usage-cli>
-                        <td className="px-3 py-2">
-                          <span className="flex items-center gap-2 font-medium text-fg">
-                            <BrandIcon icon={group.cliId} size={14} />
-                            {CLI_LABELS[group.cliId]}
-                          </span>
-                        </td>
-                        <td className="px-2 py-2 text-right font-medium tabular-nums text-fg">{group.requests.toLocaleString()}</td>
-                        <td colSpan={4} />
-                        <td className="px-2 py-2 text-right font-medium tabular-nums text-fg">{formatTokens(group.tokens)}</td>
-                      </tr>
-                      {group.accountGroups.map((account) => (
-                        <React.Fragment key={account.accountId}>
-                          {group.showAccounts && (
-                            <tr className="border-t border-line bg-muted" data-usage-account={account.accountId}>
-                              <td className="py-1.5 pl-9 pr-3">
-                                <span className="flex min-w-0 items-center gap-1.5 text-fg-muted">
-                                  <User size={12} className="shrink-0" aria-hidden="true" />
-                                  <span className="truncate">{account.name}</span>
-                                </span>
-                              </td>
-                              <td className="px-2 py-1.5 text-right tabular-nums text-fg-muted">{account.requests.toLocaleString()}</td>
-                              <td colSpan={4} />
-                              <td className="px-2 py-1.5 text-right tabular-nums text-fg-muted">{formatTokens(account.tokens)}</td>
-                            </tr>
-                          )}
-                          {account.rows.map((row) => (
-                            <tr key={`${row.accountId}-${row.model}`} className="border-t border-line" data-usage-row>
-                              <td className={`py-2 pr-3 ${group.showAccounts ? 'pl-14' : 'pl-9'}`}>
-                                <span className="flex min-w-0 items-center gap-1.5">
-                                  <span className={`truncate ${row.subagent ? 'text-fg-subtle' : 'text-fg'}`}>{row.model}</span>
-                                  {row.subagent && <span className="shrink-0 rounded-full border border-line-strong px-1.5 text-2xs text-fg-faint" title={t('Codex 自动审查等由 CLI 自动发起的子会话')}>{t('子会话')}</span>}
-                                </span>
-                              </td>
-                              <td className="px-2 py-2 text-right tabular-nums text-fg">{row.requests.toLocaleString()}</td>
-                              <td className="px-2 py-2 text-right tabular-nums text-fg-muted">{row.sessions}</td>
-                              <td className="px-2 py-2 text-right tabular-nums text-fg-muted">{formatTokens(row.input)}</td>
-                              <td className="px-2 py-2 text-right tabular-nums text-fg-muted">{formatTokens(row.output)}</td>
-                              <td className="px-2 py-2 text-right tabular-nums text-fg-muted" title={t('读 {read} / 写 {write}', { read: row.cacheRead.toLocaleString(), write: row.cacheWrite.toLocaleString() })}>{formatTokens(row.cacheRead + row.cacheWrite)}</td>
-                              <td className="px-2 py-2 text-right">
-                                <span className="block tabular-nums text-fg">{formatTokens(rowTokens(row))}</span>
-                                <span className="mt-1 block h-1 overflow-hidden rounded-full bg-control" aria-hidden="true">
-                                  <span className="block h-full rounded-full bg-success" style={{ width: `${view.maxTokens ? (rowTokens(row) / view.maxTokens) * 100 : 0}%` }} />
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </React.Fragment>
-                      ))}
-                    </tbody>
-                  ))}
+                  {view.groups.map((group) => {
+                    const expanded = !collapsedClis.has(group.cliId);
+                    const cliLabel = CLI_LABELS[group.cliId] ?? group.cliId;
+                    return (
+                      <tbody key={group.cliId} data-usage-group={group.cliId}>
+                        <tr
+                          className="cursor-pointer border-t border-line-strong bg-surface transition-colors hover:bg-hover"
+                          data-usage-cli
+                          onClick={() => toggleCli(group.cliId)}
+                        >
+                          <td className="px-3 py-2">
+                            <span className="flex items-center gap-2 font-medium text-fg">
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); toggleCli(group.cliId); }}
+                                aria-expanded={expanded}
+                                aria-label={expanded ? t('收起 {name}', { name: cliLabel }) : t('展开 {name}', { name: cliLabel })}
+                                title={expanded ? t('收起 {name}', { name: cliLabel }) : t('展开 {name}', { name: cliLabel })}
+                                className="icon-btn -ml-1 h-5 w-5 enabled:hover:bg-control"
+                              >
+                                <ChevronRight size={13} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} aria-hidden="true" />
+                              </button>
+                              <BrandIcon icon={group.cliId} size={14} />
+                              {cliLabel}
+                            </span>
+                          </td>
+                          <td className="px-2 py-2 text-right font-medium tabular-nums text-fg">{group.requests.toLocaleString()}</td>
+                          <td colSpan={4} />
+                          <td className="px-2 py-2 text-right font-medium tabular-nums text-fg">{formatTokens(group.tokens)}</td>
+                        </tr>
+                        {expanded && group.accountGroups.map((account) => (
+                          <React.Fragment key={account.accountId}>
+                            {group.showAccounts && (
+                              <tr className="border-t border-line bg-muted" data-usage-account={account.accountId}>
+                                <td className="py-1.5 pl-9 pr-3">
+                                  <span className="flex min-w-0 items-center gap-1.5 text-fg-muted">
+                                    <User size={12} className="shrink-0" aria-hidden="true" />
+                                    <span className="truncate">{account.name}</span>
+                                  </span>
+                                </td>
+                                <td className="px-2 py-1.5 text-right tabular-nums text-fg-muted">{account.requests.toLocaleString()}</td>
+                                <td colSpan={4} />
+                                <td className="px-2 py-1.5 text-right tabular-nums text-fg-muted">{formatTokens(account.tokens)}</td>
+                              </tr>
+                            )}
+                            {account.rows.map((row) => (
+                              <tr key={`${row.accountId}-${row.model}`} className="border-t border-line" data-usage-row>
+                                <td className={`py-2 pr-3 ${group.showAccounts ? 'pl-14' : 'pl-9'}`}>
+                                  <span className="flex min-w-0 items-center gap-1.5">
+                                    <span className={`truncate ${row.subagent ? 'text-fg-subtle' : 'text-fg'}`}>{row.model}</span>
+                                    {row.subagent && <span className="shrink-0 rounded-full border border-line-strong px-1.5 text-2xs text-fg-faint" title={t('Codex 自动审查等由 CLI 自动发起的子会话')}>{t('子会话')}</span>}
+                                  </span>
+                                </td>
+                                <td className="px-2 py-2 text-right tabular-nums text-fg">{row.requests.toLocaleString()}</td>
+                                <td className="px-2 py-2 text-right tabular-nums text-fg-muted">{row.sessions}</td>
+                                <td className="px-2 py-2 text-right tabular-nums text-fg-muted">{formatTokens(row.input)}</td>
+                                <td className="px-2 py-2 text-right tabular-nums text-fg-muted">{formatTokens(row.output)}</td>
+                                <td className="px-2 py-2 text-right tabular-nums text-fg-muted" title={t('读 {read} / 写 {write}', { read: row.cacheRead.toLocaleString(), write: row.cacheWrite.toLocaleString() })}>{formatTokens(row.cacheRead + row.cacheWrite)}</td>
+                                <td className="px-2 py-2 text-right">
+                                  <span className="block tabular-nums text-fg">{formatTokens(rowTokens(row))}</span>
+                                  <span className="mt-1 block h-1 overflow-hidden rounded-full bg-control" aria-hidden="true">
+                                    <span className="block h-full rounded-full bg-success" style={{ width: `${view.maxTokens ? (rowTokens(row) / view.maxTokens) * 100 : 0}%` }} />
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </React.Fragment>
+                        ))}
+                      </tbody>
+                    );
+                  })}
                 </table>
               </div>
             )}
@@ -218,36 +244,51 @@ export const UsageModal: React.FC<UsageModalProps> = ({ isOpen, onClose, account
 
           <section aria-label={t('每日使用频次')}>
             <h3 className="mb-2 text-xs font-medium text-fg-muted">{t('每日使用频次（近 {n} 周，按请求数）', { n: view.weeks.length })}</h3>
-            <div className="overflow-x-auto pb-1">
-              <div className="inline-flex gap-2" role="group" aria-label={t('每日请求数方块图')} data-usage-heatmap>
-                <div className="flex flex-col gap-1 pt-[19px] text-2xs leading-[14px] text-fg-faint" aria-hidden="true">
-                  {weekdays().map((name, index) => <span key={name} className="h-3.5">{index % 2 === 0 ? name : ''}</span>)}
+            <div className="overflow-x-auto p-px pb-1">
+              <div
+                className="grid w-full gap-1.5"
+                style={{
+                  gridTemplateColumns: `auto repeat(${Math.max(1, view.weeks.length)}, minmax(0, 1fr))`,
+                  gridTemplateRows: '1rem repeat(7, auto)',
+                }}
+                role="group"
+                aria-label={t('每日请求数方块图')}
+                data-usage-heatmap
+              >
+                <div className="row-span-full grid grid-rows-subgrid items-center pr-0.5 text-2xs leading-none text-fg-faint" aria-hidden="true">
+                  <span />
+                  {weekdays().map((name, index) => <span key={name}>{index % 2 === 0 ? name : ''}</span>)}
                 </div>
-                <div className="flex gap-1">
-                  {view.weeks.map((week, column) => {
-                    const month = Number(week[0].date.slice(5, 7));
-                    const showMonth = column === 0 || month !== Number(view.weeks[column - 1][0].date.slice(5, 7));
-                    return (
-                      <div key={week[0].date} className="flex flex-col gap-1">
-                        <span className="h-[15px] whitespace-nowrap text-2xs leading-[15px] text-fg-faint" aria-hidden="true">{showMonth ? t(`${month}月`) : ''}</span>
-                        {week.map((day, row) => {
-                          const future = day.date > today;
-                          const level = dayLevel(day.requests, view.max);
-                          return (
-                            <span
-                              key={day.date}
-                              title={future ? undefined : dayTitle(day, weekdays()[row], view.label)}
-                              data-usage-cell
-                              data-date={day.date}
-                              data-level={future ? 'future' : level}
-                              className={`h-3.5 w-3.5 rounded-[3px] ${future ? 'bg-control/40' : LEVEL_CLASSES[level]} ${day.date === today ? 'ring-1 ring-fg-subtle' : ''}`}
-                            />
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
-                </div>
+                {view.weeks.map((week, column) => {
+                  const month = Number(week[0].date.slice(5, 7));
+                  const showMonth = column === 0 || month !== Number(view.weeks[column - 1][0].date.slice(5, 7));
+                  const isLast = column === view.weeks.length - 1;
+                  return (
+                    <div key={week[0].date} className="row-span-full grid grid-rows-subgrid">
+                      <span className="relative text-2xs leading-4 text-fg-faint" aria-hidden="true">
+                        {showMonth && (
+                          <span className={`absolute top-0 whitespace-nowrap ${isLast ? 'right-0' : 'left-0'}`}>
+                            {t(`${month}月`)}
+                          </span>
+                        )}
+                      </span>
+                      {week.map((day, row) => {
+                        const future = day.date > today;
+                        const level = dayLevel(day.requests, view.max);
+                        return (
+                          <span
+                            key={day.date}
+                            title={future ? undefined : dayTitle(day, weekdays()[row], view.label)}
+                            data-usage-cell
+                            data-date={day.date}
+                            data-level={future ? 'future' : level}
+                            className={`aspect-square w-full rounded ${future ? 'bg-control/40' : LEVEL_CLASSES[level]} ${day.date === today ? 'ring-1 ring-fg-subtle' : ''}`}
+                          />
+                        );
+                      })}
+                    </div>
+                  );
+                })}
               </div>
             </div>
             <div className="mt-2 flex items-center justify-end gap-1.5 text-2xs text-fg-faint" aria-hidden="true">

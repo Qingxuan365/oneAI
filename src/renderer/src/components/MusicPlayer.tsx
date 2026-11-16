@@ -43,9 +43,16 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams, hi
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const seekingRef = useRef(false);
-  const [volume, setVolume] = useState(1);
-  const volumeRef = useRef(1);
+  const [volume, setVolume] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem('oneai_music_volume'));
+      return Number.isFinite(saved) ? Math.max(0, Math.min(1, saved)) : 1;
+    } catch { return 1; }
+  });
+  const volumeRef = useRef(volume);
   volumeRef.current = volume;
+  const lastVolumeRef = useRef(volume > 0 ? volume : 1);
+  if (volume > 0) lastVolumeRef.current = volume;
   const playingRef = useRef(false);
   const tracksRef = useRef<Track[]>([]);
   const indexRef = useRef(0);
@@ -212,6 +219,7 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams, hi
 
   const changeVolume = (value: number) => {
     setVolume(value);
+    try { localStorage.setItem('oneai_music_volume', String(value)); } catch {}
     [localAudioRef.current, streamAudioRef.current].forEach((audio) => { if (audio) audio.volume = value; });
   };
 
@@ -223,6 +231,7 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams, hi
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
   const title = error || tracks[index]?.name || '';
+  const isLiveStream = duration === 0 && playing && Boolean(tracks[index]?.url);
   const percent = duration > 0 ? Math.min(100, (time / duration) * 100) : 0;
 
   // 曲名比可用宽度长时，记下溢出距离，交给 CSS 来回滚动；侧栏宽度变化时重新计算
@@ -241,7 +250,7 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams, hi
   if (tracks.length === 0) return null;
 
   return (
-    <div role="group" aria-label={t('音乐播放器')} hidden={hidden} className="space-y-1.5 border-t border-line px-3 py-2 text-xs text-fg-muted">
+    <div role="group" data-music-player aria-label={t('音乐播放器')} hidden={hidden} className="space-y-1.5 border-t border-line px-3 py-2 text-xs text-fg-muted">
       {/* 第一行：曲名与播放控制 */}
       <div className="flex items-center gap-1.5">
         {playing ? (
@@ -258,10 +267,10 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams, hi
         ) : (
           <Music size={14} className="mx-[10px] shrink-0 text-fg-subtle" aria-hidden="true" />
         )}
-        <span ref={titleBoxRef} className={`min-w-0 flex-1 overflow-hidden whitespace-nowrap ${error ? 'text-danger' : ''}`} title={title}>
+        <span ref={titleBoxRef} className={`marquee-title-box min-w-0 flex-1 overflow-hidden whitespace-nowrap ${error ? 'text-danger' : ''}`} title={title}>
           <span
             ref={titleTextRef}
-            className={`marquee-text inline-block ${overflow > 0 ? 'is-overflow' : ''}`}
+            className={`marquee-text inline-block ${overflow > 0 ? 'is-overflow' : ''} ${playing && !error ? 'is-playing' : ''}`}
             style={{ '--marquee-dist': `${overflow}px`, '--marquee-duration': `${Math.max(4, overflow / 20 + 3)}s` } as React.CSSProperties}
           >{title}</span>
         </span>
@@ -288,23 +297,27 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams, hi
             disabled={duration === 0}
             onPointerDown={() => { seekingRef.current = true; }}
             onChange={(e) => setTime(Number(e.target.value))}
-            onPointerUp={commitSeek}
+            onPointerUp={(e) => { commitSeek(); e.currentTarget.blur(); }}
             onKeyUp={commitSeek}
           />
         </div>
-        <span className="w-8 shrink-0 text-right text-2xs tabular-nums text-fg-subtle">{fmt(duration)}</span>
-        <button type="button" className="icon-btn" onClick={() => changeVolume(volume === 0 ? 1 : 0)} title={volume === 0 ? t('取消静音') : t('静音')} aria-label={volume === 0 ? t('取消静音') : t('静音')}>
+        {isLiveStream
+          ? <span className="w-8 shrink-0 text-right text-2xs font-medium text-accent">{t('直播')}</span>
+          : <span className="w-8 shrink-0 text-right text-2xs tabular-nums text-fg-subtle">{fmt(duration)}</span>}
+        <button type="button" className="icon-btn" onClick={() => changeVolume(volume === 0 ? lastVolumeRef.current : 0)} title={volume === 0 ? t('取消静音') : t('静音')} aria-label={volume === 0 ? t('取消静音') : t('静音')}>
           {volume === 0 ? <VolumeX size={14} /> : <Volume2 size={14} />}
         </button>
         <input
           type="range"
           aria-label={t('音量')}
+          title={`${Math.round(volume * 100)}%`}
           className="slim w-12 shrink-0"
           min={0}
           max={1}
           step={0.01}
           value={volume}
           onChange={(e) => changeVolume(Number(e.target.value))}
+          onPointerUp={(e) => e.currentTarget.blur()}
         />
       </div>
     </div>

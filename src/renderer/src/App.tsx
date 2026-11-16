@@ -238,6 +238,12 @@ export const App: React.FC = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     try { return localStorage.getItem('oneai_sidebar_collapsed') === 'true'; } catch { return false; }
   });
+  const [sidebarWidth, setSidebarWidth] = useState<number | null>(() => {
+    try {
+      const saved = Number(localStorage.getItem('oneai_sidebar_width'));
+      return Number.isFinite(saved) && saved >= 240 && saved <= 480 ? saved : null;
+    } catch { return null; }
+  });
 
   // 弹窗状态
   const [newTaskContext, setNewTaskContext] = useState<{ folderPath: string; cliId?: string } | null>(null);
@@ -264,6 +270,13 @@ export const App: React.FC = () => {
   useEffect(() => {
     try { localStorage.setItem('oneai_sidebar_collapsed', String(isSidebarCollapsed)); } catch {}
   }, [isSidebarCollapsed]);
+
+  useEffect(() => {
+    try {
+      if (sidebarWidth === null) localStorage.removeItem('oneai_sidebar_width');
+      else localStorage.setItem('oneai_sidebar_width', String(sidebarWidth));
+    } catch {}
+  }, [sidebarWidth]);
 
   // 全局快捷键缩放终端字体（Ctrl + / Ctrl - / Ctrl 0）。在捕获阶段处理并阻止继续传播：
   // 冒泡阶段时 xterm 已把 Ctrl+- 转成 \x1f（Ctrl+_，多数 CLI 的「撤销」）发给 CLI。排除 Alt，避免 AltGr 组合被误判
@@ -551,6 +564,30 @@ export const App: React.FC = () => {
   // 折叠 / 展开文件夹
   const handleToggleFolder = (folderPath: string) => {
     setFolders((prev) => prev.map((folder) => (folderKey(folder.path) === folderKey(folderPath) ? { ...folder, isExpanded: !folder.isExpanded } : folder)));
+  };
+
+  const handleToggleAllFolders = (expand: boolean) => {
+    setFolders((prev) => prev.map((folder) => ({ ...folder, isExpanded: expand })));
+  };
+
+  const handlePinRecentFolder = (folderPath: string) => {
+    setFolders((prev) => ensureFolder(prev, folderPath, true));
+    setLastFolder(folderPath);
+  };
+
+  // 清理指定文件夹内已停止或启动失败的任务
+  const handleClearStoppedTasks = (folderPath: string) => {
+    const key = folderKey(folderPath);
+    const doomedIds = new Set(tasks.filter((task) => folderKey(task.cwd) === key && !isTaskAlive(task.status)).map((task) => task.id));
+    if (doomedIds.size === 0) return;
+    const remaining = orderedTasks(folders, visibleTasks).filter((task) => !doomedIds.has(task.id));
+    setTasks((prev) => prev.filter((task) => !doomedIds.has(task.id)));
+    if (activeTaskId && doomedIds.has(activeTaskId)) {
+      const sameFolder = remaining.find((task) => folderKey(task.cwd) === key);
+      const next = sameFolder ?? remaining[0] ?? null;
+      setActiveTaskId(next?.id ?? null);
+      if (next) setFolders((prev) => ensureFolder(prev, next.cwd, true));
+    }
   };
 
   // 选中具体某个子任务
@@ -904,6 +941,13 @@ ${entry.cwd}`}
       {/* 左侧：CLI 品牌 Logo + 多任务树状菜单 */}
       <Sidebar
         isCollapsed={isSidebarCollapsed}
+        width={sidebarWidth}
+        onResizeWidth={setSidebarWidth}
+        onResetWidth={() => setSidebarWidth(null)}
+        onToggleCollapse={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
+        onToggleAllFolders={handleToggleAllFolders}
+        onClearStoppedTasks={handleClearStoppedTasks}
+        onPinRecentFolder={handlePinRecentFolder}
         clis={visibleClis}
         folders={folders}
         tasks={visibleTasks}

@@ -125,15 +125,20 @@ await build({
     const mkTask = (id, groupId, cwd, extra = {}) => ({ id, groupId, title: id, status: 'idle', cwd, createdAt: 1, ...extra });
     // withMusic：带一条在线音乐，用于检查折叠侧栏时播放器不被卸载
     const MUSIC_STREAMS = [{ id: 'm1', name: 'Test radio', url: 'https://example.com/test.mp3' }];
-    window.drawSidebar = (isCollapsed = false, clockOffset = 0, withMusic = false) => {
-      const tasks = [mkTask('side-a', 'codex', 'D:/GitHub/OneAI', { title: 'Side a' }), mkTask('side-b', 'codex', 'D:/GitHub/OneAI', { title: 'Side b' }), mkTask('side-c', 'claude', 'D:/sports', { title: 'Side c' }), mkTask('side-d', 'claude', 'D:/sports', { title: 'Side d' }), mkTask('side-t', 'terminal', 'D:/sports', { title: 'Side t' })];
+    window.drawSidebar = (isCollapsed = false, clockOffset = 0, withMusic = false, customWidth = null) => {
+      const tasks = [mkTask('side-a', 'codex', 'D:/GitHub/OneAI', { title: 'Side a' }), mkTask('side-b', 'codex', 'D:/GitHub/OneAI', { title: 'Side b' }), mkTask('side-c', 'claude', 'D:/sports', { title: 'Side c' }), mkTask('side-d', 'claude', 'D:/sports', { title: 'Side d', status: 'stopped' }), mkTask('side-t', 'terminal', 'D:/sports', { title: 'Side t' })];
       const folders = [{ path: 'D:/GitHub/OneAI', isExpanded: true }, { path: 'D:/sports', isExpanded: true }, { path: 'D:/empty', isExpanded: true }];
       const entry = (id, cliId, title, ago) => ({ id, cliId, title, cwd: 'D:/plan', updatedAt: Date.now() - ago, command: cliId + ' resume ' + id });
       const recent = [{ key: keyOf('D:/plan'), path: 'D:/plan', updatedAt: Date.now() - 3600000, total: 7, entries: [entry('h1', 'codex', 'History one', 3600000), entry('h2', 'claude', 'History two', 7200000)] }];
       flushSync(() => root.render(<div className="workbench-ui flex h-screen">
-        <Sidebar isCollapsed={isCollapsed} clis={CLIS} folders={folders} tasks={tasks} activeTaskId="side-a" unreadTaskIds={new Set(['side-a', 'side-b'])}
+        <Sidebar isCollapsed={isCollapsed} width={customWidth} clis={CLIS} folders={folders} tasks={tasks} activeTaskId="side-a" unreadTaskIds={new Set(['side-a', 'side-b'])}
           gitBranches={{ [keyOf('D:/GitHub/OneAI')]: 'main', [keyOf('D:/sports')]: 'feature/x', [keyOf('D:/plan')]: 'dev' }} recentFolders={recent}
           clockOffsetHours={clockOffset} summaries={{ 'side-a': { text: 'Fix the login bug' }, 'side-b': { text: null }, 'side-c': { text: 'long '.repeat(40).trim() } }}
+          onResizeWidth={(w) => window.events.push('resize:' + w)} onResetWidth={() => window.events.push('reset-width')}
+          onToggleCollapse={() => window.events.push('toggle-collapse')}
+          onToggleAllFolders={(expand) => window.events.push('toggle-all:' + expand)}
+          onClearStoppedTasks={(p) => window.events.push('clear-stopped:' + p)}
+          onPinRecentFolder={(p) => window.events.push('pin-recent:' + p)}
           onAddFolder={() => window.events.push('add-folder')} onSelectTask={(id) => window.events.push('select:' + id)}
           onToggleFolder={(p) => window.events.push('toggle:' + p)} onReorderFolder={(s, t) => window.events.push('reorder-folder:' + s + '>' + t)}
           onNewTask={(p, cli, acc) => window.events.push('quick:' + p + ':' + cli + (acc ? ':' + acc : ''))} onCustomNewTask={(p) => window.events.push('custom:' + p)}
@@ -526,6 +531,18 @@ app.whenReady().then(async () => {
       check('an account section header shows its name and request subtotal', alt.textContent.includes('alt') && alt.textContent.includes('12'));
       check('CLIs with only the default account show no account sections', document.querySelectorAll('[data-usage-group="claude"] [data-usage-account], [data-usage-group="agy"] [data-usage-account], [data-usage-group="pi"] [data-usage-account]').length === 0);
       check('a CLI header shows that CLI request subtotal', document.querySelector('[data-usage-group="codex"] [data-usage-cli]').textContent.includes('63'));
+      // 每个 CLI 大类前的折叠按钮可收起 / 展开其下的账号与模型列表
+      const codexToggle = () => document.querySelector('[data-usage-group="codex"] [data-usage-cli] button[aria-expanded]');
+      const agyToggle = () => document.querySelector('[data-usage-group="agy"] [data-usage-cli] button[aria-expanded]');
+      check('each CLI group starts expanded with a collapse button', document.querySelectorAll('[data-usage-cli] button[aria-expanded="true"]').length === 4);
+      codexToggle().click(); await tick(100);
+      check('clicking a CLI collapse button collapses its account and model rows while keeping the CLI subtotal and other groups', codexToggle().getAttribute('aria-expanded') === 'false' && document.querySelectorAll('[data-usage-group="codex"] [data-usage-account]').length === 0 && document.querySelectorAll('[data-usage-group="codex"] [data-usage-row]').length === 0 && document.querySelector('[data-usage-group="codex"] [data-usage-cli]').textContent.includes('63') && document.querySelectorAll('[data-usage-group="agy"] [data-usage-row]').length === 1);
+      codexToggle().click(); await tick(100);
+      check('clicking the collapse button again expands the CLI model list back', codexToggle().getAttribute('aria-expanded') === 'true' && document.querySelectorAll('[data-usage-group="codex"] [data-usage-account]').length === 2 && document.querySelectorAll('[data-usage-group="codex"] [data-usage-row]').length === 3);
+      document.querySelector('[data-usage-group="agy"] [data-usage-cli]').click(); await tick(100);
+      check('clicking the CLI header row also collapses its model list', agyToggle().getAttribute('aria-expanded') === 'false' && document.querySelectorAll('[data-usage-group="agy"] [data-usage-row]').length === 0);
+      document.querySelector('[data-usage-group="agy"] [data-usage-cli]').click(); await tick(100);
+      check('clicking the CLI header row again expands its model list', agyToggle().getAttribute('aria-expanded') === 'true' && document.querySelectorAll('[data-usage-group="agy"] [data-usage-row]').length === 1);
       check('usage summary shows the weekly request total', document.querySelector('[data-usage-summary]').textContent.includes(String(requests)));
       check('usage tokens are shown in compact units', text.includes('105.7M'));
       const cells = [...document.querySelectorAll('[data-usage-cell]')];
@@ -545,6 +562,12 @@ app.whenReady().then(async () => {
       check('a day tooltip lists each CLI account (account name only where a CLI has several)', multi.title.includes('Codex（alt） 4') && multi.title.includes('Codex（默认账号） 3') && multi.title.includes('Claude Code 2') && !multi.title.includes('Claude Code（'));
       const grid = document.querySelector('[data-usage-heatmap]');
       check('heatmap fits inside the modal without horizontal scrolling', grid.parentElement.scrollWidth <= grid.parentElement.clientWidth);
+      const gridRect = grid.getBoundingClientRect();
+      const cell0Rect = cells[0].getBoundingClientRect();
+      const lastCellRect = cells[cells.length - 1].getBoundingClientRect();
+      const weekdaySpans = [...grid.firstElementChild.children].slice(1);
+      check('heatmap fills the full row width with square cells', Math.abs(gridRect.width - grid.closest('section').getBoundingClientRect().width) <= 4 && Math.abs(lastCellRect.right - gridRect.right) <= 1 && Math.abs(cell0Rect.width - cell0Rect.height) < 1 && cell0Rect.width >= 18);
+      check('heatmap weekday labels stay aligned with their rows', [0, 2, 4, 6].every(i => { const a = weekdaySpans[i].getBoundingClientRect(); const b = cells[i].getBoundingClientRect(); return Math.abs((a.top + a.height / 2) - (b.top + b.height / 2)) <= 2; }));
       const panel = document.querySelector('[role="dialog"]');
       check('usage modal is wide enough for the table and the heatmap (at least 700px)', panel.getBoundingClientRect().width >= 700);
       window.usageMany = true;
@@ -818,6 +841,10 @@ app.whenReady().then(async () => {
         fn(); await tick(300);
         const bad = findCjk(document.body);
         check('English ' + name + ' has no Chinese' + (bad ? ': ' + bad : ''), !bad);
+        if (name === 'usage') {
+          const g = document.querySelector('[data-usage-heatmap]');
+          check('English usage heatmap fills the row without horizontal overflow', Boolean(g) && g.parentElement.scrollWidth <= g.parentElement.clientWidth && Math.abs(g.getBoundingClientRect().width - g.closest('section').getBoundingClientRect().width) <= 4);
+        }
       }
       window.setUiLanguage('zh-CN');
       // 顶栏日期：最大化时显示年月日与星期，设置里关闭后只显示时间
@@ -1012,6 +1039,23 @@ app.whenReady().then(async () => {
       check('clicking back-to-top scrolls to the top: the top button hides and back-to-bottom appears', !toTop() && Boolean(jump()));
       jump().click(); await wait(150);
 
+      // Claude Code 全屏模式（备用屏）：xterm 无回滚区，回到顶部改为向 CLI 发送 Ctrl+Home；其他 CLI 不显示
+      window.clearRoot();
+      const altSent = [];
+      window.electronAPI.writeSession = async (id, data) => { altSent.push(data); return true; };
+      window.drawTerm('alt-codex', 'codex'); await wait(300);
+      emitScroll({ id: 'alt-codex', data: String.fromCharCode(27) + '[?1049h' + 'alt screen' + CRLF }); await wait(150);
+      check('alternate screen of a non-Claude CLI shows no back-to-top button', !toTop());
+      window.clearRoot();
+      window.drawTerm('alt-claude', 'claude'); await wait(300);
+      check('Claude task on the normal screen shows no back-to-top button', !toTop());
+      emitScroll({ id: 'alt-claude', data: String.fromCharCode(27) + '[?1049h' + 'alt screen' + CRLF }); await wait(150);
+      check('Claude task on the alternate screen shows a back-to-top button', Boolean(toTop()));
+      toTop().click(); await wait(100);
+      check('clicking it sends Ctrl+Home to the CLI', altSent.includes(String.fromCharCode(27) + '[1;5H'));
+      window.clearRoot();
+      window.drawTerm('scroll-a'); await wait(300);
+
       // 按住 Ctrl 时容器带 ctrl-held（链接手型光标），松开或窗口失焦后移除
       const termHost = document.querySelector('.term-host');
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control', ctrlKey: true, bubbles: true }));
@@ -1078,17 +1122,91 @@ app.whenReady().then(async () => {
       check('collapsing the sidebar keeps the music player mounted (hidden)', before && player() === before && player().hidden);
       window.drawSidebar(false, 0, true); await wait(300);
       check('expanding again shows the same player instance', player() === before && !player().hidden);
+      const volSlider = player()?.querySelector('input[aria-label="音量"]');
+      if (volSlider) {
+        volSlider.focus();
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(volSlider, '0.42');
+        volSlider.dispatchEvent(new Event('change', { bubbles: true }));
+        volSlider.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+      }
+      await wait(50);
+      check('music volume persists and releasing slider blurs input', localStorage.getItem('oneai_music_volume') === '0.42' && document.activeElement !== volSlider);
 
       window.drawSidebar(); await wait();
+      window.events = [];
       const row = document.querySelector('[data-task-id="side-a"] button[data-keep-focus]');
       row.focus(); row.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); await wait(80);
       check('mouse click on a task row keeps focus for F2 / Alt+arrows', document.activeElement === row);
 
-      document.querySelector('[data-folder-row] button[aria-haspopup="menu"]').click(); await wait(100);
+      const rowHeightBefore = document.querySelector('[data-task-id="side-a"]').getBoundingClientRect().height;
+      row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true, cancelable: true })); await wait(80);
+      const renameInput = document.querySelector('[data-task-id="side-a"] input');
+      const rowHeightEditing = document.querySelector('[data-task-id="side-a"]').getBoundingClientRect().height;
+      check('inline rename on a two-line task preserves row height and keeps summary line', Boolean(renameInput) && Math.abs(rowHeightEditing - rowHeightBefore) <= 1 && Boolean(document.querySelector('[data-task-id="side-a"] [data-task-summary]')));
+      renameInput?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); await wait(80);
+
+      const inactiveClose = document.querySelector('button[aria-label="关闭 Side b"]');
+      check('inactive unhovered task close button takes zero width so title/summary keep space', inactiveClose && inactiveClose.getBoundingClientRect().width === 0);
+
+      const plusBtn = document.querySelector('[data-folder-row] button[aria-haspopup="menu"]');
+      plusBtn.click(); await wait(100);
       const menu = document.querySelector('[role="menu"]');
       const menuStyle = menu && getComputedStyle(menu);
       check('sidebar context menu is capped to the window and scrolls', menuStyle && menuStyle.maxHeight !== 'none' && menuStyle.overflowY === 'auto');
-      document.body.click(); await wait(100);
+      menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })); await wait(50);
+      check('sidebar menu supports ArrowDown keyboard focus navigation', document.activeElement?.getAttribute('role') === 'menuitem');
+      plusBtn.click(); await wait(80);
+      check('clicking the same folder + button toggles the menu closed', !document.querySelector('[role="menu"]'));
+
+      document.querySelector('button[aria-label="折叠所有文件夹"]').click(); await wait(50);
+      check('collapse-all button requests collapsing all folders', window.events.includes('toggle-all:false'));
+
+      const sportsHeader = document.querySelectorAll('[data-folder-row]')[1].firstElementChild;
+      sportsHeader.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 60, clientY: 160 })); await wait(80);
+      const clearItem = [...document.querySelectorAll('[role="menuitem"]')].find(b => b.textContent.includes('清理已停止任务'));
+      check('folder menu offers clearing stopped tasks when present', Boolean(clearItem));
+      clearItem?.click(); await wait(50);
+      check('clear stopped tasks passes the folder path', window.events.includes('clear-stopped:D:/sports'));
+
+      document.querySelector('button[aria-label="收起最近任务"]').click(); await wait(80);
+      const collapsedRecent = !document.querySelector('[data-recent-key]');
+      document.querySelector('button[aria-label="展开最近任务"]').click(); await wait(80);
+      check('recent tasks section can collapse and expand', collapsedRecent && Boolean(document.querySelector('[data-recent-key]')));
+
+      document.querySelector('[data-recent-key] button[aria-expanded]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 60, clientY: 220 })); await wait(80);
+      const pinItem = [...document.querySelectorAll('[role="menuitem"]')].find(b => b.textContent.includes('加入工作区'));
+      pinItem?.click(); await wait(50);
+      check('recent folder menu offers pinning folder to workspace', window.events.includes('pin-recent:D:/plan'));
+
+      const resizer = document.querySelector('#oneai-sidebar [role="separator"][aria-orientation="vertical"]');
+      resizer?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: 320 }));
+      window.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 380 }));
+      window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      resizer?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      await wait(50);
+      check('sidebar resize handle updates width and double-click resets it', window.events.includes('resize:380') && window.events.includes('reset-width'));
+
+      window.drawSidebar(false, 0, false, 410); await wait(50);
+      check('custom sidebar width applies cleanly', document.getElementById('oneai-sidebar').getBoundingClientRect().width === 410);
+
+      window.events = [];
+      window.drawSidebar(true); await wait(80);
+      const stripB = document.querySelector('button[data-task-id="side-b"]');
+      const stripFolder = document.querySelector('[data-folder-strip]');
+      const taskRect = stripB.getBoundingClientRect();
+      const folderRect = stripFolder.getBoundingClientRect();
+      const stripButtons = [...document.querySelectorAll('#oneai-sidebar [data-folder-strip], #oneai-sidebar [data-task-id]')];
+      const stripGaps = stripButtons.slice(1).map((el, i) => el.getBoundingClientRect().top - stripButtons[i].getBoundingClientRect().bottom);
+      check('collapsed task button is square and matches folder button size', Math.abs(taskRect.width - taskRect.height) < 1 && Math.abs(taskRect.width - folderRect.width) < 1 && Math.abs(taskRect.height - folderRect.height) < 1 && stripB.scrollWidth <= stripB.clientWidth);
+      check('collapsed folder and CLI buttons share uniform vertical spacing', stripGaps.length >= 4 && stripGaps[0] >= 3 && stripGaps.every(g => Math.abs(g - stripGaps[0]) < 1));
+      check('collapsed unread button still renders status dot and CLI icon', stripB.querySelectorAll('span').length >= 2 && Boolean(stripB.querySelector('svg')));
+      stripB.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 120 })); await wait(80);
+      check('collapsed task button supports right-click context menu', Boolean(document.querySelector('[role="menu"]')));
+      document.body.click(); await wait(50);
+      stripB.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));
+      check('collapsed task button supports middle-click close', window.events.includes('close:side-b'));
+      document.querySelector('button[aria-label="展开左侧导航栏"]').click();
+      check('collapsed footer offers expand sidebar button', window.events.includes('toggle-collapse'));
 
       const hour = new Date().getHours();
       window.drawSidebar(false, (26 - hour) % 24); await wait();
@@ -1112,6 +1230,31 @@ app.whenReady().then(async () => {
       check('preview re-reads the file when clicked again', reads === 2);
       document.querySelector('button[aria-label="重新读取文件"]').click(); await wait();
       check('preview refresh button re-reads the file', reads === 3 && highlighted()?.textContent === 'two');
+      const syntaxText = ['/* first', 'second */', 'const value = "<img src=x onerror=alert(1)>";', ''].join(String.fromCharCode(10));
+      window.electronAPI.readPreviewFile = async () => ({ kind: 'text', path: 'sample.ts', content: syntaxText });
+      window.drawPreview(2, 3); await wait();
+      check('preview colors keywords and strings without creating HTML elements', document.querySelector('.hljs-keyword')?.textContent === 'const' && Boolean(document.querySelector('.hljs-string')) && !document.querySelector('pre img'));
+      check('preview preserves multiline comment scope and target line', highlighted()?.textContent === 'second */' && Boolean(highlighted()?.querySelector('.hljs-comment')));
+      check('preview preserves source and trailing line', [...document.querySelectorAll('pre > div')].map(d => d.textContent === ' ' ? '' : d.textContent).join(String.fromCharCode(10)) === syntaxText);
+      const keywordColor = getComputedStyle(document.querySelector('.hljs-keyword')).color;
+      const oldTheme = document.documentElement.dataset.theme;
+      document.documentElement.dataset.theme = oldTheme === 'light' ? 'dark' : 'light';
+      check('preview syntax colors follow theme changes', getComputedStyle(document.querySelector('.hljs-keyword')).color !== keywordColor);
+      document.documentElement.dataset.theme = oldTheme;
+      window.electronAPI.readPreviewFile = async () => ({ kind: 'text', path: 'sample.txt', content: syntaxText });
+      window.drawPreview(2, 4); await wait();
+      check('unknown preview languages remain plain text', !document.querySelector('pre span') && highlighted()?.textContent === 'second */');
+      const mediumMultiLine = Array.from({ length: 7000 }, (_, i) => 'const value' + i + ' = ' + i + ';').join(String.fromCharCode(13, 10));
+      window.electronAPI.readPreviewFile = async () => ({ kind: 'text', path: 'medium.mjs', content: mediumMultiLine });
+      window.drawPreview(1, 5); await wait();
+      check('multi-line code files over 100 KB still get syntax highlighting', mediumMultiLine.length > 100000 && document.querySelector('.hljs-keyword')?.textContent === 'const');
+      window.electronAPI.readPreviewFile = async () => ({ kind: 'text', path: 'minified.ts', content: 'const value = 1;'.repeat(7000) });
+      window.drawPreview(1, 6); await wait();
+      check('minified preview skips syntax processing but retains text', !document.querySelector('pre span') && document.querySelector('pre').textContent === 'const value = 1;'.repeat(7000));
+      const overMax = ('const value = 1;' + String.fromCharCode(10)).repeat(70000);
+      window.electronAPI.readPreviewFile = async () => ({ kind: 'text', path: 'huge.ts', content: overMax });
+      window.drawPreview(1, 7); await wait();
+      check('over-1MB preview skips syntax processing but retains text', !document.querySelector('pre span') && [...document.querySelectorAll('pre > div')].map(d => d.textContent === ' ' ? '' : d.textContent).join(String.fromCharCode(10)) === overMax);
       // 代码缩略图（minimap）
       const longText = Array.from({ length: 300 }, (_, i) => '  const value' + i + ' = ' + i + ';').join(String.fromCharCode(10));
       window.electronAPI.readPreviewFile = async () => ({ kind: 'text', path: 'long.ts', size: 9000, content: longText });
