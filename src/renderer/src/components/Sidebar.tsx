@@ -3,6 +3,8 @@ import { BedDouble, ChevronRight, Copy, Folder, FolderOpen, FolderPlus, GitBranc
 import { Account, CliDef, FolderEntry, HistoryEntry, MusicStream, TaskSession } from '../types';
 
 const NO_STREAMS: MusicStream[] = [];
+// 一个文件夹的任务数超过这个值时，侧栏对屏幕外的任务行启用 content-visibility
+const LARGE_FOLDER_TASKS = 30;
 import { TASK_STATUS_META, isTaskAlive } from '../taskStatus';
 import { folderKey, folderName, orderedTasks, RecentFolder } from '../workspaceState';
 import { SUMMARY_CLIS, formatAgo, formatClock } from '../taskSummary';
@@ -464,6 +466,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <div
                           key={task.id}
                           data-task-id={task.id}
+                          // 一个文件夹里任务很多时，屏幕外的行跳过布局与绘制（行高由浏览器记住）；任务少时保持原样，行高始终精确
+                          style={folderTasks.length > LARGE_FOLDER_TASKS ? { contentVisibility: 'auto', containIntrinsicSize: 'auto 40px' } : undefined}
                           onContextMenu={(e) => {
                             e.preventDefault();
                             e.stopPropagation();

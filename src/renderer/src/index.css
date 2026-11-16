@@ -59,7 +59,7 @@
   --color-violet: 130 80 223;
 }
 
-/* 护眼主题：豆沙绿、羊皮纸（浅色，降低亮度与蓝光）；暖夜、北极灰蓝（深色，低对比柔和） */
+/* 护眼主题：豆沙绿、羊皮纸、薰衣草、雾灰（浅色，降低亮度与蓝光）；暖夜、北极灰蓝、森夜、墨夜（深色，低对比柔和） */
 :root[data-theme='bean'] {
   color-scheme: light;
   --color-canvas: 204 232 207;
@@ -162,6 +162,110 @@
   --color-warning: 235 203 139;
   --color-danger: 215 120 130;
   --color-violet: 180 142 173;
+}
+
+:root[data-theme='lavender'] {
+  color-scheme: light;
+  --color-canvas: 236 232 244;
+  --color-surface: 229 224 239;
+  --color-panel: 221 215 234;
+  --color-elevated: 244 241 250;
+  --color-muted: 229 224 239;
+  --color-control: 212 206 228;
+  --color-control-hover: 198 191 218;
+  --color-hover: 221 215 234;
+  --color-selected: 205 212 240;
+  --color-line: 205 198 224;
+  --color-line-strong: 160 152 190;
+  --color-fg: 44 38 62;
+  --color-fg-muted: 70 62 94;
+  --color-fg-subtle: 84 76 110;
+  --color-fg-faint: 92 84 118;
+  --color-accent: 66 82 178;
+  --color-primary: 66 82 178;
+  --color-primary-hover: 50 64 150;
+  --color-success: 30 110 70;
+  --color-warning: 140 90 0;
+  --color-danger: 185 35 60;
+  --color-violet: 112 62 180;
+}
+
+:root[data-theme='mist'] {
+  color-scheme: light;
+  --color-canvas: 228 233 238;
+  --color-surface: 220 226 232;
+  --color-panel: 212 219 226;
+  --color-elevated: 238 242 246;
+  --color-muted: 220 226 232;
+  --color-control: 202 210 219;
+  --color-control-hover: 188 198 209;
+  --color-hover: 212 219 226;
+  --color-selected: 190 211 232;
+  --color-line: 198 207 216;
+  --color-line-strong: 150 163 177;
+  --color-fg: 33 42 52;
+  --color-fg-muted: 58 70 84;
+  --color-fg-subtle: 72 84 98;
+  --color-fg-faint: 82 94 108;
+  --color-accent: 20 96 150;
+  --color-primary: 20 96 150;
+  --color-primary-hover: 14 78 124;
+  --color-success: 24 112 60;
+  --color-warning: 142 92 0;
+  --color-danger: 190 40 50;
+  --color-violet: 112 70 180;
+}
+
+:root[data-theme='forest'] {
+  color-scheme: dark;
+  --color-canvas: 24 31 27;
+  --color-surface: 29 37 32;
+  --color-panel: 34 43 37;
+  --color-elevated: 39 49 42;
+  --color-muted: 43 54 46;
+  --color-control: 52 65 56;
+  --color-control-hover: 66 82 71;
+  --color-hover: 43 54 46;
+  --color-selected: 44 76 58;
+  --color-line: 46 58 50;
+  --color-line-strong: 70 88 76;
+  --color-fg: 214 226 214;
+  --color-fg-muted: 188 204 190;
+  --color-fg-subtle: 150 168 154;
+  --color-fg-faint: 126 144 130;
+  --color-accent: 126 200 150;
+  --color-primary: 48 130 84;
+  --color-primary-hover: 62 156 102;
+  --color-success: 140 205 130;
+  --color-warning: 226 190 100;
+  --color-danger: 232 124 118;
+  --color-violet: 184 150 216;
+}
+
+:root[data-theme='ink'] {
+  color-scheme: dark;
+  --color-canvas: 22 26 38;
+  --color-surface: 27 32 46;
+  --color-panel: 32 38 54;
+  --color-elevated: 37 44 62;
+  --color-muted: 41 48 68;
+  --color-control: 50 59 82;
+  --color-control-hover: 63 74 102;
+  --color-hover: 41 48 68;
+  --color-selected: 52 66 108;
+  --color-line: 44 52 74;
+  --color-line-strong: 68 80 110;
+  --color-fg: 216 222 236;
+  --color-fg-muted: 190 198 216;
+  --color-fg-subtle: 152 162 186;
+  --color-fg-faint: 128 138 164;
+  --color-accent: 138 170 240;
+  --color-primary: 70 104 200;
+  --color-primary-hover: 90 126 224;
+  --color-success: 130 200 140;
+  --color-warning: 230 190 100;
+  --color-danger: 236 122 128;
+  --color-violet: 186 152 226;
 }
 
 /* 编辑器风格深色主题：Darcula（JetBrains 默认深色）、Sublime Material（Material Theme 深色默认配色） */
@@ -812,3 +916,15 @@ input[type='range'].seek-input:disabled { cursor: not-allowed; }
 
 /* 终端视口底色与 xterm 主题背景一致，避免主题切换瞬间露出旧底色。 */
 .xterm .xterm-viewport { background-color: rgb(var(--color-canvas)); }
+
+/* 终端链接需按住 Ctrl 单击才打开：未按住 Ctrl 时悬停不显示手型光标 */
+.term-host:not(.ctrl-held) .xterm.xterm-cursor-pointer,
+.term-host:not(.ctrl-held) .xterm .xterm-cursor-pointer {
+  cursor: text !important;
+}
+
+/* 开启「单击打开链接」后，悬停链接始终显示手型光标 */
+.term-host.link-click .xterm.xterm-cursor-pointer,
+.term-host.link-click .xterm .xterm-cursor-pointer {
+  cursor: pointer !important;
+}

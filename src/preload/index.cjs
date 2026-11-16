@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   restartSession: (id) => ipcRenderer.invoke('terminal:restart', { id }),
   clearSessionBuffer: (id) => ipcRenderer.invoke('terminal:clear-buffer', { id }),
   resolvePreviewPaths: (cwd, candidates) => ipcRenderer.invoke('preview:resolve', cwd, candidates),
+  allowDroppedPreview: (paths) => ipcRenderer.invoke('preview:allow-dropped', paths),
   readPreviewFile: (cwd, filePath) => ipcRenderer.invoke('preview:read', cwd, filePath),
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
   openDirectory: (dir) => ipcRenderer.invoke('shell:open-directory', dir),

@@ -251,7 +251,7 @@ app.whenReady().then(async () => {
       check('close visible when task focused', getComputedStyle(document.querySelector('button[aria-label="关闭 Task 1: UI regression"]')).opacity === '1');
       const colors = [];
       // 新增编辑器配色：正文、次要文字与点缀色在面板 / 画布上的对比度（WCAG 相对亮度）须达到下限
-      const NEW_THEMES = ['darcula', 'material', 'monokai', 'mariana', 'breakers', 'solarized-dark', 'solarized-light', 'cobalt', 'idea-classic-light', 'idea-light', 'idea-dark', 'idea-contrast', 'kiro-dark', 'kiro-light'];
+      const NEW_THEMES = ['lavender', 'mist', 'forest', 'ink', 'darcula', 'material', 'monokai', 'mariana', 'breakers', 'solarized-dark', 'solarized-light', 'cobalt', 'idea-classic-light', 'idea-light', 'idea-dark', 'idea-contrast', 'kiro-dark', 'kiro-light'];
       const rgbOf = name => getComputedStyle(document.documentElement).getPropertyValue('--color-' + name).trim().split(' ').map(Number);
       const lum = ([r, g, b]) => { const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
       const ratio = (a, b) => { const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
@@ -603,9 +603,19 @@ app.whenReady().then(async () => {
       check('the minimap switch turns the setting off and on again', window.currentSettings().previewMinimap === false && minimapSwitch().getAttribute('aria-checked') === 'false');
       minimapSwitch().click(); await tick(100);
       check('turning the minimap switch back on restores the setting', window.currentSettings().previewMinimap === true);
+      const smoothSwitch = () => document.querySelector('[role="switch"][aria-label="平滑滚动"]');
+      check('settings has a smooth-scrolling switch on the terminal page, off by default', Boolean(smoothSwitch()) && smoothSwitch().getAttribute('aria-checked') === 'false');
+      smoothSwitch().click(); await tick(100);
+      check('the smooth-scrolling switch turns the setting on', window.currentSettings().terminalSmoothScroll === true && smoothSwitch().getAttribute('aria-checked') === 'true');
+      smoothSwitch().click(); await tick(100);
+      const linkSwitch = () => document.querySelector('[role="switch"][aria-label="单击打开链接"]');
+      check('settings has a single-click-links switch, off by default', Boolean(linkSwitch()) && linkSwitch().getAttribute('aria-checked') === 'false');
+      linkSwitch().click(); await tick(100);
+      check('the single-click-links switch turns the setting on', window.currentSettings().terminalLinkClick === true);
+      linkSwitch().click(); await tick(100);
       [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.includes('外观')).click(); await tick(200);
       const names = label => [...document.querySelectorAll('[aria-label="' + label + '"] button')].map(b => b.textContent.trim()).join('|');
-      check('settings lists the eye-care themes', names('护眼主题色') === '豆沙绿|羊皮纸|暖夜|北极灰蓝');
+      check('settings lists the eye-care themes', names('护眼主题色') === '豆沙绿|羊皮纸|薰衣草|雾灰|暖夜|北极灰蓝|森夜|墨夜');
       check('settings lists the editor themes (Darcula, Sublime Material, the Sublime Text built-ins, the IDEA themes and Kiro)', names('编辑器配色主题') === 'Darcula|Sublime Material|Monokai|Mariana|Breakers|Solarized Dark|Solarized Light|Cobalt|IntelliJ Light|IDEA Light|IDEA Dark|IDEA 高对比度|Kiro Dark|Kiro Light');
       const tab =[...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.includes('账号'));
       check('settings has an accounts tab', Boolean(tab));
@@ -747,7 +757,7 @@ app.whenReady().then(async () => {
       langBtn('English').click(); await tick(300);
       check('choosing English stores the language setting', window.currentSettings().language === 'en');
       check('settings tabs switch to English at once', tabLabels() === 'Appearance|Time|Terminal|Account|CLI|Reminders|Shortcuts');
-      check('theme names follow the language', [...document.querySelectorAll('[aria-label="Eye-care theme colors"] button')].map(b => b.textContent.trim()).join('|') === 'Bean Green|Parchment|Warm Night|Arctic Gray Blue');
+      check('theme names follow the language', [...document.querySelectorAll('[aria-label="Eye-care theme colors"] button')].map(b => b.textContent.trim()).join('|') === 'Bean Green|Parchment|Lavender|Mist Gray|Warm Night|Arctic Gray Blue|Forest Night|Ink Night');
       const hasCjkS = (txt) => [...txt].some(c => c.charCodeAt(0) >= 0x2e80);
       for (const tabName of ['Time', 'Terminal', 'Account', 'CLI', 'Reminders', 'Shortcuts']) {
         [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.trim() === tabName).click(); await tick(250);
@@ -953,6 +963,14 @@ app.whenReady().then(async () => {
       host.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       await wait(250);
       check('double right-click pastes only once', reads === 1 && window.ptyWrites.filter(w => w.text.includes('pasted-once')).length === 1);
+      const notice = () => document.querySelector('[role="status"]')?.textContent;
+      check('pasting shows a Pasted notice', notice() === '已粘贴');
+      window.electronAPI.readPasteContent = async () => ({ type: 'image-path', content: 'C:/t/paste_1.png' });
+      host.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })); await wait(150);
+      check('pasting a screenshot says the image path was pasted', notice() === '已粘贴图片路径');
+      window.electronAPI.readPasteContent = async () => ({ type: 'none', content: '' });
+      host.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })); await wait(150);
+      check('pasting an empty clipboard says it is empty', notice() === '剪贴板为空');
 
       window.clearRoot(); window.drawTerm('focus-click'); await wait(300);
       const button = document.getElementById('outside-button');
@@ -970,6 +988,42 @@ app.whenReady().then(async () => {
       press({ key: 'Enter', code: 'Enter', keyCode: 13 }); await wait(50);
       press({ key: 'Enter', code: 'Enter', keyCode: 13 }); await wait(100);
       check('typing into a stopped task shows the restart hint once', written('进程已停止').length === 1);
+
+      // 上翻时显示「回到底部」，期间有新输出时提示，点击后回到底部并隐藏
+      window.clearRoot();
+      let emitScroll = null;
+      window.electronAPI.onSessionData = (callback) => { emitScroll = callback; return () => { emitScroll = null; }; };
+      window.electronAPI.writeSession = async () => true;
+      window.drawTerm('scroll-a'); await wait(300);
+      const CRLF = String.fromCharCode(13, 10);
+      emitScroll({ id: 'scroll-a', data: Array.from({ length: 200 }, (_, i) => 'line-' + i).join(CRLF) + CRLF }); await wait(150);
+      const jump = () => document.querySelector('button[aria-label="回到底部"], button[aria-label="有新输出，回到底部"]');
+      check('no back-to-bottom button while the terminal is at the bottom', !jump());
+      textarea().focus();
+      press({ key: 'PageUp', code: 'PageUp', keyCode: 33, shiftKey: true }); await wait(150);
+      check('scrolling up shows the back-to-bottom button without a new-output hint', jump()?.getAttribute('aria-label') === '回到底部');
+      emitScroll({ id: 'scroll-a', data: 'more-1' + CRLF + 'more-2' + CRLF }); await wait(150);
+      check('new output while scrolled up changes the button to the new-output hint', jump()?.getAttribute('aria-label') === '有新输出，回到底部');
+      jump().click(); await wait(150);
+      check('clicking the button scrolls to the bottom and hides it', !jump());
+      const toTop = () => document.querySelector('button[aria-label="回到顶部"]');
+      check('content over one screen shows a back-to-top button', Boolean(toTop()));
+      toTop().click(); await wait(150);
+      check('clicking back-to-top scrolls to the top: the top button hides and back-to-bottom appears', !toTop() && Boolean(jump()));
+      jump().click(); await wait(150);
+
+      // 按住 Ctrl 时容器带 ctrl-held（链接手型光标），松开或窗口失焦后移除
+      const termHost = document.querySelector('.term-host');
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control', ctrlKey: true, bubbles: true }));
+      check('holding Ctrl marks the terminal host', termHost.classList.contains('ctrl-held'));
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Control', ctrlKey: false, bubbles: true }));
+      check('releasing Ctrl clears the mark', !termHost.classList.contains('ctrl-held'));
+
+      // 没有终端实例的任务仍要重启底层进程
+      let restarted = null;
+      window.electronAPI.restartSession = async (id) => { restarted = id; return { success: true }; };
+      const restartResult = await window.termRef.current.restartActiveTerminal('never-opened');
+      check('restart without a terminal instance still restarts the process', restarted === 'never-opened' && restartResult?.success === true);
       window.clearRoot();
       window.electronAPI.writeSession = async (id, text) => { window.ptyWrites.push({ id, text }); return true; };
       return checks;

@@ -56,12 +56,11 @@ function formatDuration(diffMs: number): string {
 
 function formatResetDay(targetMs: number): string {
   if (!targetMs || targetMs <= Date.now()) return t('已重置');
-  const date = new Date(targetMs);
-  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const dayName = days[date.getDay()];
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `Resets ${dayName} ${hours}:${minutes}`;
+  const totalMinutes = Math.floor((targetMs - Date.now()) / 60000);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = String(Math.floor((totalMinutes % 1440) / 60)).padStart(2, '0');
+  const minutes = String(totalMinutes % 60).padStart(2, '0');
+  return t(days === 1 ? '1 天 {time}' : '{n} 天 {time}',{ n: days, time: `${hours}:${minutes}` });
 }
 
 export class QuotaService {

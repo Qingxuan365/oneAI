@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { SearchAddon } from '@xterm/addon-search';
+import { ArrowDown, ArrowUp } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
 import { TaskSession, ThemeId } from '../types';
 import { TerminalSearchBar } from './TerminalSearchBar';
@@ -39,6 +40,10 @@ interface TerminalViewportProps {
   lineHeight?: number;
   cursorStyle?: 'bar' | 'block' | 'underline';
   cursorBlink?: boolean;
+  /** 滚轮 / 翻页滚动带缓动动画 */
+  smoothScroll?: boolean;
+  /** 链接无需按住 Ctrl，单击即打开 */
+  linkClick?: boolean;
   /** 没有任何任务时显示的引导内容 */
   emptyState?: React.ReactNode;
   /** 点击终端中的工作目录内文件路径时触发，参数为任务 cwd 与文件绝对路径 */
@@ -92,6 +97,8 @@ export function matchToLinkRange(logical: LogicalLine, start: number, length: nu
 // 终端字体；设置页的字号预览也用它，保证预览与终端一致
 export const TERMINAL_FONT_FAMILY = 'Consolas, "Cascadia Code", "Fira Code", monospace';
 const MAX_WEBGL_TERMINALS = 8;
+// 开启平滑滚动时的缓动时长；再长会让翻页有拖尾感
+const SMOOTH_SCROLL_MS = 120;
 // 隐藏终端的合并写入间隔与积压上限
 const HIDDEN_FLUSH_DELAY_MS = 250;
 const HIDDEN_FLUSH_MAX_LENGTH = 1024 * 1024;
@@ -195,6 +202,8 @@ interface TerminalInstance {
   flushTimer: NodeJS.Timeout | null;
   lastFlushAt: number;
   flush: () => void;
+  /** 滚动到底部时记录的 baseY，用来判断上翻期间是否有新输出 */
+  bottomMark: number;
 }
 
 const DARK_TERMINAL_THEME = {
@@ -243,6 +252,34 @@ const NORD_TERMINAL_THEME = {
   magenta: '#b48ead', cyan: '#88c0d0', white: '#e5e9f0', brightBlack: '#6a7690',
   brightRed: '#e0919a', brightGreen: '#b5cf9f', brightYellow: '#f2d9a3', brightBlue: '#9bb6d0',
   brightMagenta: '#c4a3bd', brightCyan: '#8fbcbb', brightWhite: '#eceff4',
+};
+
+const LAVENDER_TERMINAL_THEME = {
+  background: '#ece8f4', foreground: '#2c263e', cursor: '#4252b2', selectionBackground: '#4252b238',
+  black: '#2c263e', red: '#b9233c', green: '#1e6e46', yellow: '#8a5a00', blue: '#4252b2', magenta: '#703eb4', cyan: '#136a78', white: '#5c5476',
+  brightBlack: '#544c6e', brightRed: '#951a2f', brightGreen: '#17593a', brightYellow: '#734a00', brightBlue: '#323f96',
+  brightMagenta: '#5a3092', brightCyan: '#0e5560', brightWhite: '#2c263e',
+};
+
+const MIST_TERMINAL_THEME = {
+  background: '#e4e9ee', foreground: '#212a34', cursor: '#146096', selectionBackground: '#14609638',
+  black: '#212a34', red: '#be2832', green: '#186c3c', yellow: '#8e5c00', blue: '#146096', magenta: '#7046b4', cyan: '#12687a', white: '#526070',
+  brightBlack: '#485664', brightRed: '#9a1c26', brightGreen: '#125a31', brightYellow: '#764c00', brightBlue: '#0e4e7c',
+  brightMagenta: '#5a3892', brightCyan: '#0e5463', brightWhite: '#212a34',
+};
+
+const FOREST_TERMINAL_THEME = {
+  background: '#181f1b', foreground: '#d6e2d6', cursor: '#7ec896', selectionBackground: '#7ec89638',
+  black: '#5b7062', red: '#e87c76', green: '#8ccd82', yellow: '#e2be64', blue: '#7fb0d8', magenta: '#b896d8', cyan: '#78c8b8', white: '#c4d2c4',
+  brightBlack: '#7a8e7e', brightRed: '#f0968f', brightGreen: '#a6dc9c', brightYellow: '#ecd085', brightBlue: '#9cc4e4',
+  brightMagenta: '#cdb0e6', brightCyan: '#96d8ca', brightWhite: '#eef5ee',
+};
+
+const INK_TERMINAL_THEME = {
+  background: '#161a26', foreground: '#d8deec', cursor: '#8aaaf0', selectionBackground: '#8aaaf038',
+  black: '#5a6890', red: '#ec7a80', green: '#82c88c', yellow: '#e6be64', blue: '#8aaaf0', magenta: '#ba98e2', cyan: '#78c4d4', white: '#c4cce0',
+  brightBlack: '#808aa6', brightRed: '#f4949a', brightGreen: '#9cd8a4', brightYellow: '#f0d086', brightBlue: '#a6c0f6',
+  brightMagenta: '#d0b2ee', brightCyan: '#96d6e2', brightWhite: '#f0f3fa',
 };
 
 const DARCULA_TERMINAL_THEME = {
@@ -364,6 +401,10 @@ const TERMINAL_THEMES: Record<ThemeId, typeof DARK_TERMINAL_THEME> = {
   parchment: PARCHMENT_TERMINAL_THEME,
   dusk: DUSK_TERMINAL_THEME,
   nord: NORD_TERMINAL_THEME,
+  lavender: LAVENDER_TERMINAL_THEME,
+  mist: MIST_TERMINAL_THEME,
+  forest: FOREST_TERMINAL_THEME,
+  ink: INK_TERMINAL_THEME,
   darcula: DARCULA_TERMINAL_THEME,
   material: MATERIAL_TERMINAL_THEME,
   monokai: MONOKAI_TERMINAL_THEME,
@@ -401,12 +442,18 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
   lineHeight = 1.3,
   cursorStyle = 'bar',
   cursorBlink = true,
+  smoothScroll = false,
+  linkClick = false,
   emptyState,
   onPreviewFile,
 }, ref) => {
   const onPreviewFileRef = useRef(onPreviewFile);
   onPreviewFileRef.current = onPreviewFile;
   const containerRef = useRef<HTMLDivElement>(null);
+  const linkClickRef = useRef(linkClick);
+  linkClickRef.current = linkClick;
+  // 单击即开时链接悬停始终显示手型光标（见 index.css 的 link-click）
+  useEffect(() => { containerRef.current?.classList.toggle('link-click', linkClick); }, [linkClick]);
   const lastSizeSyncRef = useRef('');
   const instancesRef = useRef<Map<string, TerminalInstance>>(new Map());
 
@@ -423,6 +470,41 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
   const [useRegex, setUseRegex] = useState(false);
   const [searchResult, setSearchResult] = useState<{ index: number; count: number } | null>(null);
   const [searchInvalid, setSearchInvalid] = useState(false);
+  // 复制成功的短提示；上翻时「回到底部」按钮及是否有新输出
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimerRef = useRef<number | null>(null);
+  const showNotice = (text: string) => {
+    setNotice(text);
+    if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = window.setTimeout(() => setNotice(null), 1200);
+  };
+  const [scrollState, setScrollState] = useState<{ up: boolean; fresh: boolean; canTop: boolean }>({ up: false, fresh: false, canTop: false });
+  // 只关心当前显示的终端；回到底部时重置新输出标记
+  const syncScrollState = (id: string) => {
+    if (id !== activeTaskIdRef.current) return;
+    const instance = instancesRef.current.get(id);
+    if (!instance) return;
+    const buf = instance.term.buffer.active;
+    const up = buf.type === 'normal' && buf.viewportY < buf.baseY;
+    if (!up) instance.bottomMark = buf.baseY;
+    // 内容超过一屏（有回滚区）且当前不在最顶部时可一键回到顶部
+    const canTop = buf.type === 'normal' && buf.baseY > 0 && buf.viewportY > 0;
+    const next = { up, fresh: up && buf.baseY > instance.bottomMark, canTop };
+    setScrollState((prev) => (prev.up === next.up && prev.fresh === next.fresh && prev.canTop === next.canTop ? prev : next));
+  };
+  const scrollToTop = () => {
+    const instance = activeTaskId ? instancesRef.current.get(activeTaskId) : null;
+    if (!instance) return;
+    instance.term.scrollToTop();
+    instance.term.focus();
+  };
+  const scrollToBottom = () => {
+    const instance = activeTaskId ? instancesRef.current.get(activeTaskId) : null;
+    if (!instance) return;
+    instance.term.scrollToBottom();
+    instance.term.focus();
+  };
+  useEffect(() => () => { if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current); }, []);
   const tasksRef = useRef(tasks);
   tasksRef.current = tasks;
   const activeTaskIdRef = useRef(activeTaskId);
@@ -459,6 +541,22 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
     return () => {
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('click', onClick, true);
+    };
+  }, []);
+
+  // 链接需按住 Ctrl 才能点开：按住时容器加 ctrl-held，悬停链接才显示手型光标（见 index.css）
+  useEffect(() => {
+    const host = containerRef.current;
+    const set = (held: boolean) => host?.classList.toggle('ctrl-held', held);
+    const onKey = (e: KeyboardEvent) => set(e.ctrlKey);
+    const onBlur = () => set(false);
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('keyup', onKey, true);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keyup', onKey, true);
+      window.removeEventListener('blur', onBlur);
     };
   }, []);
 
@@ -571,13 +669,17 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
     if (!taskId) return undefined;
     const instance = instancesRef.current.get(taskId);
     if (instance) {
-      instance.term.clear();
+      // reset 而不是 clear：旧进程退出时可能停在备用屏、鼠标上报、隐藏光标或 bracketed paste 状态，
+      // 这些模式不重置会带进新进程；同时丢弃旧进程尚未写入的积压输出
+      if (instance.flushTimer) { clearTimeout(instance.flushTimer); instance.flushTimer = null; }
+      instance.pendingData = '';
+      instance.term.reset();
       instance.term.write(`\r\n\x1b[33m[OneAI] ${t('正在重启 CLI 会话进程...')}\x1b[0m\r\n`);
-      const result = await window.electronAPI?.restartSession?.(taskId);
-      if (taskId === activeTaskIdRef.current) instance.term.focus();
-      return result || { success: false, error: t('重启接口不可用') };
     }
-    return { success: false, error: t('终端实例不存在') };
+    // 终端实例只在任务首次被选中时创建；没有实例时仍要重启底层进程，不能因此失败
+    const result = await window.electronAPI?.restartSession?.(taskId);
+    if (instance && taskId === activeTaskIdRef.current) instance.term.focus();
+    return result || { success: false, error: t('重启接口不可用') };
   };
 
   // 导出或复制当前会话最近约 2 MiB 的文本
@@ -626,17 +728,6 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
     exportActiveTerminalLog,
   }));
 
-  // 全局阻止默认拖拽行为，防止外部文件拖入非目标区域导致 Electron 窗口刷新/跳转
-  useEffect(() => {
-    const prevent = (e: DragEvent) => e.preventDefault();
-    window.addEventListener('dragover', prevent, false);
-    window.addEventListener('drop', prevent, false);
-    return () => {
-      window.removeEventListener('dragover', prevent, false);
-      window.removeEventListener('drop', prevent, false);
-    };
-  }, []);
-
   // 动态更新所有已有终端的字体大小、行高与光标样式，实时触发自适应排版
   useEffect(() => {
     instancesRef.current.forEach((instance) => {
@@ -662,6 +753,12 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
       }
     });
   }, [fontSize, lineHeight, cursorStyle, cursorBlink]);
+
+  useEffect(() => {
+    instancesRef.current.forEach(({ term }) => {
+      term.options.smoothScrollDuration = smoothScroll ? SMOOTH_SCROLL_MS : 0;
+    });
+  }, [smoothScroll]);
 
   // 为每个任务维护一个独立的 xterm 实例，切换时仅更改 display: none / block
   useEffect(() => {
@@ -704,6 +801,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
           lineHeight,
           cursorBlink,
           cursorStyle,
+          smoothScrollDuration: smoothScroll ? SMOOTH_SCROLL_MS : 0,
           cursorInactiveStyle: 'none',
           convertEol: false,
           allowTransparency: false,
@@ -738,7 +836,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
 
         // 链接需按住 Ctrl 单击才打开，避免点终端聚焦或划选时误触；悬停时给出提示
         const linkHover = {
-          hover: () => { termContainer.title = t('按住 Ctrl 单击打开'); },
+          hover: () => { termContainer.title = linkClickRef.current ? t('单击打开') : t('按住 Ctrl 单击打开'); },
           leave: () => { termContainer.title = ''; },
         };
 
@@ -763,7 +861,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
                   range,
                   ...linkHover,
                   activate: (e: MouseEvent, text: string) => {
-                    if (!e.ctrlKey) return;
+                    if (!e.ctrlKey && !linkClickRef.current) return;
                     if (window.electronAPI?.openExternal) {
                       window.electronAPI.openExternal(text);
                     } else {
@@ -799,6 +897,13 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
               const lineMatch = raw.match(/:(\d+)$/);
               found.push({ raw, range, file: raw.replace(/:\d+$/, ''), line: lineMatch ? Number(lineMatch[1]) : undefined });
             }
+            // 带引号的绝对路径（拖入含空格的文件时 OneAI 会加引号）：链接范围不含引号
+            const quotedRegex = /"([A-Za-z]:[\\/][^"\r\n]*?\.[A-Za-z][A-Za-z0-9]{0,7})"/g;
+            while ((match = quotedRegex.exec(text)) !== null && found.length < 20) {
+              const raw = match[1];
+              const range = matchToLinkRange(logical, match.index + 1, raw.length, bufferLineNumber);
+              if (range) found.push({ raw, range, file: raw, line: undefined });
+            }
             if (found.length === 0) {
               callback(undefined);
               return;
@@ -812,7 +917,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
                     text: item.raw,
                     range: item.range,
                     ...linkHover,
-                    activate: (e: MouseEvent) => { if (e.ctrlKey) onPreviewFileRef.current?.(task.cwd, target, item.line); },
+                    activate: (e: MouseEvent) => { if (e.ctrlKey || linkClickRef.current) onPreviewFileRef.current?.(task.cwd, target, item.line); },
                   }];
                 });
                 callback(links.length > 0 ? links : undefined);
@@ -833,6 +938,10 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
             term.write(`\r\n\x1b[90m[OneAI] ${t('进程已停止，输入未发送。请点击顶栏的重启按钮重新启动。')}\x1b[0m\r\n`);
           });
         });
+
+        // 上翻查看历史时显示「回到底部」，并提示期间是否有新输出
+        term.onScroll(() => syncScrollState(task.id));
+        term.onWriteParsed(() => syncScrollState(task.id));
 
         // 监听终端尺寸变更并同步 PTY
         term.onResize(({ cols, rows }) => {
@@ -868,6 +977,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
                 } catch {}
               }
               term.clearSelection();
+              showNotice(t('已复制'));
               return true;
             }
           }
@@ -887,22 +997,33 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
         };
 
         const pasteFromClipboard = async () => {
+          let failed = false;
+          let readOk = false;
           try {
             if (window.electronAPI?.readPasteContent) {
               const res = await window.electronAPI.readPasteContent();
+              readOk = true;
               if (res && res.content) {
                 // term.paste 会按 CLI 是否启用 bracketed paste 包裹，并把换行归一，避免多行内容被逐行提交
                 term.paste(res.content);
+                showNotice(res.type === 'image-path' ? t('已粘贴图片路径') : t('已粘贴'));
                 return;
               }
             }
-          } catch {}
+          } catch { failed = true; }
+          // 主进程已正常读取但没有内容：剪贴板为空，不再回退（浏览器接口可能一直等待权限）
+          if (readOk) { showNotice(t('剪贴板为空')); return; }
 
           // 回退到浏览器原生剪贴板 API
           try {
             const text = await navigator.clipboard.readText();
-            if (text) term.paste(text);
-          } catch {}
+            if (text) {
+              term.paste(text);
+              showNotice(t('已粘贴'));
+              return;
+            }
+          } catch { failed = true; }
+          showNotice(failed ? t('粘贴失败') : t('剪贴板为空'));
         };
 
         // 右键交互（对齐 Windows Terminal 黄金标准）：
@@ -1012,11 +1133,15 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
                 p = (file as any).path || '';
               }
               if (p) {
-                paths.push(p.includes(' ') ? `"${p}"` : p);
+                // 统一加引号：空格、& ( ) ' $ 等字符在 PowerShell 里都会被解析；路径内的双引号改成两个
+                paths.push(`"${p.replace(/"/g, '""')}"`);
               }
             }
             if (paths.length > 0) {
-              window.electronAPI?.writeSession(task.id, paths.join(' '));
+              // 拖入的图片允许在预览面板打开，即使不在工作目录内
+              void window.electronAPI?.allowDroppedPreview?.(paths.map((p) => p.slice(1, -1).replace(/""/g, '"')));
+              // 走 paste 以遵循 CLI 的 bracketed paste；末尾补空格，接着打字不会粘在路径上
+              term.paste(paths.join(' ') + ' ');
               term.focus();
             }
           }
@@ -1031,6 +1156,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
           pendingData: '',
           flushTimer: null,
           lastFlushAt: 0,
+          bottomMark: 0,
           flush: () => {
             if (instance.flushTimer) {
               clearTimeout(instance.flushTimer);
@@ -1086,7 +1212,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
         printedErrorsRef.current.delete(task.id);
       }
     });
-  }, [tasks]);
+  }, [tasks, activeTaskId]);
 
   // 最近显示过的终端，越靠前越新；用来决定哪些隐藏终端保留 WebGL
   const recentShownRef = useRef<string[]>([]);
@@ -1118,12 +1244,15 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
         }
       }
     }
+    if (activeTaskId) syncScrollState(activeTaskId);
+    else setScrollState({ up: false, fresh: false, canTop: false });
     instancesRef.current.forEach((instance, id) => {
       const isCurrent = id === activeTaskId;
       instance.container.style.display = isCurrent ? 'block' : 'none';
 
       if (isCurrent) {
-        // 隐藏期间攒下的输出先写入，再 fit
+        // 先按当前容器尺寸 fit，再写入隐藏期间攒下的输出，避免按旧宽度排版后再回卷
+        try { instance.fitAddon.fit(); } catch { /* ignore */ }
         instance.flush();
         setTimeout(() => {
           try {
@@ -1251,7 +1380,35 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
       />
 
       {/* 留白加在外层容器上，不能加在 .xterm 上 */}
-      <div ref={containerRef} className="w-full h-full overflow-hidden px-6 pt-2" style={{ display: tasks.length === 0 ? 'none' : 'block' }} />
+      <div ref={containerRef} className="term-host w-full h-full overflow-hidden px-6 pt-2" style={{ display: tasks.length === 0 ? 'none' : 'block' }} />
+      {scrollState.canTop && (
+        <button
+          type="button"
+          onClick={scrollToTop}
+          title={t('回到顶部')}
+          aria-label={t('回到顶部')}
+          className={`absolute right-8 z-20 flex h-7 w-7 items-center justify-center rounded-full border border-line-strong bg-elevated/95 text-fg-muted shadow-lg backdrop-blur hover:text-fg ${scrollState.up ? 'bottom-14' : 'bottom-4'}`}
+        >
+          <ArrowUp size={14} />
+        </button>
+      )}
+      {scrollState.up && (
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          title={scrollState.fresh ? t('有新输出，回到底部') : t('回到底部')}
+          aria-label={scrollState.fresh ? t('有新输出，回到底部') : t('回到底部')}
+          className={`absolute bottom-4 right-8 z-20 flex items-center gap-1 rounded-full border border-line-strong bg-elevated/95 px-2.5 py-1 text-xs shadow-lg backdrop-blur hover:text-fg ${scrollState.fresh ? 'text-accent' : 'text-fg-muted'}`}
+        >
+          <ArrowDown size={13} />
+          {scrollState.fresh ? t('有新输出，回到底部') : t('回到底部')}
+        </button>
+      )}
+      {notice && (
+        <div role="status" className="pointer-events-none absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-full border border-line-strong bg-elevated/95 px-3 py-1 text-xs text-fg shadow-lg backdrop-blur">
+          {notice}
+        </div>
+      )}
       {/* 没有可显示的活动任务时（含任务都在隐藏分组、或未选中任何任务）显示启动引导，避免中间空白 */}
       {!tasks.some((task) => task.id === activeTaskId) && (
         <div className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto p-6 select-none">

@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron';
+import { app, ipcMain } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { t } from './i18n';
@@ -21,14 +21,27 @@ export type FilePreviewResult =
   | { kind: 'image'; path: string; size: number; dataUrl: string }
   | { kind: 'binary' | 'too-large' | 'error'; path: string; size?: number; message?: string };
 
-/** 把候选路径解析为 cwd 内真实存在的文件；越界、不存在或不是文件时返回 null。 */
+/** 用户亲手拖进终端的图片：本次运行内允许预览（只记图片的真实路径，不开放其所在目录） */
+const droppedImages = new Set<string>();
+
+function isInside(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+/**
+ * 把候选路径解析为 cwd 内真实存在的文件；越界、不存在或不是文件时返回 null。
+ * 例外：OneAI 自己写入的粘贴截图目录（%TEMP%/OneAI_Images）里的图片也允许预览，其他位置一律拒绝。
+ */
 function resolveInside(cwd: string, candidate: string): string | null {
   try {
     const root = fs.realpathSync(path.resolve(String(cwd || '')));
     const target = fs.realpathSync(path.resolve(root, String(candidate || '')));
-    const relative = path.relative(root, target);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) return null;
-    return fs.statSync(target).isFile() ? target : null;
+    if (!fs.statSync(target).isFile()) return null;
+    if (isInside(root, target)) return target;
+    if (droppedImages.has(target)) return target;
+    const pasteDir = fs.realpathSync(path.join(app.getPath('temp'), 'OneAI_Images'));
+    return isInside(pasteDir, target) && IMAGE_MIME[path.extname(target).toLowerCase()] ? target : null;
   } catch {
     return null;
   }
@@ -57,6 +70,15 @@ export function setupFilePreview() {
   ipcMain.handle('preview:resolve', (_event, cwd: string, candidates: unknown) => {
     const list = Array.isArray(candidates) ? candidates.slice(0, 20) : [];
     return list.map((item) => resolveInside(cwd, String(item)));
+  });
+  ipcMain.handle('preview:allow-dropped', (_event, paths: unknown) => {
+    for (const item of (Array.isArray(paths) ? paths.slice(0, 50) : [])) {
+      try {
+        const real = fs.realpathSync(path.resolve(String(item)));
+        if (fs.statSync(real).isFile() && IMAGE_MIME[path.extname(real).toLowerCase()]) droppedImages.add(real);
+      } catch { /* 不存在或无权限的路径忽略 */ }
+    }
+    return true;
   });
   ipcMain.handle('preview:read', (_event, cwd: string, filePath: string) => readPreview(cwd, filePath));
 }

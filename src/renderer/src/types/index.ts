@@ -72,10 +72,10 @@ export interface FolderEntry {
   isExpanded: boolean;
 }
 
-// 具体主题 id；bean 豆沙绿、parchment 羊皮纸、dusk 暖夜、nord 北极灰蓝为护眼主题；
+// 具体主题 id；bean 豆沙绿、parchment 羊皮纸、dusk 暖夜、nord 北极灰蓝、lavender 薰衣草、mist 雾灰、forest 森夜、ink 墨夜为护眼主题；
 // 其余为编辑器配色：darcula、material（Sublime Material），以及 Sublime Text 内置的 monokai、mariana、breakers、solarized-dark、solarized-light、cobalt，以及 IntelliJ IDEA 自带的 idea-classic-light、idea-light、idea-dark、idea-contrast，以及 Kiro IDE 的 kiro-dark、kiro-light
 export type ThemeId =
-  | 'light' | 'dark' | 'bean' | 'parchment' | 'dusk' | 'nord'
+  | 'light' | 'dark' | 'bean' | 'parchment' | 'dusk' | 'nord' | 'lavender' | 'mist' | 'forest' | 'ink'
   | 'darcula' | 'material' | 'monokai' | 'mariana' | 'breakers' | 'solarized-dark' | 'solarized-light' | 'cobalt'
   | 'idea-classic-light' | 'idea-light' | 'idea-dark' | 'idea-contrast'
   | 'kiro-dark' | 'kiro-light';
@@ -91,6 +91,8 @@ export interface AppSettings {
   uiScale: 'compact' | 'standard' | 'comfortable' | 'large'; // 界面全局字体缩放
   terminalCursorStyle: 'bar' | 'block' | 'underline'; // 终端光标样式 (默认 'bar')
   terminalCursorBlink: boolean; // 终端光标闪烁 (默认 true)
+  terminalLinkClick: boolean; // 终端链接无需按住 Ctrl，单击即打开，默认 false
+  terminalSmoothScroll: boolean; // 终端滚轮 / 翻页滚动带缓动动画（约 120ms），默认 false
   previewMinimap: boolean; // 文件预览面板右侧是否显示代码缩略图（minimap），默认 true
   musicDirectory: string; // 顶栏音乐播放目录，空字符串表示系统「音乐」目录
   musicPlayerVisible: boolean; // 侧栏底部是否显示音乐播放器，默认 true
@@ -197,6 +199,7 @@ export interface ElectronTerminalAPI {
   restartSession?: (id: string) => Promise<{ success: boolean; buffer?: string; error?: string }>;
   clearSessionBuffer?: (id: string) => Promise<boolean>;
   resolvePreviewPaths?: (cwd: string, candidates: string[]) => Promise<Array<string | null>>;
+  allowDroppedPreview?: (paths: string[]) => Promise<boolean>;
   readPreviewFile?: (cwd: string, filePath: string) => Promise<FilePreviewResult>;
   openExternal?: (url: string) => Promise<boolean>;
   /** 在资源管理器中打开文件夹，目录不存在时返回 false */

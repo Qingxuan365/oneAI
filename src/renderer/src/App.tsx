@@ -34,6 +34,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   uiScale: 'comfortable',
   terminalCursorStyle: 'bar',
   terminalCursorBlink: true,
+  terminalSmoothScroll: false,
+  terminalLinkClick: false,
   previewMinimap: true,
   musicDirectory: '',
   musicPlayerVisible: true,
@@ -964,6 +966,8 @@ ${entry.cwd}`}
             lineHeight={settings.terminalLineHeight}
             cursorStyle={settings.terminalCursorStyle}
             cursorBlink={settings.terminalCursorBlink}
+            smoothScroll={settings.terminalSmoothScroll === true}
+            linkClick={settings.terminalLinkClick === true}
             emptyState={emptyState}
             onPreviewFile={(cwd, path, line) => setFilePreview({ cwd, path, line, openedAt: Date.now() })}
           />

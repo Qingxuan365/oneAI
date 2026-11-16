@@ -400,6 +400,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <span>{t('光标闪烁')}</span>
                   <Switch label={t('光标闪烁')} checked={settings.terminalCursorBlink} onChange={(checked) => update({ terminalCursorBlink: checked })} />
                 </div>
+                <div className={row}>
+                  <span>
+                    <span className="block">{t('平滑滚动')}</span>
+                    <span className="block text-xs text-fg-faint">{t('鼠标滚轮和翻页键滚动终端时带缓动动画，CLI 输出刷新不受影响')}</span>
+                  </span>
+                  <Switch label={t('平滑滚动')} checked={settings.terminalSmoothScroll === true} onChange={(checked) => update({ terminalSmoothScroll: checked })} />
+                </div>
+                <div className={row}>
+                  <span>
+                    <span className="block">{t('单击打开链接')}</span>
+                    <span className="block text-xs text-fg-faint">{t('开启后无需按住 Ctrl，直接单击终端里的网址或文件路径即可打开；划选文字时可能误触')}</span>
+                  </span>
+                  <Switch label={t('单击打开链接')} checked={settings.terminalLinkClick === true} onChange={(checked) => update({ terminalLinkClick: checked })} />
+                </div>
               </Section>
 
               <Section title={t('文件预览')} hint={t('Ctrl + 单击终端里的文件路径打开')}>

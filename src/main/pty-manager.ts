@@ -134,8 +134,12 @@ export class PtyManager {
         buffer.chunks.shift();
         buffer.length -= first.length;
       } else {
-        buffer.chunks[0] = first.slice(overflow);
-        buffer.length -= overflow;
+        // 从行首开始保留：避免回放时开头是被截断的转义序列或半个代理对而显示乱码
+        let cut = overflow;
+        const nl = first.indexOf('\n', overflow);
+        if (nl >= 0 && nl - overflow < 4096) cut = nl + 1;
+        buffer.chunks[0] = first.slice(cut);
+        buffer.length -= cut;
       }
     }
 

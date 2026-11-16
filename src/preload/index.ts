@@ -65,6 +65,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resolvePreviewPaths: (cwd: string, candidates: string[]) =>
     ipcRenderer.invoke('preview:resolve', cwd, candidates),
 
+  allowDroppedPreview: (paths: string[]) =>
+    ipcRenderer.invoke('preview:allow-dropped', paths),
+
   readPreviewFile: (cwd: string, filePath: string) =>
     ipcRenderer.invoke('preview:read', cwd, filePath),
 
