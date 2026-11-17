@@ -104,6 +104,8 @@ const HIDDEN_FLUSH_DELAY_MS = 250;
 const HIDDEN_FLUSH_MAX_LENGTH = 1024 * 1024;
 // 活动终端立即写入的输出上限：超过时多半是整屏重绘，仍按帧合并
 const ECHO_FLUSH_MAX_LENGTH = 4 * 1024;
+// 输入法重复提交同一段文本时，两次到达的间隔通常只有几十毫秒
+const DUPLICATE_INPUT_WINDOW_MS = 300;
 
 const SEARCH_DECORATIONS = {
   matchBackground: '#b58900',
@@ -959,7 +961,18 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
         // 绑定键盘输入并发送到 Electron 主进程
         // 进程已停止时输入会被丢弃：提示一次如何重启，之后再打字不重复提示，直到重新写入成功
         let stoppedHintShown = false;
+        // 微信等输入法在右键粘贴、快捷键语音上屏时，同一段文本会经两条路径（compositionend 与 insertText、
+        // term.paste 与原生 paste 事件）各进入 xterm 一次（issue #4）。短时间内完全相同的多字符文本只发送一次；
+        // 方向键等转义序列可能合法地快速重复，不参与去重（括号粘贴除外）。
+        let lastText = '';
+        let lastTextAt = 0;
         term.onData((data) => {
+          if (data.length > 1 && (!data.startsWith('\x1b') || data.startsWith('\x1b[200~'))) {
+            const now = performance.now();
+            if (data === lastText && now - lastTextAt < DUPLICATE_INPUT_WINDOW_MS) return;
+            lastText = data;
+            lastTextAt = now;
+          }
           void window.electronAPI?.writeSession(task.id, data).then((written) => {
             if (written !== false) { stoppedHintShown = false; return; }
             const status = tasksRef.current.find((item) => item.id === task.id)?.status;
