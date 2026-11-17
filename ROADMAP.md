@@ -122,7 +122,8 @@
 
 ## 4. 最近验证
 
-- **2026-11-17 04:10**：issue #4 输入去重修复后 `npx tsc --noEmit` 通过；去重逻辑独立脚本 8 个场景全部通过（右键粘贴双路径含 / 不含括号粘贴、语音上屏双事件只发送一次；间隔超过 300 ms 的重复粘贴、方向键连按、单字连打、回车连按、不同文本均不受影响）；在已安装的 OneAI v2.1.5 中用 Computer Use 于 PowerShell 任务实测：右键粘贴与 Ctrl+V 各只上屏一次，相隔约 1 秒的两次右键粘贴各出现一次，键盘输入正常；用户实测快捷键语音输入不再重复。
+- **2026-11-17 20:23**：GitHub Release `v2.1.5` 安装包替换为含 issue #4 修复的 `release/OneAI-Setup-2.1.5.exe`（`gh release upload --clobber`）：线上附件 86082230 字节，SHA-256 `8c9a0cec…88c1` 与本地一致，Release 仍为 Latest；标签 `v2.1.5` 未移动，仍指向修复前的 `9954b66`。
+- **2026-11-17 20:16**：issue #4 输入去重修复后 `npx tsc --noEmit` 通过；去重逻辑独立脚本 8 个场景全部通过（右键粘贴双路径含 / 不含括号粘贴、语音上屏双事件只发送一次；间隔超过 300 ms 的重复粘贴、方向键连按、单字连打、回车连按、不同文本均不受影响）；在已安装的 OneAI v2.1.5 中用 Computer Use 于 PowerShell 任务实测：右键粘贴与 Ctrl+V 各只上屏一次，相隔约 1 秒的两次右键粘贴各出现一次，键盘输入正常；用户实测快捷键语音输入不再重复。
 - **2026-11-16 20:23**：本周用量弹窗 CLI 大类添加折叠按钮后，`npx tsc --noEmit` 通过；`npm run check:i18n` 532 条文案 0 缺失、0 占位符不一致；`npm run check:ui` 370 项全部通过（新增 5 项验证 CLI 大类默认展开并带折叠按钮、点击折叠按钮或大类行可收起 / 展开其下的账号与模型列表、收起时保留小计及其他大类状态）；Electron 离屏截图实测展开与折叠状态视觉对齐；`npm run build:win` 通过，`release/OneAI-Setup-2.1.4.exe` 86082035 字节（2026-11-16 20:22:50）。未验证：重新安装运行 `OneAI-Setup-2.1.4.exe` 后在真实桌面窗口里的实际交互观感。
 - **2026-11-16 20:12**：折叠侧栏文件夹与 CLI 任务按钮改为等距垂直间距后，`npx tsc --noEmit` 通过；`npm run check:i18n` 530 条文案 0 缺失、0 占位符不一致；`npm run check:ui` 365 项全部通过（新增断言验证折叠侧栏相邻文件夹与任务按钮的垂直间距均一致且不小于 3px）；`npm run build:win` 通过，`release/OneAI-Setup-2.1.4.exe` 86081459 字节（2026-11-16 20:12:03）。未验证：重新安装运行 `OneAI-Setup-2.1.4.exe` 后在真实桌面应用折叠侧栏的视觉观感。
 - **2026-11-16 20:06**：本周用量弹窗每日使用频次方块图改为占满整行后，`npx tsc --noEmit` 通过；`npm run check:i18n` 530 条文案 0 缺失、0 占位符不一致；`npm run check:ui` 364 项全部通过（新增断言验证中英文下方块图占满整行且无横向溢出、方块为正方形且大于原 14px 尺寸、周几标签与对应行中心垂直对齐）；并在 Electron 离屏截图实测中文与英文布局观感；`npm run build:win` 通过，`release/OneAI-Setup-2.1.4.exe` 86081373 字节（2026-11-16 20:05:52）。未验证：重新安装运行 `OneAI-Setup-2.1.4.exe` 后在真实桌面窗口里的观感。
@@ -146,7 +147,7 @@
 
 ## 5. 最近完成
 
-- **2026-11-17 04:10** 修复 issue #4：微信输入法下右键粘贴、快捷键语音上屏文字重复两遍（`TerminalViewport.tsx`）。同一段文本会经两条路径（`compositionend` 与 `insertText`、`term.paste` 与原生 paste 事件）各进入 xterm 一次，`onData` 改为 300 ms 内完全相同的多字符文本只发送一次；单字符与方向键等转义序列不参与去重，括号粘贴除外。
+- **2026-11-17 20:16** 修复 issue #4：微信输入法下右键粘贴、快捷键语音上屏文字重复两遍（`TerminalViewport.tsx`）。同一段文本会经两条路径（`compositionend` 与 `insertText`、`term.paste` 与原生 paste 事件）各进入 xterm 一次，`onData` 改为 300 ms 内完全相同的多字符文本只发送一次；单字符与方向键等转义序列不参与去重，括号粘贴除外。
 - **2026-11-17 02:46** 修复输入法组合文字显示在 CLI 输入框后面（`TerminalViewport.tsx`）：未单独适配的 CLI 统一使用 `findDrawnCursorAnchor`，真实光标隐藏时定位到 CLI 绘制的反色光标；实测 Claude Code / Kimi / Pi 隐藏光标并绘制反色光标，Codex / Antigravity 使用真实光标保持默认。
 - **2026-11-16 20:23** 本周用量弹窗每个 CLI 大类前添加折叠按钮（`UsageModal.tsx`）：在品牌图标与 CLI 名称前加入带旋转动画的 `ChevronRight` 折叠按钮（点击按钮或大类行均可切换，保持 `aria-expanded` 与整行小计显示），收起时同步隐藏该 CLI 下的账号分段与模型列表；同步 `en.ts`、`docs/features*.md` 与 `check-ui.mjs`。
 - **2026-11-16 20:12** 统一折叠侧栏文件夹与 CLI 任务按钮的垂直间距（`Sidebar.tsx`）：列表容器由 `gap-0.5` 改为 `gap-1`（与折叠底部操作栏保持一致），移除文件夹按钮的 `[&:not(:first-child)]:mt-2`，消除文件夹与任务按钮之间间距参差不齐的问题；`check-ui.mjs` 新增相邻按钮等距断言。
