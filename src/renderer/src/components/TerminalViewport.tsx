@@ -161,7 +161,29 @@ function findPiInputAnchor(term: Terminal): { row: number; col: number } | null 
 
 type InputAnchorFinder = (term: Terminal) => { row: number; col: number } | null;
 
-/** 各 CLI 的输入法定位点查找方式，未列出的 CLI 保持 xterm 默认行为。 */
+/**
+ * 通用规则：多数 TUI（Claude Code、Qwen Code 等基于 Ink 的 CLI）会隐藏真实光标，在输入框里画一个反色单元格当光标，
+ * 真实光标停在屏幕末尾，输入法组合文字因此跑到输入框后面。真实光标隐藏时，自下而上取第一个孤立的反色单元格；
+ * 光标可见（如 Codex）或找不到时返回 null，保持 xterm 默认行为。
+ */
+function findDrawnCursorAnchor(term: Terminal): { row: number; col: number } | null {
+  const core = (term as unknown as { _core?: { coreService?: { isCursorHidden?: boolean } } })._core;
+  if (!core?.coreService?.isCursorHidden) return null;
+  const buf = term.buffer.active;
+  for (let y = term.rows - 1; y >= 0; y--) {
+    const line = buf.getLine(buf.viewportY + y);
+    if (!line) continue;
+    for (let x = 0; x < line.length; x++) {
+      if (!line.getCell(x)?.isInverse()) continue;
+      if (x > 0 && line.getCell(x - 1)?.isInverse()) continue;
+      if (line.getCell(x + 1)?.isInverse()) continue;
+      return { row: y, col: x };
+    }
+  }
+  return null;
+}
+
+/** 各 CLI 专用的输入法定位点查找方式，未列出的 CLI 使用 findDrawnCursorAnchor 通用规则。 */
 export const IME_ANCHOR_FINDERS: Record<string, InputAnchorFinder> = {
   kimi: findKimiInputAnchor,
   pi: findPiInputAnchor,
@@ -840,8 +862,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
         // WebGL 渲染在终端显示时由下方的切换逻辑按需挂载，见 MAX_WEBGL_TERMINALS
         fitAddon.fit();
 
-        const findAnchor = IME_ANCHOR_FINDERS[task.groupId];
-        if (findAnchor) attachImeAnchor(term, termContainer, findAnchor);
+        attachImeAnchor(term, termContainer, IME_ANCHOR_FINDERS[task.groupId] ?? findDrawnCursorAnchor);
 
         // 链接需按住 Ctrl 单击才打开，避免点终端聚焦或划选时误触；悬停时给出提示
         const linkHover = {

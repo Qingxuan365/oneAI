@@ -1,6 +1,7 @@
 # OneAI 开发路线图与进度看板
 
 ## 1. 当前阶段
+- **独立网络工具（进行中）**：2026-11-17 01:52 真实 WebView2 验收发现并修复初始 data URL 被拦截的白屏，改用固定应用协议；结果改为可读状态卡片，不再展示 JSON。Release 版实际检测、IPC、11 张卡片、网络失败、IPv6 超时、重复检测、按钮恢复和无横向溢出检查通过，配置脱敏两项 Rust 测试通过。Windows Computer Use 内核初始化故障仍阻塞原生保存／取消／关闭交互，不标记全部完成。详细证据与限制见 [验证记录](D:/GitHub/OneAI/tools/network-check/VALIDATION.md) ，使用见 [工具说明](D:/GitHub/OneAI/tools/network-check/README.md) 。
 - **阶段**：Phase 27 - 多账号配置；Phase 26 参照效果图重做顶栏与侧栏（第一至三步完成，标题栏融合待决定）
 - **状态**：Phase 26 第三步（任务行第二行显示最近一条用户消息）已完成并通过自动检查与真实应用端到端检查；Phase 26 第二步（侧栏改为「文件夹 → 任务」、Git 分支徽标、最近任务）已完成并通过自动检查与真实应用端到端检查；多账号（Codex、Claude Code、Kimi Code）已完成并通过自动检查，便携包已生成，真实应用里的环境注入与账号隔离已端到端验证，真实登录流程待手工验收；Phase 26 第一步（顶栏 Tokens / Cost / CPU / Mem / Net 与侧栏品牌头部）已完成并通过自动检查与真实应用启动检查；第二步（侧栏按文件夹分组、Git 分支、最近任务）和第三步（任务行消息预览）尚未开始；桌面实际观感与中文输入法仍待手工验收
 
@@ -144,6 +145,7 @@
 
 ## 5. 最近完成
 
+- **2026-11-17 02:46** 修复输入法组合文字显示在 CLI 输入框后面（`TerminalViewport.tsx`）：未单独适配的 CLI 统一使用 `findDrawnCursorAnchor`，真实光标隐藏时定位到 CLI 绘制的反色光标；实测 Claude Code / Kimi / Pi 隐藏光标并绘制反色光标，Codex / Antigravity 使用真实光标保持默认。
 - **2026-11-16 20:23** 本周用量弹窗每个 CLI 大类前添加折叠按钮（`UsageModal.tsx`）：在品牌图标与 CLI 名称前加入带旋转动画的 `ChevronRight` 折叠按钮（点击按钮或大类行均可切换，保持 `aria-expanded` 与整行小计显示），收起时同步隐藏该 CLI 下的账号分段与模型列表；同步 `en.ts`、`docs/features*.md` 与 `check-ui.mjs`。
 - **2026-11-16 20:12** 统一折叠侧栏文件夹与 CLI 任务按钮的垂直间距（`Sidebar.tsx`）：列表容器由 `gap-0.5` 改为 `gap-1`（与折叠底部操作栏保持一致），移除文件夹按钮的 `[&:not(:first-child)]:mt-2`，消除文件夹与任务按钮之间间距参差不齐的问题；`check-ui.mjs` 新增相邻按钮等距断言。
 - **2026-11-16 20:06** 本周用量弹窗「每日使用频次」方块图改为占满整行（`UsageModal.tsx`）：改用 `grid-rows-subgrid` + `auto repeat(N, minmax(0, 1fr))` 铺满容器宽度，方块通过 `aspect-square w-full` 自适应为等宽等高正方形，周几标签与各行居中对齐、末列月份右对齐防止横向溢出，外层增加 `p-px` 避免今日边框被裁剪；`check-ui.mjs` 补充中英文全宽占满与对齐断言。
