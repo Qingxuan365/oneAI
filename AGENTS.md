@@ -34,6 +34,7 @@ d:/GitHub/OneAI/
 ├── src/
 │   ├── main/                  # Electron 主进程代码
 │   │   ├── index.ts           # 窗口创建、应用生命周期与 IPC 注册
+│   │   ├── diagnostics.ts     # 卡顿诊断日志：主进程事件循环阻塞、慢 IPC、渲染进程无响应 / 崩溃，写入 userData/logs/oneai-diag.log
 │   │   ├── fs-utils.ts        # 路径大小写归一化、目录包含判断、文件切片与 .zst 流式解压、LRU 容量上限 Map
 │   │   ├── pty-manager.ts     # node-pty 进程池管理器；按任务账号注入 CODEX_HOME / CLAUDE_CONFIG_DIR / KIMI_CODE_HOME
 │   │   ├── quota-service.ts   # 大模型配额、模型与推理等级、会话累计 Tokens / Cost 读取及配置热监听

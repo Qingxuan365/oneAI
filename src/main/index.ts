@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, clipboard, shell, dialog, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, clipboard, shell, dialog, Menu, screen, session } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +17,7 @@ import { allowPreviewFilePaths, isImageExtension, setupFilePreview } from './fil
 import { bindWindowState, loadWindowState, WindowStateTracker } from './window-state';
 import { getLanguage, setLanguage, t } from './i18n';
 import { quoteTerminalPath } from '../shared/paths';
+import { startDiagnostics, timed, watchWindow } from './diagnostics';
 
 registerMusicScheme();
 
@@ -39,10 +40,22 @@ function createWindow() {
   const appIcon = fs.existsSync(iconCandidate) ? iconCandidate : undefined;
   const initialWindow = loadWindowState();
 
-  mainWindow = new BrowserWindow({
-    ...(initialWindow.x !== undefined && initialWindow.y !== undefined ? { x: initialWindow.x, y: initialWindow.y } : {}),
+  // 上次是最大化时，直接按所在屏幕工作区尺寸创建窗口，让首帧按最大化尺寸渲染；
+  // 否则先按还原尺寸渲染再 maximize()，显示瞬间只有左上角一块还原尺寸的画面，其余区域空白
+  const restoreBounds = {
+    x: initialWindow.x ?? 0,
+    y: initialWindow.y ?? 0,
     width: initialWindow.width,
     height: initialWindow.height,
+  };
+  const startBounds = initialWindow.isMaximized
+    ? screen.getDisplayMatching(restoreBounds).workArea
+    : initialWindow.x !== undefined && initialWindow.y !== undefined
+      ? restoreBounds
+      : { width: initialWindow.width, height: initialWindow.height };
+
+  mainWindow = new BrowserWindow({
+    ...startBounds,
     minWidth: 900,
     minHeight: 600,
     show: false,
@@ -62,6 +75,7 @@ function createWindow() {
   });
 
   windowStateTracker = bindWindowState(mainWindow, initialWindow);
+  watchWindow(mainWindow);
 
   // 应用只有一个页面：文件拖到终端以外的区域时 Chromium 会把窗口导航到该文件，整个界面被替换。
   // 一律拦截页面跳转（重新加载不经过 will-navigate，不受影响），新窗口也不打开（链接由 shell:open-external 处理）
@@ -85,14 +99,20 @@ function createWindow() {
     clearTimeout(showFallbackTimer);
     if (initialWindow.isMaximized) {
       mainWindow.maximize();
+      // 窗口按工作区尺寸创建，首次取消最大化时恢复到上次保存的还原尺寸
+      mainWindow.once('unmaximize', () => {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        if (initialWindow.x !== undefined && initialWindow.y !== undefined) mainWindow.setBounds(restoreBounds);
+        else { mainWindow.setSize(restoreBounds.width, restoreBounds.height); mainWindow.center(); }
+      });
     }
     mainWindow.show();
     bgStartupTimer = setTimeout(() => {
       bgStartupTimer = null;
       if (!mainWindow || mainWindow.isDestroyed()) return;
-      quotaService.startPolling(30000);
-      stopSystemStats = startSystemStats(mainWindow);
-      void cleanupPastedImages();
+      timed('quota polling start', () => quotaService.startPolling(30000));
+      stopSystemStats = timed('system stats start', () => startSystemStats(mainWindow!));
+      void timed('pasted image cleanup start', () => cleanupPastedImages());
     }, 800);
   };
   const showFallbackTimer = setTimeout(revealWindow, 3000);
@@ -372,7 +392,22 @@ async function cleanupPastedImages(): Promise<void> {
   }
 }
 
+// 只允许一个实例：第二个实例拿不到 localStorage 的数据库锁，会读到空设置而重新弹出首次引导（语言、主题都像被重置），
+// 还会与第一个实例同时写工作区文件。再次启动时改为聚焦已有窗口
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    if (!mainWindow.isVisible()) mainWindow.show();
+    mainWindow.focus();
+  });
+}
+
 app.whenReady().then(() => {
+  if (!app.hasSingleInstanceLock()) return;
+  startDiagnostics();
   // 去掉 Electron 默认菜单：它的 Ctrl+W 关窗、Ctrl+R 刷新与 CLI 常用键冲突，按 Alt 还会弹出菜单栏抢走焦点。
   // 开发模式保留，方便用 Ctrl+Shift+I 打开开发者工具。
   if (!process.env.VITE_DEV_SERVER_URL) Menu.setApplicationMenu(null);
@@ -387,6 +422,8 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', () => {
+  // localStorage（设置、引导状态）由 Chromium 延迟写盘，退出前主动刷盘，避免最近的改动丢失
+  try { session.defaultSession.flushStorageData(); } catch {}
   quotaService.stopPolling();
   ptyManager.destroyAll();
 });
