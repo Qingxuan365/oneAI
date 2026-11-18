@@ -96,6 +96,7 @@ OneAI 在本机运行，没有遥测和统计，也没有更新检查。它读�
 
 - [Claude](https://claude.com/claude-code)（Anthropic）-- AI 结对编程伙伴；项目中大量代码、测试和文档由 Claude Code 协助完成。
 - [Codex](https://openai.com/codex)（OpenAI）-- AI 结对编程伙伴；同样参与了代码与文档的编写和审查。
+- [Gemini](https://gemini.google.com)（Google）-- AI 结对编程伙伴；通过 Antigravity 参与了功能开发、性能优化、测试与文档编写。
 
 ## 许可证
 

@@ -96,6 +96,7 @@ Issues and pull requests are welcome. Project conventions, directory layout and 
 
 - [Claude](https://claude.com/claude-code) (Anthropic) -- AI pair programmer; much of the code, tests and documentation was written with Claude Code.
 - [Codex](https://openai.com/codex) (OpenAI) -- AI pair programmer; also used to write and review code and documentation.
+- [Gemini](https://gemini.google.com) (Google) -- AI pair programmer; also used via Antigravity to build, optimize and verify features and documentation.
 
 ## License
 
