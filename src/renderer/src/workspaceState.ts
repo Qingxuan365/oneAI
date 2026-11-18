@@ -208,9 +208,44 @@ const STATE_KEY = 'oneai_state_v2';
 const OLD_WORKSPACES_KEY = 'oneai_workspaces';
 const OLD_ACTIVE_KEY = 'oneai_active_workspace';
 const OLD_LEGACY_KEY = 'oneai_workspace';
+const SAVE_DEBOUNCE_MS = 250;
+
+let cachedOldWorkspaces: Record<string, any> | undefined;
+let cachedOldActive: string | null | undefined;
+let lastSavedPersistedJson = '';
+let pendingPersistedState: AppState | null = null;
+let pendingPersistedJson = '';
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let unloadHooked = false;
 
 function readJson(key: string): unknown {
   try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; }
+}
+
+function getOldWorkspaces(): Record<string, any> {
+  if (cachedOldWorkspaces === undefined) {
+    const raw = readJson(OLD_WORKSPACES_KEY);
+    cachedOldWorkspaces = isRecord(raw) ? raw : {};
+  }
+  return cachedOldWorkspaces;
+}
+
+function getOldActiveWorkspace(): string | null {
+  if (cachedOldActive === undefined) {
+    try { cachedOldActive = localStorage.getItem(OLD_ACTIVE_KEY); } catch { cachedOldActive = null; }
+  }
+  return cachedOldActive;
+}
+
+/** 剥离纯运行时瞬态字段（status 读回时一律重置为 stopped，errorMessage 读回时丢弃），避免 running <-> idle 切换触发无效写盘 */
+function toPersistableState(state: AppState): AppState {
+  return {
+    ...state,
+    tasks: state.tasks.map(({ errorMessage: _err, status: _status, ...rest }) => ({
+      ...rest,
+      status: 'stopped',
+    })),
+  };
 }
 
 /** 启动时读取状态：新格式优先（主进程落盘文件为准），没有则从旧的各工作区数据迁移 */
@@ -221,30 +256,73 @@ export function loadAppState(): AppState {
     if (raw) {
       const saved = JSON.parse(raw);
       // 旧数据原样回填到 localStorage，供迁移与保存时透传
-      if (isRecord(saved?.workspaces)) localStorage.setItem(OLD_WORKSPACES_KEY, JSON.stringify(saved.workspaces));
-      if (typeof saved?.activeWorkspace === 'string' && saved.activeWorkspace) localStorage.setItem(OLD_ACTIVE_KEY, saved.activeWorkspace);
+      if (isRecord(saved?.workspaces)) {
+        cachedOldWorkspaces = saved.workspaces;
+        localStorage.setItem(OLD_WORKSPACES_KEY, JSON.stringify(saved.workspaces));
+      }
+      if (typeof saved?.activeWorkspace === 'string' && saved.activeWorkspace) {
+        cachedOldActive = saved.activeWorkspace;
+        localStorage.setItem(OLD_ACTIVE_KEY, saved.activeWorkspace);
+      }
       diskState = saved?.v2 ?? null;
     }
   } catch {}
   const normalized = normalizeState(diskState) ?? normalizeState(readJson(STATE_KEY));
-  if (normalized) return normalized;
-  const workspaces = readJson(OLD_WORKSPACES_KEY);
+  if (normalized) {
+    lastSavedPersistedJson = JSON.stringify(toPersistableState(normalized));
+    return normalized;
+  }
+  const workspaces = getOldWorkspaces();
   return migrateWorkspaces({
-    workspaces: isRecord(workspaces) ? workspaces : {},
-    activeWorkspace: localStorage.getItem(OLD_ACTIVE_KEY),
+    workspaces,
+    activeWorkspace: getOldActiveWorkspace(),
     legacy: readJson(OLD_LEGACY_KEY),
   });
 }
 
-/** 同时写入主进程文件（同步落盘、原子替换）与 localStorage；旧的各工作区数据原样透传，不删除 */
-export function saveAppState(state: AppState): void {
-  const oldWorkspaces = readJson(OLD_WORKSPACES_KEY);
+function writePersistedState(persisted: AppState, persistedJson: string): void {
+  lastSavedPersistedJson = persistedJson;
   try {
     window.electronAPI?.saveWorkspaceState?.(JSON.stringify({
-      workspaces: isRecord(oldWorkspaces) ? oldWorkspaces : {},
-      activeWorkspace: localStorage.getItem(OLD_ACTIVE_KEY),
-      v2: state,
+      workspaces: getOldWorkspaces(),
+      activeWorkspace: getOldActiveWorkspace(),
+      v2: persisted,
     }));
   } catch {}
-  try { localStorage.setItem(STATE_KEY, JSON.stringify(state)); } catch {}
+  try { localStorage.setItem(STATE_KEY, persistedJson); } catch {}
+}
+
+/** 同时写入主进程文件（原子替换）与 localStorage；旧的各工作区数据原样透传，不删除 */
+export function saveAppState(state: AppState): void {
+  const persisted = toPersistableState(state);
+  writePersistedState(persisted, JSON.stringify(persisted));
+}
+
+export function flushScheduledAppState(): void {
+  if (saveTimer !== null) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  if (pendingPersistedState) {
+    const state = pendingPersistedState;
+    const json = pendingPersistedJson;
+    pendingPersistedState = null;
+    pendingPersistedJson = '';
+    writePersistedState(state, json);
+  }
+}
+
+/** 防抖且跳过纯瞬态变化的持久化入口；窗口关闭或卸载前自动立即刷盘 */
+export function scheduleSaveAppState(state: AppState): void {
+  const persisted = toPersistableState(state);
+  const json = JSON.stringify(persisted);
+  if (json === (pendingPersistedState ? pendingPersistedJson : lastSavedPersistedJson)) return;
+  pendingPersistedState = persisted;
+  pendingPersistedJson = json;
+  if (!unloadHooked && typeof window !== 'undefined') {
+    unloadHooked = true;
+    window.addEventListener('beforeunload', flushScheduledAppState);
+  }
+  if (saveTimer !== null) clearTimeout(saveTimer);
+  saveTimer = setTimeout(flushScheduledAppState, SAVE_DEBOUNCE_MS);
 }

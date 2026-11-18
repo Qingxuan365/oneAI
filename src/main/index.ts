@@ -12,9 +12,12 @@ import { listSessionHistory, deleteSessionHistory } from './session-history';
 import { getUsageStats } from './usage-stats';
 import { detectInstalledClis, listKnownClis } from './cli-detect';
 import { setupWorkspaceStore } from './workspace-store';
-import { setupMusicLibrary } from './music-library';
+import { registerMusicScheme, setupMusicLibrary } from './music-library';
 import { setupFilePreview } from './file-preview';
+import { bindWindowState, loadWindowState, WindowStateTracker } from './window-state';
 import { getLanguage, setLanguage, t } from './i18n';
+
+registerMusicScheme();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,6 +26,7 @@ const __dirname = path.dirname(__filename);
 // app.disableHardwareAcceleration();
 
 let mainWindow: BrowserWindow | null = null;
+let windowStateTracker: WindowStateTracker | null = null;
 
 function createWindow() {
   const preloadCandidate = path.join(__dirname, '../preload/index.cjs');
@@ -32,13 +36,16 @@ function createWindow() {
 
   const iconCandidate = path.resolve(__dirname, '../../resources/icon.png');
   const appIcon = fs.existsSync(iconCandidate) ? iconCandidate : undefined;
+  const initialWindow = loadWindowState();
 
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    ...(initialWindow.x !== undefined && initialWindow.y !== undefined ? { x: initialWindow.x, y: initialWindow.y } : {}),
+    width: initialWindow.width,
+    height: initialWindow.height,
     minWidth: 900,
     minHeight: 600,
-    backgroundColor: '#0e1117',
+    show: false,
+    backgroundColor: initialWindow.backgroundColor,
     title: 'OneAI',
     icon: appIcon,
     webPreferences: {
@@ -49,9 +56,11 @@ function createWindow() {
     },
     // 隐藏原生标题栏，由顶栏承担拖动与标题栏职责；窗口控件（最小化 / 最大化 / 关闭）以覆盖层显示在右上角，颜色由渲染进程随主题同步
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#161b22', symbolColor: '#e2e8f0', height: 44 },
+    titleBarOverlay: initialWindow.titleBarOverlay,
     autoHideMenuBar: true,
   });
+
+  windowStateTracker = bindWindowState(mainWindow, initialWindow);
 
   // 应用只有一个页面：文件拖到终端以外的区域时 Chromium 会把窗口导航到该文件，整个界面被替换。
   // 一律拦截页面跳转（重新加载不经过 will-navigate，不受影响），新窗口也不打开（链接由 shell:open-external 处理）
@@ -63,8 +72,30 @@ function createWindow() {
 
   ptyManager.setWindow(mainWindow);
   quotaService.setWindow(mainWindow);
-  quotaService.startPolling(30000); // 每 30 秒轮询一次大模型配额
-  const stopSystemStats = startSystemStats(mainWindow);
+
+  // 首帧渲染完成（ready-to-show）后再一次性显示窗口，彻底消除启动空框；
+  // 常驻 PowerShell 系统资源采样、配额轮询与过期截图清理延后 800 ms 启动，让出冷启动期的 CPU 与磁盘开销
+  let stopSystemStats: (() => void) | null = null;
+  let bgStartupTimer: NodeJS.Timeout | null = null;
+  let shown = false;
+  const revealWindow = () => {
+    if (shown || !mainWindow || mainWindow.isDestroyed()) return;
+    shown = true;
+    clearTimeout(showFallbackTimer);
+    if (initialWindow.isMaximized) {
+      mainWindow.maximize();
+    }
+    mainWindow.show();
+    bgStartupTimer = setTimeout(() => {
+      bgStartupTimer = null;
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      quotaService.startPolling(30000);
+      stopSystemStats = startSystemStats(mainWindow);
+      void cleanupPastedImages();
+    }, 800);
+  };
+  const showFallbackTimer = setTimeout(revealWindow, 3000);
+  mainWindow.once('ready-to-show', revealWindow);
 
   mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     console.log(`[Renderer Log ${level}]: ${message} (${sourceId}:${line})`);
@@ -105,8 +136,15 @@ function createWindow() {
   ipcMain.on('window:cancel-close', () => { closeRequestedAt = 0; });
 
   mainWindow.on('closed', () => {
+    clearTimeout(showFallbackTimer);
+    if (bgStartupTimer) {
+      clearTimeout(bgStartupTimer);
+      bgStartupTimer = null;
+    }
+    windowStateTracker = null;
     mainWindow = null;
-    stopSystemStats();
+    stopSystemStats?.();
+    stopSystemStats = null;
     quotaService.stopPolling();
     ptyManager.destroyAll();
   });
@@ -119,7 +157,7 @@ function setupIPC() {
   setupFilePreview();
   setupGitBranch();
   setupTaskSummary();
-  ipcMain.handle('history:list', () => listSessionHistory());
+  ipcMain.handle('history:list', (_event, accounts) => listSessionHistory(Array.isArray(accounts) ? accounts : []));
   ipcMain.handle('history:delete', (_event, items) => deleteSessionHistory(Array.isArray(items) ? items : []));
   ipcMain.handle('usage:stats', (_event, accounts) => getUsageStats(accounts));
   ipcMain.handle('app:set-language', (_event, language) => {
@@ -169,6 +207,11 @@ function setupIPC() {
     return true;
   });
 
+  ipcMain.on('terminal:set-active', (_event, id: unknown, cliId?: unknown) => {
+    ptyManager.setActiveSession(typeof id === 'string' && id ? id : null);
+    quotaService.setActiveCli(typeof cliId === 'string' && cliId ? cliId : null);
+  });
+
   ipcMain.handle('quota:get', async (_event, cliId?: string) => {
     return quotaService.getQuota(cliId);
   });
@@ -181,12 +224,17 @@ function setupIPC() {
     return quotaService.refreshQuota(cliId);
   });
 
-  // 窗口控件覆盖层随主题变色；只接受 #rrggbb 与合理的高度
-  ipcMain.on('window:set-title-bar-overlay', (_event, opts: { color?: unknown; symbolColor?: unknown; height?: unknown }) => {
+  // 窗口控件覆盖层与窗口底色随主题变色并持久化；只接受 #rrggbb 与合理的高度
+  ipcMain.on('window:set-title-bar-overlay', (_event, opts: { color?: unknown; symbolColor?: unknown; height?: unknown; backgroundColor?: unknown }) => {
     const hex = /^#[0-9a-f]{6}$/i;
     if (typeof opts?.color !== 'string' || !hex.test(opts.color) || typeof opts.symbolColor !== 'string' || !hex.test(opts.symbolColor)) return;
     const height = typeof opts.height === 'number' && opts.height >= 24 && opts.height <= 80 ? Math.round(opts.height) : 44;
+    const backgroundColor = typeof opts.backgroundColor === 'string' && hex.test(opts.backgroundColor) ? opts.backgroundColor : undefined;
     try { mainWindow?.setTitleBarOverlay({ color: opts.color, symbolColor: opts.symbolColor, height }); } catch {}
+    if (backgroundColor) {
+      try { mainWindow?.setBackgroundColor(backgroundColor); } catch {}
+    }
+    windowStateTracker?.updateAppearance({ color: opts.color, symbolColor: opts.symbolColor, height, backgroundColor });
   });
 
   ipcMain.handle('account:login-status', (_event, account) => checkAccountLogin(account));
@@ -210,8 +258,11 @@ function setupIPC() {
       const fileNameW = clipboard.readBuffer('FileNameW');
       if (fileNameW.length > 0) {
         const filePath = fileNameW.toString('utf16le').replace(/\0+$/, '');
-        if (filePath && fs.existsSync(filePath)) {
-          return { type: 'file-path', content: filePath.includes(' ') ? `"${filePath}"` : filePath };
+        if (filePath) {
+          try {
+            await fs.promises.access(filePath);
+            return { type: 'file-path', content: filePath.includes(' ') ? `"${filePath}"` : filePath };
+          } catch {}
         }
       }
 
@@ -220,12 +271,10 @@ function setupIPC() {
       if (!img.isEmpty()) {
         const pngBuffer = img.toPNG();
         const tempDir = path.join(app.getPath('temp'), 'OneAI_Images');
-        if (!fs.existsSync(tempDir)) {
-          fs.mkdirSync(tempDir, { recursive: true });
-        }
+        await fs.promises.mkdir(tempDir, { recursive: true });
         const filename = `paste_${Date.now()}.png`;
         const fullPath = path.join(tempDir, filename);
-        fs.writeFileSync(fullPath, pngBuffer);
+        await fs.promises.writeFile(fullPath, pngBuffer);
         return { type: 'image-path', content: fullPath.includes(' ') ? `"${fullPath}"` : fullPath };
       }
     } catch (e) {
@@ -263,7 +312,7 @@ function setupIPC() {
   // 在资源管理器中打开任务的工作目录；只接受已存在的文件夹
   ipcMain.handle('shell:open-directory', async (_event, dir: string) => {
     try {
-      if (typeof dir === 'string' && fs.statSync(dir).isDirectory()) {
+      if (typeof dir === 'string' && (await fs.promises.stat(dir)).isDirectory()) {
         return (await shell.openPath(dir)) === '';
       }
     } catch {
@@ -288,7 +337,7 @@ function setupIPC() {
       if (canceled || !filePath) {
         return { success: false, canceled: true };
       }
-      fs.writeFileSync(filePath, content, 'utf-8');
+      await fs.promises.writeFile(filePath, content, 'utf-8');
       return { success: true, filePath };
     } catch (e: any) {
       console.error('[OneAI] Error saving log file:', e);
@@ -313,7 +362,6 @@ async function cleanupPastedImages(): Promise<void> {
 }
 
 app.whenReady().then(() => {
-  void cleanupPastedImages();
   // 去掉 Electron 默认菜单：它的 Ctrl+W 关窗、Ctrl+R 刷新与 CLI 常用键冲突，按 Alt 还会弹出菜单栏抢走焦点。
   // 开发模式保留，方便用 Ctrl+Shift+I 打开开发者工具。
   if (!process.env.VITE_DEV_SERVER_URL) Menu.setApplicationMenu(null);

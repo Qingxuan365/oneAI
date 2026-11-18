@@ -27,7 +27,7 @@ function themeColor(name: string, alpha: number): string {
  * 类似 VS Code 的代码缩略图（minimap）：每行画成一排按缩进与长度排布的小色块，半透明滑块标出当前可见范围，
  * 点击或拖动滑块即可滚动预览。纯装饰与鼠标辅助，不参与键盘与读屏。
  */
-export const PreviewMinimap: React.FC<PreviewMinimapProps> = ({ lines, scrollRef, targetLine }) => {
+export const PreviewMinimap: React.FC<PreviewMinimapProps> = React.memo(({ lines, scrollRef, targetLine }) => {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [height, setHeight] = useState(0);
@@ -64,8 +64,10 @@ export const PreviewMinimap: React.FC<PreviewMinimapProps> = ({ lines, scrollRef
     context.scale(dpr, dpr);
     const colWidth = MINIMAP_WIDTH / MAX_COLS;
     const blockHeight = Math.max(rowHeight * 0.72, 0.6);
+    // 超长文件多行会落在同一个物理像素行上：按像素步长采样绘制，避免在同一像素位置重复绘制数十次
+    const rowStep = Math.max(1, Math.floor(0.75 / Math.max(0.001, rowHeight * dpr)));
     context.fillStyle = themeColor('fg-subtle', 0.55);
-    for (let i = 0; i < lines.length; i++) {
+    for (let i = 0; i < lines.length; i += rowStep) {
       const text = lines[i].replace(/\t/g, '  ').slice(0, MAX_COLS);
       if (!text.trim()) continue;
       for (const match of text.matchAll(/\S+/g)) {
@@ -144,4 +146,6 @@ export const PreviewMinimap: React.FC<PreviewMinimapProps> = ({ lines, scrollRef
       )}
     </div>
   );
-};
+});
+
+PreviewMinimap.displayName = 'PreviewMinimap';

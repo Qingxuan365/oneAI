@@ -6,6 +6,8 @@ import { t } from '../i18n';
 interface InlineQuotaTextProps {
   quota: QuotaData | null;
   onRefresh: () => Promise<void>;
+  /** 传入当前语言，使 React.memo 在切换语言时同步重绘 */
+  language?: string;
 }
 
 // 剩余百分比配色：>= 50 绿色，20-49 黄色，< 20 红色，未知为灰色
@@ -38,7 +40,7 @@ function formatTokens(n: number): string {
 }
 
 /** 顶栏单行纯文字额度。空间不足时 .quota-detail 与 .quota-model 由顶栏容器查询收起，完整信息保留在 title 中。 */
-export const InlineQuotaText: React.FC<InlineQuotaTextProps> = ({ quota, onRefresh }) => {
+export const InlineQuotaText: React.FC<InlineQuotaTextProps> = React.memo(({ quota, onRefresh }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleRefreshClick = async () => {
@@ -148,4 +150,6 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = ({ quota, onRefre
       {refreshButton(t('立即刷新 {name} 额度', { name: quota.cliName }))}
     </div>
   );
-};
+});
+
+InlineQuotaText.displayName = 'InlineQuotaText';

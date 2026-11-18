@@ -24,21 +24,32 @@ const MAX_SESSION_BUFFER_LENGTH = 2 * 1024 * 1024;
 const TARGET_BUFFER_CHUNK_LENGTH = 8 * 1024;
 
 const BATCH_WINDOW_MS = 8;
+const BACKGROUND_BATCH_WINDOW_MS = 120;
 
 /**
- * 按会话合并 PTY 输出再发 IPC。先发一次再合并：距上次发送已超过合并窗口的数据立即发出，
- * 打字回显不额外等待；只有窗口内连续到达的数据才攒成一条，减少大量输出时的 IPC 次数。
+ * 按会话合并 PTY 输出再发 IPC。先发一次再合并：前台活动会话距上次发送已超过合并窗口的数据立即发出，
+ * 打字回显不额外等待；后台隐藏会话放宽合并窗口以大幅减少高频刷屏时的跨进程拷贝次数。
  */
 export class PtyOutputBatcher {
   private pending = new Map<string, { chunks: string[]; bytes: number; timer: NodeJS.Timeout }>();
   private lastSent = new Map<string, number>();
+  private activeId: string | null = null;
+  private activeKnown = false;
 
   constructor(private send: (id: string, data: string) => void) {}
 
+  public setActive(id: string | null): void {
+    this.activeKnown = true;
+    this.activeId = id;
+    if (id) this.flush(id);
+  }
+
   public push(id: string, data: string): void {
     const limit = 256 * 1024;
+    const isForeground = !this.activeKnown || this.activeId === id;
+    const windowMs = isForeground ? BATCH_WINDOW_MS : BACKGROUND_BATCH_WINDOW_MS;
     const now = Date.now();
-    if (!this.pending.has(id) && now - (this.lastSent.get(id) ?? 0) >= BATCH_WINDOW_MS && data.length <= 64 * 1024) {
+    if (isForeground && !this.pending.has(id) && now - (this.lastSent.get(id) ?? 0) >= BATCH_WINDOW_MS && data.length <= 64 * 1024) {
       this.lastSent.set(id, now);
       this.send(id, data);
       return;
@@ -56,7 +67,7 @@ export class PtyOutputBatcher {
         batch = undefined;
       }
       if (!batch) {
-        batch = { chunks: [], bytes: 0, timer: setTimeout(() => this.flush(id), BATCH_WINDOW_MS) };
+        batch = { chunks: [], bytes: 0, timer: setTimeout(() => this.flush(id), windowMs) };
         this.pending.set(id, batch);
       }
       batch.chunks.push(chunk);
@@ -96,6 +107,10 @@ export class PtyManager {
 
   public setWindow(win: BrowserWindow) {
     this.mainWindow = win;
+  }
+
+  public setActiveSession(id: string | null) {
+    this.output.setActive(id);
   }
 
   /** 仍在运行的终端进程数量 */
@@ -183,15 +198,16 @@ export class PtyManager {
       let args: string[] = [];
 
       if (isWindows) {
+        const runAndExit = (cmd: string) => `$global:LASTEXITCODE = $null; ${cmd}; if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }`;
         if (rawCommand.toLowerCase() === 'kimi' || rawCommand.toLowerCase() === 'kimi code') {
           file = 'powershell.exe';
-          args = ['-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', 'kimi'];
+          args = ['-ExecutionPolicy', 'Bypass', '-Command', runAndExit('kimi')];
         } else if (rawCommand.toLowerCase() === 'codex') {
           file = 'powershell.exe';
-          args = ['-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', 'codex'];
+          args = ['-ExecutionPolicy', 'Bypass', '-Command', runAndExit('codex')];
         } else if (rawCommand.toLowerCase() === 'claude') {
           file = 'powershell.exe';
-          args = ['-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', 'claude'];
+          args = ['-ExecutionPolicy', 'Bypass', '-Command', runAndExit('claude')];
         } else if (rawCommand.toLowerCase() === 'opencode') {
           file = 'powershell.exe';
           args = [
@@ -199,7 +215,7 @@ export class PtyManager {
             '-ExecutionPolicy',
             'Bypass',
             '-Command',
-            'if (Get-Command opencode -ErrorAction SilentlyContinue) { opencode } else { Write-Host "`n' + t('[OneAI 提示]: 本地尚未安装或配置 opencode 环境变量。当前已为您打开交互终端，可随时输入命令。') + '" -ForegroundColor Yellow }',
+            'if (Get-Command opencode -ErrorAction SilentlyContinue) { $global:LASTEXITCODE = $null; opencode; exit $(if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }) } else { Write-Host "`n' + t('[OneAI 提示]: 本地尚未安装或配置 opencode 环境变量。当前已为您打开交互终端，可随时输入命令。') + '" -ForegroundColor Yellow }',
           ];
         } else if (rawCommand.toLowerCase() === 'grok') {
           file = 'powershell.exe';
@@ -208,7 +224,7 @@ export class PtyManager {
             '-ExecutionPolicy',
             'Bypass',
             '-Command',
-            'if (Get-Command grok -ErrorAction SilentlyContinue) { grok } else { Write-Host "`n' + t('[OneAI 提示]: 本地尚未安装或配置 grok CLI 环境变量。当前已为您打开交互终端，可随时输入命令。') + '" -ForegroundColor Yellow }',
+            'if (Get-Command grok -ErrorAction SilentlyContinue) { $global:LASTEXITCODE = $null; grok; exit $(if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }) } else { Write-Host "`n' + t('[OneAI 提示]: 本地尚未安装或配置 grok CLI 环境变量。当前已为您打开交互终端，可随时输入命令。') + '" -ForegroundColor Yellow }',
           ];
         } else if (rawCommand.toLowerCase() === 'powershell' || rawCommand.toLowerCase() === 'powershell.exe') {
           file = 'powershell.exe';
@@ -217,9 +233,9 @@ export class PtyManager {
           file = 'cmd.exe';
           args = [];
         } else if (resolvedOptions.shell || /^(kimi|codex|claude)\s/i.test(rawCommand)) {
-          // 恢复历史会话：带参数的 CLI 命令交给 PowerShell 解析，兼容 .cmd/.ps1 启动器
+          // 自定义 CLI 或恢复历史会话：带参数的 CLI 命令交给 PowerShell 解析，兼容 .cmd/.ps1 启动器；命令退出后结束会话以触发状态更新
           file = 'powershell.exe';
-          args = ['-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', rawCommand];
+          args = ['-ExecutionPolicy', 'Bypass', '-Command', runAndExit(rawCommand)];
         } else if (rawCommand.includes(' ')) {
           // 按空格拆分，但保留引号内的空格（如 "C:\Program Files\x\tool.exe" --flag）
           const parts = (rawCommand.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((part) => part.replace(/^(["'])(.*)\1$/, '$2'));
@@ -227,7 +243,7 @@ export class PtyManager {
           args = parts.slice(1);
         } else {
           file = 'powershell.exe';
-          args = ['-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', rawCommand];
+          args = ['-ExecutionPolicy', 'Bypass', '-Command', runAndExit(rawCommand)];
         }
       } else {
         file = rawCommand;

@@ -17,9 +17,13 @@ interface FilePreviewPanelProps {
   width: number;
   onResize: (width: number) => void;
   onClose: () => void;
+  /** 传入当前语言，使 React.memo 在切换语言时同步重绘 */
+  language?: string;
 }
 
 const MIN_WIDTH = 280;
+const LARGE_PREVIEW_LINES = 400;
+const LARGE_LINE_STYLE: React.CSSProperties = { contentVisibility: 'auto', containIntrinsicSize: 'auto 20px' };
 
 function formatSize(size?: number): string {
   if (size === undefined) return '';
@@ -27,7 +31,8 @@ function formatSize(size?: number): string {
 }
 
 /** 终端右侧的只读文件预览面板：文本、图片，其他类型给出提示。 */
-export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ cwd, filePath, line, openedAt, minimap = true, width, onResize, onClose }) => {
+export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = React.memo(({ cwd, filePath, line, openedAt, minimap = true, width, onResize, onClose }) => {
+  const asideRef = useRef<HTMLElement | null>(null);
   const [result, setResult] = useState<FilePreviewResult | null>(null);
   const [reloadCount, setReloadCount] = useState(0);
   const targetLineRef = useRef<HTMLDivElement>(null);
@@ -53,10 +58,20 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ cwd, filePat
 
   const startDrag = (event: React.MouseEvent) => {
     event.preventDefault();
-    const onMove = (e: MouseEvent) => onResize(Math.max(MIN_WIDTH, Math.min(window.innerWidth * 0.6, window.innerWidth - e.clientX)));
+    const prevCursor = document.body.style.cursor;
+    document.body.style.cursor = 'col-resize';
+    let latestWidth: number | null = null;
+    const onMove = (e: MouseEvent) => {
+      const next = Math.round(Math.max(MIN_WIDTH, Math.min(window.innerWidth * 0.6, window.innerWidth - e.clientX)));
+      latestWidth = next;
+      if (asideRef.current) asideRef.current.style.width = `${next}px`;
+    };
     const onUp = () => {
+      document.body.style.cursor = prevCursor;
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      if (asideRef.current) asideRef.current.style.width = `${width}px`;
+      if (latestWidth !== null) onResize(latestWidth);
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -64,6 +79,7 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ cwd, filePat
 
   const name = filePath.split(/[\\/]/).pop() || filePath;
   const notice = (text: string) => <p className="p-4 text-ui text-fg-subtle">{text}</p>;
+  const isLargeFile = lines.length > LARGE_PREVIEW_LINES;
 
   let body: React.ReactNode = notice(t('读取中…'));
   if (result?.kind === 'text') {
@@ -72,7 +88,14 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ cwd, filePat
         {lines.map((text, index) => {
           const isTarget = index + 1 === line;
           return (
-            <div key={index} ref={isTarget ? targetLineRef : undefined} className={isTarget ? 'bg-accent/20' : undefined}>{highlightedLines?.[index]?.length ? highlightedLines[index].map((token, i) => (token.className ? <span key={i} className={token.className}>{token.text}</span> : token.text)) : text || ' '}</div>
+            <div
+              key={index}
+              ref={isTarget ? targetLineRef : undefined}
+              style={isLargeFile && !isTarget ? LARGE_LINE_STYLE : undefined}
+              className={isTarget ? 'bg-accent/20' : undefined}
+            >
+              {highlightedLines?.[index]?.length ? highlightedLines[index].map((token, i) => (token.className ? <span key={i} className={token.className}>{token.text}</span> : token.text)) : text || ' '}
+            </div>
           );
         })}
       </pre>
@@ -88,7 +111,7 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ cwd, filePat
   }
 
   return (
-    <aside className="relative flex h-full shrink-0 flex-col border-l border-line bg-surface" style={{ width }} aria-label={t('文件预览')}>
+    <aside ref={asideRef} className="relative flex h-full shrink-0 flex-col border-l border-line bg-surface" style={{ width }} aria-label={t('文件预览')}>
       <div
         role="separator"
         aria-orientation="vertical"
@@ -111,4 +134,6 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ cwd, filePat
       </div>
     </aside>
   );
-};
+});
+
+FilePreviewPanel.displayName = 'FilePreviewPanel';

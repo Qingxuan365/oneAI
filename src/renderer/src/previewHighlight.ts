@@ -32,6 +32,24 @@ function isMinifiedText(content: string): boolean {
   return content.length / lineCount > MAX_AVG_LINE_CHARS;
 }
 
+function scopeToClassName(scope: string | undefined): string {
+  if (!scope) return '';
+  if (scope.startsWith('language:')) return scope.replace('language:', 'language-');
+  if (scope.includes('.')) {
+    const pieces = scope.split('.');
+    return [`hljs-${pieces.shift()}`, ...pieces.map((part, i) => `${part}${'_'.repeat(i + 1)}`)].join(' ');
+  }
+  return `hljs-${scope}`;
+}
+
+interface EmitterTree {
+  walk?: (renderer: {
+    addText: (text: string) => void;
+    openNode: (node: { scope?: string }) => void;
+    closeNode: (node: { scope?: string }) => void;
+  }) => void;
+}
+
 /** Parse the whole file so multiline tokens retain their scope across displayed lines. */
 export function highlightPreview(content: string, filePath: string): PreviewToken[][] | null {
   const name = filePath.split(/[\\/]/).pop()?.toLowerCase() || '';
@@ -40,19 +58,56 @@ export function highlightPreview(content: string, filePath: string): PreviewToke
   const normalized = content.replace(/\r\n?/g, '\n');
   if (isMinifiedText(normalized)) return null;
   try {
-    const html = hljs.highlight(normalized, { language, ignoreIllegals: true }).value;
-    const template = document.createElement('template');
-    template.innerHTML = html;
+    const highlighted = hljs.highlight(normalized, { language, ignoreIllegals: true }) as unknown as { value: string; _emitter?: EmitterTree };
     const lines: PreviewToken[][] = [[]];
+    const appendText = (raw: string, className: string) => {
+      let pos = 0;
+      let nl = raw.indexOf('\n');
+      if (nl < 0) {
+        if (raw) lines[lines.length - 1].push({ text: raw, className });
+        return;
+      }
+      while (nl >= 0) {
+        const segment = raw.slice(pos, nl);
+        if (segment) lines[lines.length - 1].push({ text: segment, className });
+        lines.push([]);
+        pos = nl + 1;
+        nl = raw.indexOf('\n', pos);
+      }
+      const tail = raw.slice(pos);
+      if (tail) lines[lines.length - 1].push({ text: tail, className });
+    };
+
+    if (typeof highlighted._emitter?.walk === 'function') {
+      const scopeStack: string[] = [];
+      let currentClass = '';
+      highlighted._emitter.walk({
+        addText(text) {
+          appendText(text, currentClass);
+        },
+        openNode(node) {
+          const cls = scopeToClassName(node.scope);
+          if (!cls) return;
+          scopeStack.push(cls);
+          currentClass = scopeStack.join(' ');
+        },
+        closeNode(node) {
+          if (!node.scope) return;
+          scopeStack.pop();
+          currentClass = scopeStack.join(' ');
+        },
+      });
+      return lines;
+    }
+
+    const template = document.createElement('template');
+    template.innerHTML = highlighted.value;
     const visit = (node: Node, className: string) => {
       if (node.nodeType === Node.TEXT_NODE) {
-        (node.textContent || '').split('\n').forEach((text, index) => {
-          if (index) lines.push([]);
-          if (text) lines[lines.length - 1].push({ text, className });
-        });
+        appendText(node.textContent || '', className);
       } else {
         const scope = node instanceof Element ? `${className} ${node.className}`.trim() : className;
-        node.childNodes.forEach(child => visit(child, scope));
+        node.childNodes.forEach((child) => visit(child, scope));
       }
     };
     visit(template.content, '');

@@ -41,6 +41,8 @@ export interface HistoryEntry {
   cwd: string;
   updatedAt: number;
   command: string;
+  accountId?: string;
+  accountName?: string;
 }
 
 /** CLI 定义：图标、默认命令；任务按其 groupId（即 CLI id）关联到这里 */
@@ -171,6 +173,7 @@ export interface ElectronTerminalAPI {
   selectWorkspaceDirectory?: (currentPath?: string) => Promise<string | null>;
   listMusic?: (dir?: string) => Promise<{ directory: string; tracks: Array<{ name: string; path: string }> }>;
   readMusic?: (filePath: string) => Promise<Uint8Array | null>;
+  getMusicTrackUrl?: (filePath: string) => string;
   selectMusicDirectory?: (currentPath?: string) => Promise<string | null>;
   resolveMusicStream?: (url: string) => Promise<Array<{ name: string; url: string }>>;
   getPathForFile?: (file: File) => string;
@@ -178,8 +181,8 @@ export interface ElectronTerminalAPI {
   writeClipboardText?: (text: string) => Promise<boolean>;
   loadWorkspaceState?: () => string | null;
   saveWorkspaceState?: (json: string) => void;
-  listSessionHistory: () => Promise<HistoryEntry[]>;
-  deleteSessionHistory: (items: Array<{ cliId: HistoryEntry['cliId']; id: string }>) => Promise<{ deleted: number; failed: number }>;
+  listSessionHistory: (accounts?: Array<{ id: string; name: string; cliId: string; configDir: string }>) => Promise<HistoryEntry[]>;
+  deleteSessionHistory: (items: Array<{ cliId: HistoryEntry['cliId']; id: string; accountId?: string }>) => Promise<{ deleted: number; failed: number }>;
   /** 本周各 CLI × 模型的用量与每日请求数（Claude Code / Codex / Antigravity）；accounts 为需要一并统计的账号配置目录 */
   getUsageStats?: (accounts: Array<{ id: string; name: string; cliId: string; configDir: string }>) => Promise<UsageStats>;
   /** 按 PATH 检测已安装的 CLI；custom 为用户自定义 CLI，检测到的会一并返回（name 为空） */
@@ -190,7 +193,7 @@ export interface ElectronTerminalAPI {
   /** 当前用户的主目录，新用户首次启动时作为默认文件夹 */
   getHomeDir?: () => string;
   detectClis: (custom?: Array<{ id: string; command: string }>) => Promise<Array<{ id: string; name: string; command: string }>>;
-  createSession: (options: { id: string; command?: string; cwd?: string; shell?: boolean; account?: SessionAccount }) => Promise<{ success: boolean; buffer?: string; error?: string }>;
+  createSession: (options: { id: string; command?: string; cwd?: string; shell?: boolean; account?: SessionAccount; cols?: number; rows?: number }) => Promise<{ success: boolean; buffer?: string; error?: string }>;
   getSessionBuffer: (id: string) => Promise<string>;
   /** 会话不存在（已退出或尚未启动）时返回 false */
   writeSession: (id: string, data: string) => Promise<boolean>;
@@ -198,6 +201,7 @@ export interface ElectronTerminalAPI {
   killSession: (id: string) => Promise<void>;
   restartSession?: (id: string) => Promise<{ success: boolean; buffer?: string; error?: string }>;
   clearSessionBuffer?: (id: string) => Promise<boolean>;
+  setActiveSession?: (id: string | null, cliId?: string | null) => void;
   resolvePreviewPaths?: (cwd: string, candidates: string[]) => Promise<Array<string | null>>;
   allowDroppedPreview?: (paths: string[]) => Promise<boolean>;
   readPreviewFile?: (cwd: string, filePath: string) => Promise<FilePreviewResult>;
@@ -214,7 +218,7 @@ export interface ElectronTerminalAPI {
   setQuotaAccounts?: (accounts: Array<{ key: string; cliId: string; configDir: string }>) => Promise<void>;
   /** 读取任务对应会话里最近一条用户消息（仅 Claude / Codex / Kimi）；text 为 null 表示还没有消息 */
   /** 窗口控件覆盖层的颜色与高度，随主题与界面缩放同步 */
-  setTitleBarOverlay?: (opts: { color: string; symbolColor: string; height: number }) => void;
+  setTitleBarOverlay?: (opts: { color: string; symbolColor: string; height: number; backgroundColor?: string }) => void;
   getTaskSummaries?: (tasks: Array<{ id: string; cliId: string; cwd: string; createdAt: number; historyId?: string; configDir?: string }>) => Promise<Record<string, { text: string | null }>>;
   /** 读取各文件夹所在 Git 仓库的当前分支（只读 .git/HEAD）；不在仓库内为 null */
   getGitBranches?: (paths: string[]) => Promise<Record<string, string | null>>;

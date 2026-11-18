@@ -11,8 +11,10 @@
   },
   "files": [
     "dist/**/*",
+    "!dist/app-icon.jpg",
     "dist-electron/**/*",
     "resources/**/*",
+    "!resources/app-icon.jpg",
     "package.json"
   ],
   "asar": true,

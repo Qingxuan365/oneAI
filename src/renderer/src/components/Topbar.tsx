@@ -27,6 +27,8 @@ interface TopbarProps {
   onExportLogs?: (mode: 'copy' | 'save') => Promise<{ success: boolean; error?: string; canceled?: boolean }>;
   onOpenHistory?: () => void;
   onOpenUsage?: () => void;
+  /** 传入当前语言，使 React.memo 在切换语言时同步重绘 */
+  language?: string;
 }
 
 // 数字日期转中文数字（1~30）
@@ -39,16 +41,29 @@ function toChineseDay(n: number): string {
   return '三十';
 }
 
+let lunarFormatter: Intl.DateTimeFormat | null | false = null;
+let cachedLunarKey = '';
+let cachedLunarValue = '';
+
 function getLunarStr(now: Date): string {
+  const dayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+  if (dayKey === cachedLunarKey) return cachedLunarValue;
   try {
-    const parts = new Intl.DateTimeFormat('zh-CN-u-ca-chinese', {
-      month: 'long',
-      day: 'numeric',
-    }).formatToParts(now);
+    if (lunarFormatter === null) {
+      lunarFormatter = new Intl.DateTimeFormat('zh-CN-u-ca-chinese', {
+        month: 'long',
+        day: 'numeric',
+      });
+    }
+    if (!lunarFormatter) return '';
+    const parts = lunarFormatter.formatToParts(now);
     const month = parts.find((p) => p.type === 'month')?.value ?? '';
     const dayNum = parseInt(parts.find((p) => p.type === 'day')?.value ?? '0', 10);
-    return `${month}${toChineseDay(dayNum)}日`;
+    cachedLunarKey = dayKey;
+    cachedLunarValue = `${month}${toChineseDay(dayNum)}日`;
+    return cachedLunarValue;
   } catch {
+    lunarFormatter = false;
     return '';
   }
 }
@@ -71,7 +86,50 @@ function getFormattedTime(maximized: boolean, offsetHours: number, dateVisible: 
   return `${Y}-${M}-${D}${lunarPart} ${h}:${m}:${s} ${t('（{weekday}）', { weekday: w })}`;
 }
 
-export const Topbar: React.FC<TopbarProps> = ({
+/** 独立时钟节点：每秒滴答只更新自身文本，不触发整条顶栏重渲染；被容器查询隐藏或窗口不可见时暂停滴答 */
+const TopbarClock: React.FC<{ isMaximized: boolean; clockOffsetHours: number; dateVisible: boolean; language?: string }> = React.memo(({
+  isMaximized,
+  clockOffsetHours,
+  dateVisible,
+}) => {
+  const clockRef = useRef<HTMLDivElement | null>(null);
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    const refreshIfVisible = () => {
+      if (document.hidden || !clockRef.current || clockRef.current.offsetParent === null) return;
+      setTick((v) => (v + 1) % 1_000_000);
+    };
+    const timer = setInterval(refreshIfVisible, 1000);
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    let resizeObserver: ResizeObserver | null = null;
+    const header = clockRef.current?.parentElement;
+    if (header && typeof ResizeObserver !== 'undefined') {
+      let wasVisible = clockRef.current?.offsetParent !== null;
+      resizeObserver = new ResizeObserver(() => {
+        const nowVisible = clockRef.current?.offsetParent !== null;
+        if (nowVisible && !wasVisible) setTick((v) => (v + 1) % 1_000_000);
+        wasVisible = nowVisible;
+      });
+      resizeObserver.observe(header);
+    }
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+      resizeObserver?.disconnect();
+    };
+  }, []);
+
+  return (
+    <div ref={clockRef} id="oneai-topbar-clock" className="topbar-clock pointer-events-none shrink-0 px-1.5 font-mono text-xs font-medium tabular-nums tracking-wide text-fg-subtle">
+      {getFormattedTime(isMaximized, clockOffsetHours, dateVisible)}
+    </div>
+  );
+});
+
+TopbarClock.displayName = 'TopbarClock';
+
+export const Topbar: React.FC<TopbarProps> = React.memo(({
   isSidebarCollapsed,
   onToggleSidebar,
   currentGroup,
@@ -88,9 +146,9 @@ export const Topbar: React.FC<TopbarProps> = ({
   onExportLogs,
   onOpenHistory,
   onOpenUsage,
+  language,
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
-  const [currentTime, setCurrentTime] = useState<string>(() => getFormattedTime(false, clockOffsetHours, dateVisible));
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [action, setAction] = useState<{ text: string; ok: boolean } | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
@@ -107,15 +165,6 @@ export const Topbar: React.FC<TopbarProps> = ({
       unsubscribe();
     };
   }, []);
-
-  // 每秒更新时钟，窗口状态或时间偏移变化时立即刷新
-  useEffect(() => {
-    setCurrentTime(getFormattedTime(isMaximized, clockOffsetHours, dateVisible));
-    const timer = setInterval(() => {
-      setCurrentTime(getFormattedTime(isMaximized, clockOffsetHours, dateVisible));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [isMaximized, clockOffsetHours, dateVisible]);
 
   // 点击外部或按 Esc 关闭导出下拉菜单
   useEffect(() => {
@@ -267,19 +316,17 @@ export const Topbar: React.FC<TopbarProps> = ({
       </div>
 
       {/* 时钟：空间不足时由 .topbar-clock 收起 */}
-      <div id="oneai-topbar-clock" className="topbar-clock pointer-events-none shrink-0 px-1.5 font-mono text-xs font-medium tabular-nums tracking-wide text-fg-subtle">
-        {currentTime}
-      </div>
+      <TopbarClock isMaximized={isMaximized} clockOffsetHours={clockOffsetHours} dateVisible={dateVisible} language={language} />
 
       {/* 右侧：单行横排纯文字大模型配额（无弹窗、无浮窗）；没有活动终端的空页面不显示额度与刷新按钮 */}
       {activeTask && (
         <div id="oneai-topbar-quota" className="flex shrink-0 items-center whitespace-nowrap border-l border-line pl-2.5">
-          <InlineQuotaText quota={quota} onRefresh={onRefreshQuota} />
+          <InlineQuotaText quota={quota} onRefresh={onRefreshQuota} language={language} />
         </div>
       )}
 
       {/* 整机 CPU / 内存 / 网速：与活动终端无关，始终显示；空间不足时由 .topbar-sys-* 依次收起 */}
-      <SystemStatsText />
+      <SystemStatsText language={language} />
 
       {onOpenUsage && (
         <button
@@ -306,4 +353,6 @@ export const Topbar: React.FC<TopbarProps> = ({
       )}
     </header>
   );
-};
+});
+
+Topbar.displayName = 'Topbar';

@@ -6,24 +6,24 @@ const MAX_PATHS = 64;
 const MAX_DEPTH = 30;
 
 /**
- * 读取目录所在 Git 仓库的当前分支：从该目录向上找 `.git`，只读 HEAD，不执行 git 命令。
+ * 读取目录所在 Git 仓库的当前分支：从该目录向上找 `.git`，只读 HEAD，不执行 git 命令，使用异步 I/O 避免慢盘或网络路径阻塞主进程。
  * 兼容 worktree / 子模块（`.git` 是指向 gitdir 的文件）；游离 HEAD 返回 7 位提交号；不在仓库内返回 null。
  */
-export function readGitBranch(dir: string): string | null {
+export async function readGitBranch(dir: string): Promise<string | null> {
   let current = path.resolve(dir);
   for (let depth = 0; depth < MAX_DEPTH; depth++) {
     const dotGit = path.join(current, '.git');
     let stat: fs.Stats | null = null;
-    try { stat = fs.statSync(dotGit); } catch {}
+    try { stat = await fs.promises.stat(dotGit); } catch {}
     if (stat) {
       try {
         let gitDir = dotGit;
         if (stat.isFile()) {
-          const match = fs.readFileSync(dotGit, 'utf8').match(/^gitdir:\s*(.+)$/m);
+          const match = (await fs.promises.readFile(dotGit, 'utf8')).match(/^gitdir:\s*(.+)$/m);
           if (!match) return null;
           gitDir = path.resolve(current, match[1].trim());
         }
-        const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim();
+        const head = (await fs.promises.readFile(path.join(gitDir, 'HEAD'), 'utf8')).trim();
         const ref = head.match(/^ref:\s*refs\/heads\/(.+)$/);
         if (ref) return ref[1];
         if (/^[0-9a-f]{40,64}$/i.test(head)) return head.slice(0, 7);
@@ -39,12 +39,12 @@ export function readGitBranch(dir: string): string | null {
   return null;
 }
 
-export function readGitBranches(paths: unknown): Record<string, string | null> {
+export async function readGitBranches(paths: unknown): Promise<Record<string, string | null>> {
   const result: Record<string, string | null> = {};
   if (!Array.isArray(paths)) return result;
-  for (const item of paths.slice(0, MAX_PATHS)) {
-    if (typeof item === 'string' && path.isAbsolute(item)) result[item] = readGitBranch(item);
-  }
+  const targets = paths.slice(0, MAX_PATHS).filter((item): item is string => typeof item === 'string' && path.isAbsolute(item));
+  const branches = await Promise.all(targets.map((item) => readGitBranch(item)));
+  targets.forEach((item, index) => { result[item] = branches[index]; });
   return result;
 }
 

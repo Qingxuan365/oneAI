@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { FolderOpen, LogIn, Pencil, Plus, RotateCw, Trash2 } from 'lucide-react';
 import { Account, LoginStatus } from '../types';
-import { t } from '../i18n';
+import { getLanguage, t } from '../i18n';
 import { ACCOUNT_CLIS, defaultConfigDir, exampleConfigDir, toSessionAccount, validateAccount } from '../accounts';
 
 interface AccountsSettingsProps {
@@ -14,6 +14,14 @@ interface AccountsSettingsProps {
 }
 
 type StatusEntry = LoginStatus | { error: string } | 'checking';
+
+const LOGIN_CACHE_TTL_MS = 60_000;
+const LOGIN_CHECK_CONCURRENCY = 2;
+const loginStatusCache = new Map<string, { sig: string; at: number; result: Exclude<StatusEntry, 'checking'> }>();
+
+function accountSig(account: Account): string {
+  return `${getLanguage()}|${account.cliId}|${account.configDir.trim()}|${(account.env ?? '').trim()}`;
+}
 
 interface Draft {
   id?: string;
@@ -43,23 +51,51 @@ export const AccountsSettings: React.FC<AccountsSettingsProps> = ({ isActive, ac
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [statuses, setStatuses] = useState<Record<string, StatusEntry>>({});
+  const [statuses, setStatuses] = useState<Record<string, StatusEntry>>(() => {
+    const now = Date.now();
+    const initial: Record<string, StatusEntry> = {};
+    for (const account of accounts) {
+      const cached = loginStatusCache.get(account.id);
+      if (cached && cached.sig === accountSig(account) && now - cached.at < LOGIN_CACHE_TTL_MS) {
+        initial[account.id] = cached.result;
+      }
+    }
+    return initial;
+  });
 
-  const checkStatus = async (account: Account) => {
+  const checkStatus = async (account: Account, force = false) => {
+    const sig = accountSig(account);
+    if (!force) {
+      const cached = loginStatusCache.get(account.id);
+      if (cached && cached.sig === sig && Date.now() - cached.at < LOGIN_CACHE_TTL_MS) {
+        setStatuses((prev) => (prev[account.id] === cached.result ? prev : { ...prev, [account.id]: cached.result }));
+        return;
+      }
+    }
     setStatuses((prev) => ({ ...prev, [account.id]: 'checking' }));
-    let result: StatusEntry;
+    let result: Exclude<StatusEntry, 'checking'>;
     try {
       result = await window.electronAPI?.checkAccountLogin?.(toSessionAccount(account)) ?? { error: t('当前环境不支持检查') };
     } catch (err) {
       result = { error: err instanceof Error ? err.message : t('检查失败') };
     }
+    loginStatusCache.set(account.id, { sig, at: Date.now(), result });
     setStatuses((prev) => ({ ...prev, [account.id]: result }));
   };
 
-  // 每次打开本页，检查所有账号的登录状态（登录在终端任务里完成，回到设置时需要刷新）
+  // 打开本页时按需检查各账号登录状态：60 秒内已查过的直接复用缓存，未命中的限制并发数排队运行，避免切选项卡时并发拉起大量 PowerShell 子进程
   useEffect(() => {
     if (!isActive) return;
-    accounts.forEach((account) => { void checkStatus(account); });
+    let cancelled = false;
+    const queue = [...accounts];
+    const workers = Array.from({ length: Math.min(LOGIN_CHECK_CONCURRENCY, queue.length) }, async () => {
+      while (!cancelled && queue.length > 0) {
+        const next = queue.shift();
+        if (next) await checkStatus(next, false);
+      }
+    });
+    void Promise.all(workers);
+    return () => { cancelled = true; };
     // 只在打开本页时检查；增删改账号后由对应操作单独刷新
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive]);
@@ -95,10 +131,11 @@ export const AccountsSettings: React.FC<AccountsSettingsProps> = ({ isActive, ac
     };
     onChange(draft.id ? accounts.map((a) => (a.id === saved.id ? saved : a)) : [...accounts, saved]);
     setDraft(null);
-    void checkStatus(saved);
+    void checkStatus(saved, true);
   };
 
   const remove = (account: Account) => {
+    loginStatusCache.delete(account.id);
     onChange(accounts.filter((a) => a.id !== account.id));
     setConfirmDeleteId(null);
     setStatuses((prev) => {
@@ -163,10 +200,10 @@ export const AccountsSettings: React.FC<AccountsSettingsProps> = ({ isActive, ac
                     </span>
                   ) : (
                     <span className="flex shrink-0 items-center gap-1">
-                      <button type="button" onClick={() => onLogin(account)} className="btn-secondary px-2.5 py-1 text-xs" title={t('在该账号环境下新开终端运行 {command}', { command: cli.loginCommand })}>
+                      <button type="button" onClick={() => { loginStatusCache.delete(account.id); onLogin(account); }} className="btn-secondary px-2.5 py-1 text-xs" title={t('在该账号环境下新开终端运行 {command}', { command: cli.loginCommand })}>
                         <LogIn size={12} />{t('登录')}
                       </button>
-                      <button type="button" onClick={() => void checkStatus(account)} className="icon-btn" title={t('刷新登录状态')} aria-label={t('刷新 {name} 的登录状态', { name: account.name })}>
+                      <button type="button" onClick={() => void checkStatus(account, true)} className="icon-btn" title={t('刷新登录状态')} aria-label={t('刷新 {name} 的登录状态', { name: account.name })}>
                         <RotateCw size={13} />
                       </button>
                       <button type="button" onClick={() => openEdit(account)} className="icon-btn" title={t('编辑')} aria-label={t('编辑 {name}', { name: account.name })}>

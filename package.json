@@ -1,6 +1,6 @@
 {
   "name": "oneai",
-  "version": "2.1.5",
+  "version": "2.1.6",
   "description": "Desktop workbench for managing multiple local AI coding CLIs with live quotas",
   "author": "OneAI Team",
   "license": "MIT",

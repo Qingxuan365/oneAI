@@ -1,3 +1,4 @@
+import { app } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -68,22 +69,87 @@ const home = os.homedir();
 const AGY_ROOT = path.join(home, '.gemini', 'antigravity-cli');
 const PI_SESSIONS = path.join(home, '.pi', 'agent', 'sessions');
 
-// 单个会话文件的解析结果，按 mtime + 大小判断是否过期；会话文件只追加，未变化的文件不再重读
+// 单个会话文件的解析结果，按 mtime + 大小判断是否过期；持久化到 userData 下避免重启后重复解压全部历史归档会话
 const fileCache = new Map<string, { mtimeMs: number; size: number; entries: Entry[] }>();
+const PARSE_CONCURRENCY = 6;
+let diskCacheLoaded = false;
+let savingDiskCache = false;
+let pendingDiskCacheSave = false;
+
+function usageCachePath(): string | null {
+  try {
+    return app?.isReady?.() ? path.join(app.getPath('userData'), 'usage-cache-v1.json') : null;
+  } catch {
+    return null;
+  }
+}
+
+const DISK_CACHE_VERSION = 3;
+
+async function ensureDiskCacheLoaded(): Promise<void> {
+  if (diskCacheLoaded) return;
+  diskCacheLoaded = true;
+  const cacheFile = usageCachePath();
+  if (!cacheFile) return;
+  try {
+    const parsed = JSON.parse(await fs.promises.readFile(cacheFile, 'utf8'));
+    if (parsed && typeof parsed === 'object' && parsed.version === DISK_CACHE_VERSION && parsed.files && typeof parsed.files === 'object') {
+      for (const [file, val] of Object.entries(parsed.files as Record<string, any>)) {
+        if (val && typeof val.mtimeMs === 'number' && typeof val.size === 'number' && Array.isArray(val.entries)) {
+          fileCache.set(file, { mtimeMs: val.mtimeMs, size: val.size, entries: val.entries });
+        }
+      }
+    }
+  } catch { /* 首次运行或缓存损坏时忽略，自动重建 */ }
+}
+
+function scheduleSaveDiskCache(): void {
+  const cacheFile = usageCachePath();
+  if (!cacheFile) return;
+  if (savingDiskCache) {
+    pendingDiskCacheSave = true;
+    return;
+  }
+  savingDiskCache = true;
+  void (async () => {
+    try {
+      do {
+        pendingDiskCacheSave = false;
+        const files: Record<string, { mtimeMs: number; size: number; entries: Entry[] }> = {};
+        for (const [file, value] of fileCache) files[file] = value;
+        const tmp = `${cacheFile}.tmp`;
+        await fs.promises.mkdir(path.dirname(cacheFile), { recursive: true });
+        await fs.promises.writeFile(tmp, JSON.stringify({ version: DISK_CACHE_VERSION, files }), 'utf8');
+        await fs.promises.rename(tmp, cacheFile);
+      } while (pendingDiskCacheSave);
+    } catch { /* 缓存落盘失败不影响统计结果 */ } finally {
+      savingDiskCache = false;
+    }
+  })();
+}
 
 const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
 
-/** 逐行读取会话文件；Codex 会把较旧的会话压缩成 .jsonl.zst，边解压边按行回调，不整体读入内存 */
+/** 逐行读取会话文件；按游标切分避免大块或超长单行产生 O(N^2) 字符串切片拷贝 */
 async function readLines(file: string, onLine: (line: string) => void): Promise<void> {
   const decoder = new StringDecoder('utf8');
   let pending = '';
   const feed = (chunk: Uint8Array) => {
-    pending += decoder.write(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength));
-    let newline: number;
-    while ((newline = pending.indexOf('\n')) >= 0) {
-      onLine(pending.slice(0, newline));
-      pending = pending.slice(newline + 1);
+    const str = decoder.write(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+    const firstNl = str.indexOf('\n');
+    if (firstNl < 0) {
+      pending += str;
+      return;
     }
+    onLine(pending ? pending + str.slice(0, firstNl) : str.slice(0, firstNl));
+    pending = '';
+    let pos = firstNl + 1;
+    let newline: number;
+    while ((newline = str.indexOf('\n', pos)) >= 0) {
+      onLine(str.slice(pos, newline));
+      pos = newline + 1;
+    }
+    if (pos < str.length) pending = str.slice(pos);
   };
   const stream = fs.createReadStream(file);
   try {
@@ -147,8 +213,8 @@ const AUTO_REVIEW_MODEL = 'codex-auto-review';
 // 缓存里保留原始模型 id，显示名在汇总时按当前语言生成
 const modelLabel = (model: string) => (model === AUTO_REVIEW_MODEL ? t('自动审查 (codex-auto-review)') : model);
 
-// Codex：turn_context 给出模型，token_count 给出每次请求的用量；总量没有增长的重复事件不计
-async function parseCodex(file: string, fallbackModel: () => string): Promise<Entry[]> {
+// Codex：turn_context 给出模型，token_count 给出每次请求的用量；总量没有增长的重复事件不计；缺失模型时在汇总阶段代入实时默认模型
+async function parseCodex(file: string): Promise<Entry[]> {
   const entries: Entry[] = [];
   let model = '';
   let lastTotal = -1;
@@ -172,7 +238,7 @@ async function parseCodex(file: string, fallbackModel: () => string): Promise<En
       const cached = num(last.cached_input_tokens);
       entries.push({
         ts,
-        model: model || fallbackModel(),
+        model,
         input: Math.max(0, num(last.input_tokens) - cached),
         output: num(last.output_tokens),
         cacheRead: cached,
@@ -183,20 +249,45 @@ async function parseCodex(file: string, fallbackModel: () => string): Promise<En
   return entries;
 }
 
-// Antigravity：PLANNER_RESPONSE 步骤带 token；记录里没有模型字段，只能从「Model Selection 变更」提示中跟踪
-const AGY_MODEL_CHANGE = /`Model Selection` from .+? to (.+?)\. No need/;
+// Antigravity：PLANNER_RESPONSE 步骤带 token；记录里没有模型字段，只能从 USER_INPUT 末尾的 <USER_SETTINGS_CHANGE> 块中跟踪。
+// 必须先解析 JSON 并限定为 USER_INPUT 末尾的标签块，避免对话里读取/编辑源码或粘贴正则（如 (.+?)\\）时误匹配成模型名。
+const AGY_MODEL_CHANGE = /^The user changed setting `Model Selection` from [^\r\n]+? to ([^\r\n]+?)\. No need to comment/m;
+const VALID_AGY_MODEL = /^[A-Za-z0-9][A-Za-z0-9 ._:\/+-]*$/;
 
 function stripEffort(model: string): string {
   return model.trim().replace(/\s*\([^)]*\)$/, '');
 }
 
-async function parseAgy(file: string, fallbackModel: () => string): Promise<Entry[]> {
+export function extractAgyModelChange(line: string): string | null {
+  if (!line.includes('"USER_INPUT"') || !line.includes('Model Selection')) return null;
+  let parsed: { type?: unknown; content?: unknown };
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (parsed.type !== 'USER_INPUT' || typeof parsed.content !== 'string') return null;
+  const tagStart = parsed.content.lastIndexOf('<USER_SETTINGS_CHANGE>');
+  if (tagStart < 0) return null;
+  const tail = parsed.content.slice(tagStart);
+  if (!/<\/USER_SETTINGS_CHANGE>\s*$/.test(tail)) return null;
+  const closeIdx = tail.lastIndexOf('</USER_SETTINGS_CHANGE>');
+  const body = tail.slice('<USER_SETTINGS_CHANGE>'.length, closeIdx);
+  const changed = body.match(AGY_MODEL_CHANGE)?.[1]?.trim();
+  if (!changed) return null;
+  if (changed === 'None') return '';
+  const stripped = stripEffort(changed);
+  return VALID_AGY_MODEL.test(stripped) ? stripped : null;
+}
+
+async function parseAgy(file: string): Promise<Entry[]> {
   const entries: Entry[] = [];
   let model = '';
   await readLines(file, (line) => {
-    if (line.includes('Model Selection')) {
-      const changed = line.match(AGY_MODEL_CHANGE)?.[1];
-      if (changed && changed !== 'None') model = stripEffort(changed);
+    const changedModel = extractAgyModelChange(line);
+    if (changedModel !== null) {
+      model = changedModel;
+      return;
     }
     if (!line.includes('"PLANNER_RESPONSE"') || !line.includes('"input_tokens"')) return;
     try {
@@ -205,7 +296,7 @@ async function parseAgy(file: string, fallbackModel: () => string): Promise<Entr
       if (e.type !== 'PLANNER_RESPONSE' || !Number.isFinite(ts)) return;
       entries.push({
         ts,
-        model: model || fallbackModel(),
+        model,
         input: num(e.input_tokens),
         output: num(e.output_tokens),
         cacheRead: num(e.cache_read_tokens),
@@ -280,19 +371,24 @@ async function collectSources(accounts: UsageAccountRef[]): Promise<FileSource[]
       }
     }
   }
-  // Antigravity 的登录在系统凭据库，无法按目录区分，统一归默认账号
+  // Antigravity 的登录在系统凭据库，无法按目录区分，统一归默认账号；
+  // 紧凑版 transcript.jsonl 完整保留所有顶层 token 字段与模型切换提示，体积远小于 transcript_full.jsonl，缺失时才回退
   let conversations: fs.Dirent[] = [];
   try { conversations = await fs.promises.readdir(path.join(AGY_ROOT, 'brain'), { withFileTypes: true }); } catch { /* 未安装 agy */ }
-  for (const entry of conversations) {
-    if (!entry.isDirectory()) continue;
-    sources.push({
+  const agySources = await Promise.all(conversations.filter((entry) => entry.isDirectory()).map(async (entry): Promise<FileSource> => {
+    const logsDir = path.join(AGY_ROOT, 'brain', entry.name, '.system_generated', 'logs');
+    const compact = path.join(logsDir, 'transcript.jsonl');
+    let file = compact;
+    try { await fs.promises.access(compact); } catch { file = path.join(logsDir, 'transcript_full.jsonl'); }
+    return {
       cliId: 'agy',
       accountId: DEFAULT_ACCOUNT.id,
       accountName: DEFAULT_ACCOUNT.name,
-      file: path.join(AGY_ROOT, 'brain', entry.name, '.system_generated', 'logs', 'transcript_full.jsonl'),
+      file,
       fallbackModel: () => stripEffort(agyModel),
-    });
-  }
+    };
+  }));
+  sources.push(...agySources);
   // Pi 没有多账号，统一归默认账号
   for (const file of await listJsonl(PI_SESSIONS)) {
     sources.push({ cliId: 'pi', accountId: DEFAULT_ACCOUNT.id, accountName: DEFAULT_ACCOUNT.name, file, fallbackModel: () => '' });
@@ -300,21 +396,21 @@ async function collectSources(accounts: UsageAccountRef[]): Promise<FileSource[]
   return sources;
 }
 
-async function loadEntries(source: FileSource, rangeStart: number): Promise<Entry[]> {
+async function loadEntries(source: FileSource, rangeStart: number): Promise<{ entries: Entry[]; dirty: boolean }> {
   let stat: fs.Stats;
-  try { stat = await fs.promises.stat(source.file); } catch { return []; }
-  if (stat.mtimeMs < rangeStart) return [];
+  try { stat = await fs.promises.stat(source.file); } catch { return { entries: [], dirty: false }; }
+  if (stat.mtimeMs < rangeStart) return { entries: [], dirty: false };
   const cached = fileCache.get(source.file);
-  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached.entries;
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return { entries: cached.entries, dirty: false };
   let entries: Entry[];
   try {
     entries = source.cliId === 'claude' ? await parseClaude(source.file)
-      : source.cliId === 'codex' ? await parseCodex(source.file, source.fallbackModel)
+      : source.cliId === 'codex' ? await parseCodex(source.file)
         : source.cliId === 'pi' ? await parsePi(source.file)
-          : await parseAgy(source.file, source.fallbackModel);
-  } catch { return []; }
+          : await parseAgy(source.file);
+  } catch { return { entries: [], dirty: false }; }
   fileCache.set(source.file, { mtimeMs: stat.mtimeMs, size: stat.size, entries });
-  return entries;
+  return { entries, dirty: true };
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -342,17 +438,39 @@ export async function getUsageStats(accounts: unknown): Promise<UsageStats> {
     days.set(dateKey(day), { date: dateKey(day), requests: 0, by: {} });
   }
 
+  await ensureDiskCacheLoaded();
   const sources = await collectSources(Array.isArray(accounts) ? accounts as UsageAccountRef[] : []);
   const rows = new Map<string, UsageRow>();
   const accountsSeen = new Map<string, UsageAccountInfo>();
   const seen = new Set<string>();
+  let cacheDirty = false;
   // 只在会话文件的 mtime 落在统计范围内才读取；已读过且未变化的文件走缓存
   const liveFiles = new Set(sources.map((source) => source.file));
-  for (const file of fileCache.keys()) if (!liveFiles.has(file)) fileCache.delete(file);
+  for (const file of fileCache.keys()) {
+    if (!liveFiles.has(file)) {
+      fileCache.delete(file);
+      cacheDirty = true;
+    }
+  }
 
-  for (const source of sources) {
+  // 有限并发读取解析，结果按原 sources 下标顺序汇总，保证跨文件去重键与顺序完全确定
+  const loadedEntries: Entry[][] = new Array(sources.length);
+  let nextIdx = 0;
+  const workerCount = Math.min(PARSE_CONCURRENCY, sources.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIdx < sources.length) {
+      const i = nextIdx++;
+      const { entries, dirty } = await loadEntries(sources[i], rangeStart);
+      loadedEntries[i] = entries;
+      if (dirty) cacheDirty = true;
+    }
+  }));
+  if (cacheDirty) scheduleSaveDiskCache();
+
+  for (let i = 0; i < sources.length; i++) {
+    const source = sources[i];
     const sessionRows = new Set<UsageRow>();
-    for (const entry of await loadEntries(source, rangeStart)) {
+    for (const entry of loadedEntries[i]) {
       if (entry.ts < rangeStart || entry.ts >= rangeEnd.getTime()) continue;
       if (entry.key) {
         if (seen.has(entry.key)) continue;
@@ -366,10 +484,11 @@ export async function getUsageStats(accounts: unknown): Promise<UsageStats> {
         day.by[accountKey] = (day.by[accountKey] ?? 0) + 1;
       }
       if (entry.ts < weekStart) continue;
-      const rowKey = `${accountKey}\t${entry.model}`;
+      const resolvedModel = entry.model || source.fallbackModel();
+      const rowKey = `${accountKey}\t${resolvedModel}`;
       let row = rows.get(rowKey);
       if (!row) {
-        row = { cliId: source.cliId, accountId: source.accountId, accountName: source.accountName, model: modelLabel(entry.model), ...(entry.model === AUTO_REVIEW_MODEL ? { subagent: true } : {}), requests: 0, sessions: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+        row = { cliId: source.cliId, accountId: source.accountId, accountName: source.accountName, model: modelLabel(resolvedModel), ...(resolvedModel === AUTO_REVIEW_MODEL ? { subagent: true } : {}), requests: 0, sessions: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
         rows.set(rowKey, row);
       }
       row.requests += 1;

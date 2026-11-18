@@ -1,9 +1,31 @@
 import { defineConfig } from 'vite'
 import path from 'node:path'
 import fs from 'node:fs'
+import crypto from 'node:crypto'
 import electron from 'vite-plugin-electron'
 import renderer from 'vite-plugin-electron-renderer'
 import react from '@vitejs/plugin-react'
+
+function extractPreloadKeys(source: string): string[] {
+  const start = source.indexOf('exposeInMainWorld(')
+  const body = start >= 0 ? source.slice(start) : source
+  return [...body.matchAll(/^\s{2}([A-Za-z0-9_]+)\s*:/gm)].map((m) => m[1]).sort()
+}
+
+function verifyAndCopyPreload(rootDir: string) {
+  const cjsFile = path.resolve(rootDir, 'src/preload/index.cjs')
+  const tsFile = path.resolve(rootDir, 'src/preload/index.ts')
+  const cjsKeys = extractPreloadKeys(fs.readFileSync(cjsFile, 'utf-8'))
+  const tsKeys = extractPreloadKeys(fs.readFileSync(tsFile, 'utf-8'))
+  if (cjsKeys.join(',') !== tsKeys.join(',')) {
+    const onlyCjs = cjsKeys.filter((k) => !tsKeys.includes(k))
+    const onlyTs = tsKeys.filter((k) => !cjsKeys.includes(k))
+    throw new Error(`[preload-sync] src/preload/index.cjs and index.ts keys differ: onlyInCjs=[${onlyCjs.join(', ')}], onlyInTs=[${onlyTs.join(', ')}]`)
+  }
+  const outDir = path.resolve(rootDir, 'dist-electron/preload')
+  fs.mkdirSync(outDir, { recursive: true })
+  fs.copyFileSync(cjsFile, path.join(outDir, 'index.cjs'))
+}
 
 export default defineConfig({
   base: './',
@@ -28,22 +50,41 @@ export default defineConfig({
       },
     ]),
     {
-      name: 'copy-preload-cjs',
+      name: 'copy-preload-and-csp',
       buildStart() {
-        const outDir = path.resolve(__dirname, 'dist-electron/preload');
-        fs.mkdirSync(outDir, { recursive: true });
-        fs.copyFileSync(
-          path.resolve(__dirname, 'src/preload/index.cjs'),
-          path.join(outDir, 'index.cjs')
-        );
+        verifyAndCopyPreload(__dirname)
       },
       closeBundle() {
-        const outDir = path.resolve(__dirname, 'dist-electron/preload');
-        fs.mkdirSync(outDir, { recursive: true });
-        fs.copyFileSync(
-          path.resolve(__dirname, 'src/preload/index.cjs'),
-          path.join(outDir, 'index.cjs')
-        );
+        verifyAndCopyPreload(__dirname)
+      },
+      transformIndexHtml: {
+        order: 'post',
+        handler(html, ctx) {
+          // 仅在生产构建产物注入 CSP（开发模式下保留 Vite HMR / React Fast Refresh 内联脚本）
+          if (!ctx.bundle) return html
+          const hashes: string[] = []
+          for (const match of html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)) {
+            const digest = crypto.createHash('sha256').update(match[1], 'utf8').digest('base64')
+            hashes.push(`'sha256-${digest}'`)
+          }
+          const scriptSrc = ["'self'", ...hashes].join(' ')
+          const policy = [
+            "default-src 'self'",
+            `script-src ${scriptSrc}`,
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: blob:",
+            "media-src 'self' oneai-music: https: http: data: blob:",
+            "font-src 'self' data:",
+            "connect-src 'self' oneai-music:",
+            "worker-src 'self' blob:",
+            "object-src 'none'",
+            "base-uri 'self'",
+          ].join('; ')
+          return html.replace(
+            '<meta charset="UTF-8" />',
+            `<meta charset="UTF-8" />\n    <meta http-equiv="Content-Security-Policy" content="${policy}" />`
+          )
+        },
       },
     },
     renderer(),

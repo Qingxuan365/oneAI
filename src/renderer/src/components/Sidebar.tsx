@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { BedDouble, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Folder, FolderOpen, FolderPlus, GitBranch, GripVertical, History, Moon, PanelLeftOpen, Pencil, Plus, RotateCcw, Settings, SlidersHorizontal, Sun, Trash2, User, X } from 'lucide-react';
 import { Account, CliDef, FolderEntry, HistoryEntry, MusicStream, TaskSession } from '../types';
 
@@ -62,6 +62,8 @@ interface SidebarProps {
   musicDirectory?: string;
   musicStreams?: MusicStream[];
   showMusicPlayer?: boolean;
+  /** 传入当前语言，使 React.memo 在切换语言时同步重绘 */
+  language?: string;
 }
 
 /** 按顶栏时钟的小时数（含设置里的时钟偏移）选择问候语，与顶栏和「新会话 · 时间」一致 */
@@ -87,7 +89,7 @@ const BranchBadge: React.FC<{ branch?: string | null }> = ({ branch }) => (branc
 
 type MenuState = { x: number; y: number; kind: 'new' | 'folder' | 'task' | 'recent-folder'; folderPath?: string; taskId?: string; focusFirst?: boolean };
 
-export const Sidebar: React.FC<SidebarProps> = ({
+export const Sidebar: React.FC<SidebarProps> = React.memo(({
   isCollapsed,
   clis,
   folders,
@@ -125,6 +127,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   musicStreams = NO_STREAMS,
   showMusicPlayer = true,
 }) => {
+  const asideRef = useRef<HTMLElement | null>(null);
+  const isCollapsedRef = useRef(isCollapsed);
+  isCollapsedRef.current = isCollapsed;
+
+  useLayoutEffect(() => {
+    if (asideRef.current) asideRef.current.style.width = !isCollapsed && width ? `${width}px` : '';
+  }, [isCollapsed, width]);
   const [greeting, setGreeting] = useState(() => getGreeting(clockOffsetHours));
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
   const [openRecent, setOpenRecent] = useState<ReadonlySet<string>>(() => new Set());
@@ -175,12 +184,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
     document.querySelector(`[data-task-id="${CSS.escape(activeTaskId)}"]`)?.scrollIntoView({ block: 'nearest' });
   }, [activeTaskId, activeFolderExpanded, isCollapsed]);
 
-  // 与 App 中 Ctrl+数字 的任务顺序一致：按侧栏从上到下，前 9 个带序号
-  const taskOrder = new Map<string, number>();
-  orderedTasks(folders, tasks).forEach((task, index) => taskOrder.set(task.id, index + 1));
-  const tasksOf = (folderPath: string) => tasks.filter((task) => folderKey(task.cwd) === folderKey(folderPath));
-  const cliOf = (task: TaskSession) => clis.find((cli) => cli.id === task.groupId);
-  const accountOf = (task: TaskSession) => (task.accountId ? accounts.find((account) => account.id === task.accountId) : undefined);
+  // 与 App 中 Ctrl+数字 的任务顺序一致：按侧栏从上到下，前 9 个带序号；单遍建立文件夹映射，避免渲染中 O(folders × tasks) 重复计算
+  const { taskOrder, tasksByFolder } = useMemo(() => {
+    const byFolder = new Map<string, TaskSession[]>();
+    for (const task of tasks) {
+      const key = folderKey(task.cwd);
+      const list = byFolder.get(key);
+      if (list) list.push(task);
+      else byFolder.set(key, [task]);
+    }
+    const order = new Map<string, number>();
+    orderedTasks(folders, tasks).forEach((task, index) => order.set(task.id, index + 1));
+    return { taskOrder: order, tasksByFolder: byFolder };
+  }, [folders, tasks]);
+  const tasksOf = (folderPath: string) => tasksByFolder.get(folderKey(folderPath)) ?? [];
+  const cliMap = useMemo(() => new Map(clis.map((cli) => [cli.id, cli])), [clis]);
+  const accountMap = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
+  const cliOf = (task: TaskSession) => cliMap.get(task.groupId);
+  const accountOf = (task: TaskSession) => (task.accountId ? accountMap.get(task.accountId) : undefined);
 
   const runningCount = tasks.filter((task) => isTaskAlive(task.status)).length;
   const allFoldersExpanded = folders.length > 0 && folders.every((folder) => folder.isExpanded);
@@ -270,14 +291,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
     e.preventDefault();
     const prevCursor = document.body.style.cursor;
     document.body.style.cursor = 'col-resize';
+    let latestWidth: number | null = null;
     const onMove = (ev: MouseEvent) => {
       const max = Math.max(240, Math.min(480, Math.floor(window.innerWidth * 0.45)));
-      onResizeWidth(Math.max(240, Math.min(max, Math.round(ev.clientX))));
+      const next = Math.max(240, Math.min(max, Math.round(ev.clientX)));
+      latestWidth = next;
+      if (!isCollapsedRef.current && asideRef.current) asideRef.current.style.width = `${next}px`;
     };
     const onUp = () => {
       document.body.style.cursor = prevCursor;
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      if (asideRef.current) asideRef.current.style.width = !isCollapsedRef.current && width ? `${width}px` : '';
+      if (latestWidth !== null) onResizeWidth(latestWidth);
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -418,7 +444,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // 折叠后保留窄条：每个文件夹一个按钮（点击新建任务）及其下的任务序号按钮（带品牌标与状态点，支持切换、右键菜单与中键关闭），底部保留添加文件夹、设置与展开入口
   if (isCollapsed) {
     return (
-      <aside id="oneai-sidebar" aria-label={t('任务列表（已折叠）')} className="flex h-full w-12 shrink-0 select-none flex-col items-center border-r border-line bg-surface">
+      <aside ref={asideRef} id="oneai-sidebar" aria-label={t('任务列表（已折叠）')} className="flex h-full w-12 shrink-0 select-none flex-col items-center border-r border-line bg-surface">
         <div className="window-drag flex h-11 w-full shrink-0 items-center justify-center border-b border-line bg-panel">
           <AppLogo size={20} />
         </div>
@@ -503,7 +529,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }
 
   return (
-    <aside id="oneai-sidebar" style={width ? { width } : undefined} className={`relative flex ${width ? '' : 'w-80'} bg-surface border-r border-line flex-col h-full select-none shrink-0 text-fg-muted`}>
+    <aside ref={asideRef} id="oneai-sidebar" style={width ? { width } : undefined} className={`relative flex ${width ? '' : 'w-80'} bg-surface border-r border-line flex-col h-full select-none shrink-0 text-fg-muted`}>
       {/* 侧边栏顶部：应用品牌、标语、版本号与问候语 */}
       <div className="window-drag shrink-0 border-b border-line bg-panel px-3.5 pb-3 pt-4 text-center">
         <div className="flex items-center justify-center gap-2.5">
@@ -910,7 +936,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <div className="ml-[1.4rem] mt-0.5 space-y-0.5 border-l border-line pl-1.5">
                           {recent.entries.map((entry) => (
                             <button
-                              key={`${entry.cliId}:${entry.id}`}
+                              key={`${entry.cliId}:${entry.accountId ?? 'default'}:${entry.id}`}
                               type="button"
                               data-history-id={entry.id}
                               onClick={() => onResumeHistory?.(entry)}
@@ -919,6 +945,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             >
                               <BrandIcon icon={entry.cliId} size={14} />
                               <span className="truncate">{entry.title}</span>
+                              {entry.accountName && <span className="shrink-0 rounded border border-line px-1 text-2xs text-fg-subtle">{entry.accountName}</span>}
                               <span className="ml-auto shrink-0 text-2xs text-fg-faint">{formatAgo(entry.updatedAt)}</span>
                             </button>
                           ))}
@@ -975,4 +1002,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       )}
     </aside>
   );
-};
+});
+
+Sidebar.displayName = 'Sidebar';

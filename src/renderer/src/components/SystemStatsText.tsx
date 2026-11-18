@@ -13,14 +13,30 @@ const Dot = ({ className = '' }: { className?: string }) => (
   <span className={`shrink-0 text-fg-faint ${className}`} aria-hidden="true">•</span>
 );
 
+function isSameDisplayedStats(a: SystemStats | null, b: SystemStats): boolean {
+  if (!a) return false;
+  return a.cpuPercent === b.cpuPercent
+    && (a.memUsedBytes / 1024 ** 3).toFixed(1) === (b.memUsedBytes / 1024 ** 3).toFixed(1)
+    && (a.memTotalBytes / 1024 ** 3).toFixed(1) === (b.memTotalBytes / 1024 ** 3).toFixed(1)
+    && formatRate(a.netUpBytesPerSec) === formatRate(b.netUpBytesPerSec)
+    && formatRate(a.netDownBytesPerSec) === formatRate(b.netDownBytesPerSec);
+}
+
+interface SystemStatsTextProps {
+  /** 传入当前语言，使 React.memo 在切换语言时同步重绘 */
+  language?: string;
+}
+
 /**
  * 顶栏右侧整机 CPU / 内存 / 网速，纯文字单行。数值定宽并右对齐，避免每 2 秒刷新时顶栏抖动。
  * 空间不足时按「网速、内存、CPU」的顺序由顶栏容器查询依次收起；尚无数据时不占位。
  */
-export const SystemStatsText: React.FC = () => {
+export const SystemStatsText: React.FC<SystemStatsTextProps> = React.memo(() => {
   const [stats, setStats] = useState<SystemStats | null>(null);
 
-  useEffect(() => window.electronAPI?.onSystemStats?.(setStats), []);
+  useEffect(() => window.electronAPI?.onSystemStats?.((next) => {
+    setStats((prev) => (isSameDisplayedStats(prev, next) ? prev : next));
+  }), []);
 
   if (!stats) return null;
   const memGb = `${(stats.memUsedBytes / 1024 ** 3).toFixed(1)} GB`;
@@ -49,4 +65,6 @@ export const SystemStatsText: React.FC = () => {
       </span>
     </div>
   );
-};
+});
+
+SystemStatsText.displayName = 'SystemStatsText';

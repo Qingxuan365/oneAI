@@ -136,7 +136,9 @@ async function lastCodexPrompt(file: string): Promise<string | null> {
   return null;
 }
 
-async function codexSessions(home: string, cwd: string, earliest: number): Promise<SessionInfo[]> {
+async function codexSessionsByFolder(home: string, targetFolders: ReadonlySet<string>, earliest: number): Promise<Map<string, SessionInfo[]>> {
+  const byFolder = new Map<string, SessionInfo[]>();
+  if (targetFolders.size === 0) return byFolder;
   const root = path.join(home, 'sessions');
   // 只看修改时间不早于最早任务创建时间的文件；按日期目录由新到旧，早于这个日期前一天的整个目录跳过
   const cutoffDay = new Date(earliest - 24 * 3600_000);
@@ -154,9 +156,11 @@ async function codexSessions(home: string, cwd: string, earliest: number): Promi
       }
     }
   }
-  const found: SessionInfo[] = [];
-  for (const file of files.slice(0, 200)) {
-    const stat = await statOf(file);
+  const candidateFiles = files.slice(0, 200);
+  const stats = await Promise.all(candidateFiles.map((file) => statOf(file)));
+  for (let i = 0; i < candidateFiles.length; i++) {
+    const file = candidateFiles[i];
+    const stat = stats[i];
     if (!stat || stat.mtimeMs < earliest - SKEW_MS) continue;
     const meta = await cached(`${file}#meta`, stat, async () => {
       try {
@@ -167,39 +171,54 @@ async function codexSessions(home: string, cwd: string, earliest: number): Promi
         return { id: String(payload.id), cwd: String(payload.cwd ?? ''), birth: Date.parse(payload.timestamp) || stat.birthtimeMs };
       } catch { return null; }
     });
-    if (!meta || folderKey(meta.cwd) !== folderKey(cwd)) continue;
+    if (!meta) continue;
+    const key = folderKey(meta.cwd);
+    if (!targetFolders.has(key)) continue;
     const lastPrompt = await cached(file, stat, () => lastCodexPrompt(file).catch(() => null));
-    found.push({ id: meta.id, birth: meta.birth, lastPrompt });
+    const list = byFolder.get(key) ?? [];
+    list.push({ id: meta.id, birth: meta.birth, lastPrompt });
+    byFolder.set(key, list);
   }
-  return found.sort((a, b) => b.birth - a.birth).slice(0, MAX_SESSIONS_PER_GROUP);
+  for (const [key, list] of byFolder) {
+    byFolder.set(key, list.sort((a, b) => b.birth - a.birth).slice(0, MAX_SESSIONS_PER_GROUP));
+  }
+  return byFolder;
 }
 
 // ---------- Kimi Code：<KIMI_CODE_HOME>/sessions/<项目>/<会话>/state.json（含 cwd、createdAt、lastPrompt） ----------
-async function kimiSessions(home: string, cwd: string, earliest: number): Promise<SessionInfo[]> {
+async function kimiSessionsByFolder(home: string, targetFolders: ReadonlySet<string>, earliest: number): Promise<Map<string, SessionInfo[]>> {
+  const byFolder = new Map<string, SessionInfo[]>();
+  if (targetFolders.size === 0) return byFolder;
   const root = path.join(home, 'sessions');
-  const found: SessionInfo[] = [];
   let projects: fs.Dirent[];
-  try { projects = await fs.promises.readdir(root, { withFileTypes: true }); } catch { return []; }
-  for (const project of projects.filter((e) => e.isDirectory())) {
+  try { projects = await fs.promises.readdir(root, { withFileTypes: true }); } catch { return byFolder; }
+  await Promise.all(projects.filter((e) => e.isDirectory()).map(async (project) => {
     let sessions: fs.Dirent[];
-    try { sessions = await fs.promises.readdir(path.join(root, project.name), { withFileTypes: true }); } catch { continue; }
-    for (const session of sessions.filter((e) => e.isDirectory())) {
+    try { sessions = await fs.promises.readdir(path.join(root, project.name), { withFileTypes: true }); } catch { return; }
+    await Promise.all(sessions.filter((e) => e.isDirectory()).map(async (session) => {
       const file = path.join(root, project.name, session.name, 'state.json');
       const stat = await statOf(file);
-      if (!stat || stat.mtimeMs < earliest - SKEW_MS) continue;
+      if (!stat || stat.mtimeMs < earliest - SKEW_MS) return;
       const state = await cached(file, stat, async () => {
         try { return JSON.parse(await fs.promises.readFile(file, 'utf8')); } catch { return null; }
       });
-      if (!state || state.archived || typeof state.cwd !== 'string' || folderKey(state.cwd) !== folderKey(cwd)) continue;
+      if (!state || state.archived || typeof state.cwd !== 'string') return;
+      const key = folderKey(state.cwd);
+      if (!targetFolders.has(key)) return;
       const created = typeof state.createdAt === 'number' ? state.createdAt : Date.parse(state.createdAt);
-      found.push({
+      const list = byFolder.get(key) ?? [];
+      list.push({
         id: String(state.id ?? session.name),
         birth: Number.isFinite(created) ? created : stat.birthtimeMs,
         lastPrompt: typeof state.lastPrompt === 'string' && state.lastPrompt.trim() ? clip(state.lastPrompt) : null,
       });
-    }
+      byFolder.set(key, list);
+    }));
+  }));
+  for (const [key, list] of byFolder) {
+    byFolder.set(key, list.sort((a, b) => b.birth - a.birth).slice(0, MAX_SESSIONS_PER_GROUP));
   }
-  return found.sort((a, b) => b.birth - a.birth).slice(0, MAX_SESSIONS_PER_GROUP);
+  return byFolder;
 }
 
 /**
@@ -254,26 +273,46 @@ const DEFAULT_HOMES: Record<SummaryTask['cliId'], string> = {
   kimi: path.join(os.homedir(), '.kimi-code'),
 };
 
-/** 读取一批任务的摘要；只处理 Claude / Codex / Kimi 的任务，其他 CLI 或无法识别的输入不出现在结果里 */
+/** 读取一批任务的摘要；按 (cliId, home) 合并扫描，避免多个文件夹下重复遍历整个 Codex / Kimi 会话目录 */
 export async function readTaskSummaries(raw: unknown): Promise<Record<string, TaskSummary>> {
-  const groups = new Map<string, SummaryTask[]>();
+  const byCliHome = new Map<string, { cliId: SummaryTask['cliId']; home: string; folders: Map<string, SummaryTask[]> }>();
   for (const task of parseTasks(raw)) {
-    const key = `${task.cliId}|${task.configDir ?? ''}|${folderKey(task.cwd)}`;
-    groups.set(key, [...(groups.get(key) ?? []), task]);
+    const home = task.configDir ?? DEFAULT_HOMES[task.cliId];
+    const homeKey = `${task.cliId}|${process.platform === 'win32' ? home.toLowerCase() : home}`;
+    let bucket = byCliHome.get(homeKey);
+    if (!bucket) {
+      bucket = { cliId: task.cliId, home, folders: new Map() };
+      byCliHome.set(homeKey, bucket);
+    }
+    const fKey = folderKey(task.cwd);
+    const list = bucket.folders.get(fKey);
+    if (list) list.push(task);
+    else bucket.folders.set(fKey, [task]);
   }
   const result: Record<string, TaskSummary> = {};
-  await Promise.all([...groups.values()].map(async (tasks) => {
-    const { cliId, cwd, configDir } = tasks[0];
-    const home = configDir ?? DEFAULT_HOMES[cliId];
-    const earliest = Math.min(...tasks.map((task) => task.createdAt));
-    let sessions: SessionInfo[] = [];
+  await Promise.all([...byCliHome.values()].map(async ({ cliId, home, folders }) => {
+    if (cliId === 'claude') {
+      await Promise.all([...folders.values()].map(async (tasks) => {
+        let sessions: SessionInfo[] = [];
+        try { sessions = await claudeSessions(home, tasks[0].cwd); } catch {}
+        const assigned = assignSessions(tasks, sessions);
+        for (const task of tasks) result[task.id] = { text: assigned.get(task.id)?.lastPrompt ?? null };
+      }));
+      return;
+    }
+    const allTasks = [...folders.values()].flat();
+    const earliest = Math.min(...allTasks.map((task) => task.createdAt));
+    const targetFolders = new Set(folders.keys());
+    let grouped = new Map<string, SessionInfo[]>();
     try {
-      sessions = cliId === 'claude' ? await claudeSessions(home, cwd)
-        : cliId === 'codex' ? await codexSessions(home, cwd, earliest)
-          : await kimiSessions(home, cwd, earliest);
+      grouped = cliId === 'codex'
+        ? await codexSessionsByFolder(home, targetFolders, earliest)
+        : await kimiSessionsByFolder(home, targetFolders, earliest);
     } catch { /* 读取失败时按「没有会话」处理 */ }
-    const assigned = assignSessions(tasks, sessions);
-    for (const task of tasks) result[task.id] = { text: assigned.get(task.id)?.lastPrompt ?? null };
+    for (const [fKey, tasks] of folders) {
+      const assigned = assignSessions(tasks, grouped.get(fKey) ?? []);
+      for (const task of tasks) result[task.id] = { text: assigned.get(task.id)?.lastPrompt ?? null };
+    }
   }));
   return result;
 }

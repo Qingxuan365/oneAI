@@ -23,7 +23,7 @@ d:/GitHub/OneAI/
 ├── LICENSE                    # MIT 许可证
 ├── package.json
 ├── tsconfig.json
-├── vite.config.ts             # 渲染进程、主进程构建及 preload 复制
+├── vite.config.ts             # 渲染进程、主进程构建、preload 同步校验与复制、生产 CSP 注入
 ├── electron-builder.json      # Windows 打包配置：默认安装版（NSIS），便携版通过 build:portable 生成，产物输出到 release/
 ├── tailwind.config.js
 ├── postcss.config.js
@@ -39,17 +39,19 @@ d:/GitHub/OneAI/
 │   │   ├── system-stats.ts    # 整机 CPU / 内存 / 网速采样（网速读物理网卡，常驻 PowerShell），每 2 秒推送给顶栏
 │   │   ├── task-summary.ts    # 读取任务对应会话（Claude / Codex / Kimi 的本机会话文件）里最近一条用户消息，供侧栏任务行第二行
 │   │   ├── model-format.ts    # Claude 模型 id 转显示名（无副作用，额度与用量共用）
-│   │   ├── usage-stats.ts     # 本周用量：流式解析 Claude Code / Codex（含 archived_sessions 与 .jsonl.zst，用 fzstd 解压）/ Antigravity / Pi 本机会话记录，按 CLI × 账号 × 模型汇总请求数与 Tokens（账号来自设置里的账号配置目录，默认目录归「默认账号」），并给出近 26 周每日请求数（按文件 mtime + 大小缓存解析结果）
+│   │   ├── usage-stats.ts     # 本周用量：流式解析 Claude Code / Codex（含 archived_sessions 与 .jsonl.zst，用 fzstd 解压）/ Antigravity（优先紧凑版 transcript.jsonl）/ Pi 本机会话记录，按 CLI × 账号 × 模型汇总请求数与 Tokens，给出近 26 周每日请求数（按文件 mtime + 大小缓存解析结果并持久化到 userData）
 │   │   ├── git-branch.ts      # 读取文件夹所在 Git 仓库的当前分支（只读 .git/HEAD，不执行 git）
 │   │   ├── account-env.ts     # 多账号：各 CLI 的配置目录环境变量、路径校验与目录创建，只创建目录不读凭据
 │   │   ├── account-login.ts   # 多账号：调用 CLI 自带状态命令判断登录状态（Kimi Code 只检查凭据文件是否存在）
 │   │   ├── cli-detect.ts      # 按 PATH 检测已知 CLI（清单取自 known-clis.json）与用户自定义 CLI 是否已安装，决定「+」菜单里可新建的 CLI
 │   │   ├── known-clis.json    # 已知 AI 编程 CLI 清单（id / 名称 / 命令），新增支持的 CLI 只改这里
 │   │   ├── i18n.ts            # 主进程文案翻译（t()），语言由渲染进程通过 IPC 同步
-│   │   ├── file-preview.ts    # 文件预览：路径解析与只读读取，限制在任务 cwd 内
-│   │   ├── music-library.ts   # 音乐：扫描本地音乐目录、读取音频，并把在线音乐的 .m3u / .pls 歌单展开成曲目（只接受 http(s)）
-│   │   └── session-history.ts # 读取 Claude / Codex / Kimi 本机历史会话及恢复命令
-│   ├── preload/               # 预加载脚本
+│   │   ├── file-preview.ts    # 文件预览：异步路径解析与只读读取，限制在任务 cwd 内（及粘贴/拖入图片白名单）
+│   │   ├── music-library.ts   # 音乐：扫描本地音乐目录、经 oneai-music:// 流式协议（及兼容读取）提供本地音频，并把在线音乐的 .m3u / .pls 歌单展开成曲目（只接受 http(s)）
+│   │   ├── workspace-store.ts # 工作区状态落盘：启动同步读取，运行期异步串行原子写入，退出前兜底刷盘
+│   │   ├── window-state.ts    # 窗口状态落盘：尺寸、位置（含多屏越界保护）、最大化状态与上次主题底色 / 标题栏覆盖层色值
+│   │   └── session-history.ts # 读取 Claude / Codex（含 archived_sessions 与 .jsonl.zst）/ Kimi 本机及多账号目录历史会话与恢复命令（按文件签名缓存）
+│   ├── preload/               # 预加载脚本（构建时由 vite.config.ts 自动校验两份接口键集合一致）
 │   │   ├── index.cjs          # 运行时实际加载的 preload，由 vite.config.ts 复制到 dist-electron/preload/
 │   │   └── index.ts           # 同一组接口的 TS 版本，不参与构建；修改接口时须与 index.cjs 同步
 │   ├── shared/                # 主进程与渲染进程共用

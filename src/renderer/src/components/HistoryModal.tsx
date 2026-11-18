@@ -15,7 +15,7 @@ const CLI_LABELS: Record<string, string> = {
 
 const cliLabel = (cliId: string) => CLI_LABELS[cliId] ?? cliId;
 
-const entryKey = (entry: HistoryEntry) => `${entry.cliId}-${entry.id}`;
+const entryKey = (entry: HistoryEntry) => `${entry.cliId}:${entry.accountId ?? 'default'}:${entry.id}`;
 
 function formatTime(timestamp: number): string {
   const date = new Date(timestamp);
@@ -37,10 +37,14 @@ interface HistoryModalProps {
   onResume: (entry: HistoryEntry) => void;
   /** 已在侧栏里有对应任务的会话 id（点击会切换过去，而不是再开一个） */
   openHistoryIds?: ReadonlySet<string>;
+  /** 主界面已持有的历史会话快照：打开抽屉时先立即呈现，再静默刷新最新列表 */
+  initialEntries?: HistoryEntry[];
+  /** 已配置的多账号目录（一并纳入历史会话扫描与恢复） */
+  accounts?: Array<{ id: string; name: string; cliId: string; configDir: string }>;
 }
 
-export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onResume, openHistoryIds }) => {
-  const [entries, setEntries] = useState<HistoryEntry[]>([]);
+export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onResume, openHistoryIds, initialEntries, accounts }) => {
+  const [entries, setEntries] = useState<HistoryEntry[]>(initialEntries ?? []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('all')  // 'all' 或历史记录里出现过的 cliId;
@@ -53,9 +57,11 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
   useEffect(() => {
     if (!isOpen) return;
     let active = true;
-    setLoading(true);
+    const hasSeed = Boolean(initialEntries && initialEntries.length > 0);
+    if (hasSeed && entries.length === 0) setEntries(initialEntries!);
+    setLoading(!hasSeed && entries.length === 0);
     setError('');
-    window.electronAPI.listSessionHistory()
+    window.electronAPI.listSessionHistory(accounts)
       .then((list) => {
         if (!active) return;
         setEntries(list);
@@ -71,7 +77,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
       .catch((err) => { if (active) setError(err instanceof Error ? err.message : t('读取历史会话失败')); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [isOpen]);
+  }, [isOpen, accounts]);
 
   // 下拉选项来自实际读到的历史记录，新增 CLI 的历史出现后自动可选
   const filterOptions = useMemo(() => {
@@ -89,7 +95,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
     const keyword = query.trim().toLowerCase();
     return entries.filter((entry) =>
       (filter === 'all' || entry.cliId === filter)
-      && (!keyword || `${entry.title} ${entry.cwd}`.toLowerCase().includes(keyword)));
+      && (!keyword || `${entry.title} ${entry.cwd} ${entry.accountName ?? ''}`.toLowerCase().includes(keyword)));
   }, [entries, filter, query]);
 
   useEffect(() => { setPendingKey(null); setConfirmAll(false); }, [filter, query, isOpen]);
@@ -98,8 +104,8 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
     setDeleting(true);
     setError('');
     try {
-      await window.electronAPI.deleteSessionHistory(targets.map(({ cliId, id }) => ({ cliId, id })));
-      const fresh = await window.electronAPI.listSessionHistory();
+      await window.electronAPI.deleteSessionHistory(targets.map(({ cliId, id, accountId }) => ({ cliId, id, ...(accountId ? { accountId } : {}) })));
+      const fresh = await window.electronAPI.listSessionHistory(accounts);
       setEntries(fresh);
       const stillThere = new Set(fresh.map(entryKey));
       const failed = targets.filter((entry) => stillThere.has(entryKey(entry))).length;
@@ -178,7 +184,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
           const confirming = pendingKey === key;
           const group = dayGroup(entry.updatedAt);
           const showGroup = index === 0 || dayGroup(visible[index - 1].updatedAt) !== group;
-          const isOpenTask = openHistoryIds?.has(entry.id) ?? false;
+          const isOpenTask = Boolean(openHistoryIds && (openHistoryIds.has(`${entry.accountId ?? 'default'}:${entry.id}`) || (!entry.accountId && openHistoryIds.has(entry.id))));
           const branch = branches[folderKey(entry.cwd)];
           return (
             <React.Fragment key={key}>
@@ -203,7 +209,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
                   </span>
                 </span>
                 <span className="shrink-0 text-right text-xs">
-                  <span className="block text-fg-muted">{cliLabel(entry.cliId)}</span>
+                  <span className="block text-fg-muted">{entry.accountName ? t('{cli}（{account}）', { cli: cliLabel(entry.cliId), account: entry.accountName }) : cliLabel(entry.cliId)}</span>
                   <span className="block tabular-nums text-fg-faint" title={formatTime(entry.updatedAt)}>{formatAgo(entry.updatedAt)}</span>
                   {isOpenTask && <span className="mt-0.5 inline-block rounded-full bg-accent/15 px-1.5 text-2xs font-medium text-accent" data-history-open>{t('已打开')}</span>}
                 </span>

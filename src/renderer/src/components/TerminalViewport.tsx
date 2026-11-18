@@ -48,6 +48,8 @@ interface TerminalViewportProps {
   emptyState?: React.ReactNode;
   /** 点击终端中的工作目录内文件路径时触发，参数为任务 cwd 与文件绝对路径 */
   onPreviewFile?: (cwd: string, filePath: string, line?: number) => void;
+  /** 传入当前语言，使 React.memo 在切换语言时同步重绘搜索栏与悬浮按钮 */
+  language?: string;
 }
 
 interface LogicalLine {
@@ -59,6 +61,7 @@ interface LogicalLine {
 /** 合并因终端宽度折行的物理行，并记录字符与单元格的对应关系，供链接识别按真实列号定位。 */
 export function getLogicalLine(term: Terminal, bufferLineNumber: number): LogicalLine | null {
   const buf = term.buffer.active;
+  const reusableCell = buf.getNullCell();
   let start = bufferLineNumber - 1;
   while (start > 0 && buf.getLine(start)?.isWrapped) start--;
   let text = '';
@@ -67,12 +70,13 @@ export function getLogicalLine(term: Terminal, bufferLineNumber: number): Logica
     const line = buf.getLine(y);
     if (!line || (y > start && !line.isWrapped)) break;
     for (let x = 0; x < line.length; x++) {
-      const cell = line.getCell(x);
+      const cell = line.getCell(x, reusableCell);
       if (!cell || cell.getWidth() === 0) continue;
       const chars = cell.getChars() || ' ';
+      const width = cell.getWidth();
       for (let i = 0; i < chars.length; i++) {
         text += chars[i];
-        cells.push({ x: x + 1, y: y + 1, w: cell.getWidth() });
+        cells.push({ x: x + 1, y: y + 1, w: width });
       }
     }
   }
@@ -121,6 +125,7 @@ const SEARCH_DECORATIONS = {
  */
 function findKimiInputAnchor(term: Terminal): { row: number; col: number } | null {
   const buf = term.buffer.active;
+  const reusableCell = buf.getNullCell();
   for (let y = term.rows - 1; y >= 1; y--) {
     const border = buf.getLine(buf.viewportY + y);
     const text = border?.translateToString(true).trim() ?? '';
@@ -129,7 +134,7 @@ function findKimiInputAnchor(term: Terminal): { row: number; col: number } | nul
     if (!line) return null;
     let col = 0;
     for (let x = 0; x < line.length; x++) {
-      const cell = line.getCell(x);
+      const cell = line.getCell(x, reusableCell);
       const ch = cell?.getChars() ?? '';
       if (cell && ch && ch !== ' ' && ch !== '│' && ch !== '┃') col = x + Math.max(cell.getWidth(), 1);
     }
@@ -144,6 +149,7 @@ function findKimiInputAnchor(term: Terminal): { row: number; col: number } | nul
  */
 function findPiInputAnchor(term: Terminal): { row: number; col: number } | null {
   const buf = term.buffer.active;
+  const reusableCell = buf.getNullCell();
   const isBorder = (y: number) => /^[─━═]{20,}$/.test(buf.getLine(buf.viewportY + y)?.translateToString(true).trim() ?? '');
   let lower = -1;
   for (let y = term.rows - 1; y >= 0; y--) {
@@ -152,7 +158,7 @@ function findPiInputAnchor(term: Terminal): { row: number; col: number } | null 
       for (let r = y + 1; r < lower; r++) {
         const line = buf.getLine(buf.viewportY + r);
         for (let x = 0; line && x < line.length; x++) {
-          if (line.getCell(x)?.isInverse()) return { row: r, col: x };
+          if (line.getCell(x, reusableCell)?.isInverse()) return { row: r, col: x };
         }
       }
     }
@@ -172,13 +178,14 @@ function findDrawnCursorAnchor(term: Terminal): { row: number; col: number } | n
   const core = (term as unknown as { _core?: { coreService?: { isCursorHidden?: boolean } } })._core;
   if (!core?.coreService?.isCursorHidden) return null;
   const buf = term.buffer.active;
+  const reusableCell = buf.getNullCell();
   for (let y = term.rows - 1; y >= 0; y--) {
     const line = buf.getLine(buf.viewportY + y);
     if (!line) continue;
     for (let x = 0; x < line.length; x++) {
-      if (!line.getCell(x)?.isInverse()) continue;
-      if (x > 0 && line.getCell(x - 1)?.isInverse()) continue;
-      if (line.getCell(x + 1)?.isInverse()) continue;
+      if (!line.getCell(x, reusableCell)?.isInverse()) continue;
+      if (x > 0 && line.getCell(x - 1, reusableCell)?.isInverse()) continue;
+      if (line.getCell(x + 1, reusableCell)?.isInverse()) continue;
       return { row: y, col: x };
     }
   }
@@ -191,29 +198,87 @@ export const IME_ANCHOR_FINDERS: Record<string, InputAnchorFinder> = {
   pi: findPiInputAnchor,
 };
 
-export function attachImeAnchor(term: Terminal, host: HTMLElement, find: InputAnchorFinder): void {
+export function attachImeAnchor(term: Terminal, host: HTMLElement, find: InputAnchorFinder): () => void {
   const textarea = term.textarea;
   const root = term.element;
-  if (!textarea || !root) return;
+  if (!textarea || !root) return () => {};
   // xterm 在重绘、光标移动和组合输入的延时回调里都会把 textarea 的内联 left/top 写回真实光标，
   // 输入法恰好在这些回写之后读取位置。这里不再和它抢写内联样式，
   // 改由 index.css 的 .ime-anchored 规则用 !important 读取下面两个变量，xterm 的回写因此不生效。
-  const place = () => {
-    const screen = host.querySelector<HTMLElement>('.xterm-screen');
-    const anchor = find(term);
-    if (!screen || !anchor || !screen.clientWidth) {
-      root.classList.remove('ime-anchored');
+  let screen: HTMLElement | null = null;
+  let screenWidth = 0;
+  let screenHeight = 0;
+  let resizeObserver: ResizeObserver | null = null;
+  let rafId = 0;
+  let lastLeft = '';
+  let lastTop = '';
+  let wasAnchored = false;
+
+  const ensureScreen = () => {
+    if (screen) return screen;
+    screen = host.querySelector<HTMLElement>('.xterm-screen');
+    if (screen && typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => {
+        if (!screen) return;
+        screenWidth = screen.clientWidth;
+        screenHeight = screen.clientHeight;
+      });
+      resizeObserver.observe(screen);
+    }
+    return screen;
+  };
+
+  const placeNow = () => {
+    rafId = 0;
+    if (host.style.display === 'none') return;
+    const targetScreen = ensureScreen();
+    const width = screenWidth || targetScreen?.clientWidth || 0;
+    const height = screenHeight || targetScreen?.clientHeight || 0;
+    const anchor = width > 0 ? find(term) : null;
+    if (!targetScreen || !anchor || !width) {
+      if (wasAnchored) {
+        root.classList.remove('ime-anchored');
+        wasAnchored = false;
+        lastLeft = '';
+        lastTop = '';
+      }
       return;
     }
-    root.style.setProperty('--ime-left', `${(anchor.col * screen.clientWidth) / term.cols}px`);
-    root.style.setProperty('--ime-top', `${(anchor.row * screen.clientHeight) / term.rows}px`);
-    root.classList.add('ime-anchored');
+    const left = `${(anchor.col * width) / term.cols}px`;
+    const top = `${(anchor.row * height) / term.rows}px`;
+    if (left !== lastLeft) {
+      root.style.setProperty('--ime-left', left);
+      lastLeft = left;
+    }
+    if (top !== lastTop) {
+      root.style.setProperty('--ime-top', top);
+      lastTop = top;
+    }
+    if (!wasAnchored) {
+      root.classList.add('ime-anchored');
+      wasAnchored = true;
+    }
   };
-  term.onRender(place);
-  term.onCursorMove(place);
-  textarea.addEventListener('focus', place);
-  textarea.addEventListener('compositionstart', place);
-  textarea.addEventListener('compositionupdate', place);
+
+  const schedulePlace = () => {
+    if (host.style.display === 'none' || document.activeElement !== textarea) return;
+    if (!rafId) rafId = requestAnimationFrame(placeNow);
+  };
+
+  const renderDisposable = term.onRender(schedulePlace);
+  const cursorDisposable = term.onCursorMove(schedulePlace);
+  textarea.addEventListener('focus', placeNow);
+  textarea.addEventListener('compositionstart', placeNow);
+  textarea.addEventListener('compositionupdate', placeNow);
+  return () => {
+    if (rafId) cancelAnimationFrame(rafId);
+    resizeObserver?.disconnect();
+    renderDisposable.dispose();
+    cursorDisposable.dispose();
+    textarea.removeEventListener('focus', placeNow);
+    textarea.removeEventListener('compositionstart', placeNow);
+    textarea.removeEventListener('compositionupdate', placeNow);
+  };
 }
 
 interface TerminalInstance {
@@ -221,6 +286,7 @@ interface TerminalInstance {
   fitAddon: FitAddon;
   searchAddon: SearchAddon;
   webglAddon?: WebglAddon;
+  disposeImeAnchor?: () => void;
   container: HTMLDivElement;
   pendingData: string;
   flushTimer: NodeJS.Timeout | null;
@@ -458,7 +524,7 @@ export function sanitizeTerminalData(data: string): string {
   return res;
 }
 
-export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewportProps>(({
+export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, TerminalViewportProps>(({
   theme,
   tasks,
   activeTaskId,
@@ -804,6 +870,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
       if (!currentTaskIds.has(id)) {
         try {
           if (instance.flushTimer) clearTimeout(instance.flushTimer);
+          instance.disposeImeAnchor?.();
           instance.searchAddon?.dispose();
           instance.webglAddon?.dispose();
           instance.term.dispose();
@@ -864,7 +931,22 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
         // WebGL 渲染在终端显示时由下方的切换逻辑按需挂载，见 MAX_WEBGL_TERMINALS
         fitAddon.fit();
 
-        attachImeAnchor(term, termContainer, IME_ANCHOR_FINDERS[task.groupId] ?? findDrawnCursorAnchor);
+        const disposeImeAnchor = attachImeAnchor(term, termContainer, IME_ANCHOR_FINDERS[task.groupId] ?? findDrawnCursorAnchor);
+
+        // 同一批次输出内两个 LinkProvider 共享同一行的逻辑行合并结果；路径存在性结果做 5 秒短时缓存，避免鼠标扫过时重复触发跨进程文件解析
+        let parseEpoch = 0;
+        let cachedLogical: { epoch: number; line: number; value: LogicalLine | null } | null = null;
+        const getCachedLogicalLine = (bufferLineNumber: number): LogicalLine | null => {
+          if (cachedLogical && cachedLogical.epoch === parseEpoch && cachedLogical.line === bufferLineNumber) {
+            return cachedLogical.value;
+          }
+          const value = getLogicalLine(term, bufferLineNumber);
+          cachedLogical = { epoch: parseEpoch, line: bufferLineNumber, value };
+          return value;
+        };
+        const resolvedPathCache = new Map<string, { at: number; epoch: number; target: string | null }>();
+        const PATH_CACHE_TTL_MS = 5_000;
+        const NEGATIVE_CACHE_TTL_MS = 800;
 
         // 链接需按住 Ctrl 单击才打开，避免点终端聚焦或划选时误触；悬停时给出提示
         const linkHover = {
@@ -876,7 +958,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
         term.registerLinkProvider({
           provideLinks(bufferLineNumber, callback) {
             try {
-              const logical = getLogicalLine(term, bufferLineNumber);
+              const logical = getCachedLogicalLine(bufferLineNumber);
               if (!logical) {
                 callback(undefined);
                 return;
@@ -912,7 +994,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
         // 识别任务工作目录内真实存在的文件路径（绝对或相对，可带 :行号），点击在右侧预览面板打开
         term.registerLinkProvider({
           provideLinks(bufferLineNumber, callback) {
-            const logical = getLogicalLine(term, bufferLineNumber);
+            const logical = getCachedLogicalLine(bufferLineNumber);
             const resolve = window.electronAPI?.resolvePreviewPaths;
             if (!logical || !resolve || !task.cwd) {
               callback(undefined);
@@ -940,18 +1022,43 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
               callback(undefined);
               return;
             }
-            resolve(task.cwd, found.map((item) => item.file))
+            const now = performance.now();
+            const reqEpoch = parseEpoch;
+            const uncachedFiles: string[] = [];
+            const seenUncached = new Set<string>();
+            for (const item of found) {
+              const hit = resolvedPathCache.get(item.file);
+              const fresh = hit && (hit.target !== null
+                ? now - hit.at <= PATH_CACHE_TTL_MS
+                : hit.epoch === reqEpoch && now - hit.at <= NEGATIVE_CACHE_TTL_MS);
+              if (!fresh && !seenUncached.has(item.file)) {
+                seenUncached.add(item.file);
+                uncachedFiles.push(item.file);
+              }
+            }
+            const buildLinks = () => found.flatMap((item) => {
+              const target = resolvedPathCache.get(item.file)?.target;
+              if (!target) return [];
+              return [{
+                text: item.raw,
+                range: item.range,
+                ...linkHover,
+                activate: (e: MouseEvent) => { if (e.ctrlKey || linkClickRef.current) onPreviewFileRef.current?.(task.cwd, target, item.line); },
+              }];
+            });
+            if (uncachedFiles.length === 0) {
+              const links = buildLinks();
+              callback(links.length > 0 ? links : undefined);
+              return;
+            }
+            resolve(task.cwd, uncachedFiles)
               .then((resolved) => {
-                const links = found.flatMap((item, index) => {
-                  const target = resolved[index];
-                  if (!target) return [];
-                  return [{
-                    text: item.raw,
-                    range: item.range,
-                    ...linkHover,
-                    activate: (e: MouseEvent) => { if (e.ctrlKey || linkClickRef.current) onPreviewFileRef.current?.(task.cwd, target, item.line); },
-                  }];
+                const stamp = performance.now();
+                if (resolvedPathCache.size > 256) resolvedPathCache.clear();
+                uncachedFiles.forEach((file, index) => {
+                  resolvedPathCache.set(file, { at: stamp, epoch: reqEpoch, target: resolved[index] ?? null });
                 });
+                const links = buildLinks();
                 callback(links.length > 0 ? links : undefined);
               })
               .catch(() => callback(undefined));
@@ -984,7 +1091,10 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
 
         // 上翻查看历史时显示「回到底部」，并提示期间是否有新输出
         term.onScroll(() => syncScrollState(task.id));
-        term.onWriteParsed(() => syncScrollState(task.id));
+        term.onWriteParsed(() => {
+          parseEpoch++;
+          syncScrollState(task.id);
+        });
 
         // 监听终端尺寸变更并同步 PTY
         term.onResize(({ cols, rows }) => {
@@ -1181,8 +1291,10 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
               }
             }
             if (paths.length > 0) {
-              // 拖入的图片允许在预览面板打开，即使不在工作目录内
-              void window.electronAPI?.allowDroppedPreview?.(paths.map((p) => p.slice(1, -1).replace(/""/g, '"')));
+              // 拖入的图片允许在预览面板打开，即使不在工作目录内；异步登记前后均清掉路径解析缓存以便立即识别为可点击链接
+              resolvedPathCache.clear();
+              void window.electronAPI?.allowDroppedPreview?.(paths.map((p) => p.slice(1, -1).replace(/""/g, '"')))
+                ?.finally(() => resolvedPathCache.clear());
               // 走 paste 以遵循 CLI 的 bracketed paste；末尾补空格，接着打字不会粘在路径上
               term.paste(paths.join(' ') + ' ');
               term.focus();
@@ -1195,6 +1307,7 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
           fitAddon,
           searchAddon,
           webglAddon: undefined,
+          disposeImeAnchor,
           container: termContainer,
           pendingData: '',
           flushTimer: null,
@@ -1219,24 +1332,28 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
     });
 
     // PTY 可能晚于 xterm 实例创建。任务状态变化（尤其 starting -> running）后
-    // 再同步一次真实行列，避免 Kimi 重绘输入框时按默认 120 列发生横向回卷。
+    // 再同步一次真实行列，避免 Kimi 重绘输入框时按默认 120 列发生横向回卷；
+    // 后台其他任务或 running <-> idle 瞬态切换时不重复触发 fit 布局测量。
     if (activeTaskId) {
       const activeInstance = instancesRef.current.get(activeTaskId);
       if (activeInstance) {
-        const status = tasks.find((task) => task.id === activeTaskId)?.status;
-        requestAnimationFrame(() => {
-          try {
-            activeInstance.fitAddon.fit();
-            const { cols, rows } = activeInstance.term;
-            // 其他任务的状态变化也会触发这里；尺寸和本任务状态都没变时不重复通知 PTY
-            const key = `${activeTaskId}:${cols}x${rows}:${status}`;
-            if (lastSizeSyncRef.current === key) return;
-            lastSizeSyncRef.current = key;
-            window.electronAPI?.resizeSession(activeTaskId, cols, rows);
-          } catch {
-            // ignore
-          }
-        });
+        const rawStatus = tasks.find((task) => task.id === activeTaskId)?.status;
+        const syncBucket = rawStatus === 'idle' || rawStatus === 'waiting' ? 'running' : rawStatus;
+        const preKey = `${activeTaskId}:${syncBucket}`;
+        if (!lastSizeSyncRef.current.startsWith(`${preKey}:`)) {
+          requestAnimationFrame(() => {
+            try {
+              activeInstance.fitAddon.fit();
+              const { cols, rows } = activeInstance.term;
+              const key = `${preKey}:${cols}x${rows}`;
+              if (lastSizeSyncRef.current === key) return;
+              lastSizeSyncRef.current = key;
+              window.electronAPI?.resizeSession(activeTaskId, cols, rows);
+            } catch {
+              // ignore
+            }
+          });
+        }
       }
     }
   }, [tasks, activeTaskId]);
@@ -1329,8 +1446,8 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
           return;
         }
 
-        const inSync =
-          instance.pendingData.includes('\x1b[?2026h') && !instance.pendingData.includes('\x1b[?2026l');
+        const lastSyncStart = instance.pendingData.lastIndexOf('\x1b[?2026h');
+        const inSync = lastSyncStart >= 0 && lastSyncStart > instance.pendingData.lastIndexOf('\x1b[?2026l');
         const delay = inSync ? 25 : 16;
 
         // 先写一次再合并：距上次写入已超过一帧的小块输出（典型是打字回显）立即写入，不额外等 16ms；
@@ -1473,6 +1590,6 @@ export const TerminalViewport = forwardRef<TerminalViewportRef, TerminalViewport
       )}
     </main>
   );
-});
+}));
 
 TerminalViewport.displayName = 'TerminalViewport';

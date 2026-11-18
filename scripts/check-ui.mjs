@@ -31,7 +31,7 @@ await build({
       // 路径里带 logged 的账号视为已登录；账号相关桩不使用反斜杠，避免外层模板字符串转义
       checkAccountLogin: async account => ({ loggedIn: account.configDir.indexOf('logged') >= 0, detail: account.configDir.indexOf('logged') >= 0 ? 'me@example.com' : undefined }),
       selectWorkspaceDirectory: async () => 'C:/picked/dir',
-      listSessionHistory: async () => { const h = (id, cliId, title, cwd, ago) => ({ id, cliId, title, cwd, updatedAt: Date.now() - ago, command: 'x' }); return [h('h1', 'codex', 'Today one', 'D:/GitHub/OneAI', 60000), h('h2', 'claude', 'Yesterday one', 'D:/plan', 86400000 + 3600000 * 2), h('h3', 'kimi', 'Old one', 'D:/old', 10 * 86400000)]; },
+      listSessionHistory: async (accounts) => { const h = (id, cliId, title, cwd, ago, extra = {}) => ({ id, cliId, title, cwd, updatedAt: Date.now() - ago, command: 'x', ...extra }); const base = [h('h1', 'codex', 'Today one', 'D:/GitHub/OneAI', 60000), h('h2', 'claude', 'Yesterday one', 'D:/plan', 86400000 + 3600000 * 2), h('h3', 'kimi', 'Old one', 'D:/old', 10 * 86400000)]; return Array.isArray(accounts) && accounts.length ? [h('h-acc', 'codex', 'Account session', 'D:/acc', 30000, { accountId: accounts[0].id, accountName: accounts[0].name }), ...base] : base; },
       getGitBranches: async (dirs) => Object.fromEntries(dirs.map((d) => [d, d === 'D:/GitHub/OneAI' ? 'main' : null])),
       getUsageStats: async () => window.usageFixture(window.usageEmpty),
       deleteSessionHistory: async () => ({ deleted: 0, failed: 0 }) };
@@ -183,7 +183,7 @@ await build({
     window.drawOnboarding = (clis) => flushSync(() => root.render(<div className="workbench-ui h-screen"><OnboardingHarness clis={clis} /></div>));
     window.drawSettings = () => flushSync(() => root.render(<div className="workbench-ui h-screen"><SettingsHarness /></div>));
     window.drawUsage = () => flushSync(() => root.render(<div className="workbench-ui h-screen"><UsageModal key={String(window.usageEmpty) + String(window.usageMany)} isOpen onClose={() => {}} accounts={[]} /></div>));
-    window.drawHistory = (open) => flushSync(() => root.render(<div className="workbench-ui h-screen"><HistoryModal isOpen onClose={() => {}} onResume={(e) => window.events.push('resume:' + e.id)} openHistoryIds={new Set(open)} /></div>));
+    window.drawHistory = (open, accounts) => flushSync(() => root.render(<div className="workbench-ui h-screen"><HistoryModal isOpen onClose={() => {}} onResume={(e) => window.events.push('resume:' + e.id + (e.accountId ? ':' + e.accountId : ''))} openHistoryIds={new Set(open)} accounts={accounts} /></div>));
     window.drawTermMany = (count, active) => {
       const tasks = Array.from({ length: count }, (_, i) => ({ id: 'many-' + i, groupId: 'terminal', title: 'm' + i, status: 'running', cwd: 'D:/GitHub/OneAI', createdAt: 1 }));
       flushSync(() => root.render(<div className="workbench-ui flex h-screen"><TerminalViewport theme="dark" tasks={tasks} activeTaskId={'many-' + active} /></div>));
@@ -229,6 +229,11 @@ await build({
     };
   `, resolveDir: process.cwd(), loader: 'tsx' },
   bundle: true, outfile: new URL('fixture.js', dir).pathname.replace(/^\/(\w:)/, '$1'), platform: 'browser',
+});
+await build({
+  entryPoints: ['src/main/usage-stats.ts'],
+  bundle: true, platform: 'node', format: 'cjs', external: ['electron', 'fzstd'],
+  outfile: new URL('usage-stats.cjs', dir).pathname.replace(/^\/(\w:)/, '$1'),
 });
 const css = await postcss([tailwind(config)]).process(await fs.readFile('src/renderer/src/index.css', 'utf8'), { from: 'src/renderer/src/index.css' });
 await fs.writeFile(new URL('fixture.css', dir), css.css + await fs.readFile('node_modules/@xterm/xterm/css/xterm.css', 'utf8'));
@@ -505,6 +510,12 @@ app.whenReady().then(async () => {
       check('clicking a session resumes it', window.events.includes('resume:h1'));
       [...document.querySelectorAll('button')].find(b => b.textContent.includes('删除列表中全部')).click(); await tick();
       check('delete-all confirmation says it deletes the local session files', document.body.textContent.includes('同时删除本机会话文件'));
+      window.events = [];
+      window.drawHistory(['acc-alt:h-acc'], window.accountsFixture); await tick(250);
+      check('history modal displays configured account sessions with CLI and account label', document.body.textContent.includes('Codex（alt）') && document.body.textContent.includes('Account session'));
+      check('history modal marks account-scoped open sessions via accountId:id', document.querySelectorAll('[data-history-open]').length === 1);
+      [...document.querySelectorAll('button')].find(b => b.textContent.includes('Account session')).click();
+      check('resuming an account history session preserves its accountId', window.events.includes('resume:h-acc:acc-alt'));
       return checks;
     })()\`));
     // 本周用量面板与每日方块图
@@ -543,6 +554,12 @@ app.whenReady().then(async () => {
       check('clicking the CLI header row also collapses its model list', agyToggle().getAttribute('aria-expanded') === 'false' && document.querySelectorAll('[data-usage-group="agy"] [data-usage-row]').length === 0);
       document.querySelector('[data-usage-group="agy"] [data-usage-cli]').click(); await tick(100);
       check('clicking the CLI header row again expands its model list', agyToggle().getAttribute('aria-expanded') === 'true' && document.querySelectorAll('[data-usage-group="agy"] [data-usage-row]').length === 1);
+      const toggleAllBtn = () => [...document.querySelectorAll('section[aria-label="各 CLI 的账号与模型用量"] button')].find(b => b.textContent.includes('全部收起') || b.textContent.includes('全部展开'));
+      toggleAllBtn().click(); await tick(100);
+      check('collapse-all button collapses every CLI group and flips its label to expand-all', document.querySelectorAll('[data-usage-row]').length === 0 && toggleAllBtn().textContent.includes('全部展开'));
+      toggleAllBtn().click(); await tick(100);
+      check('expand-all button restores every CLI group', document.querySelectorAll('[data-usage-row]').length === 6 && toggleAllBtn().textContent.includes('全部收起'));
+      check('usage overview renders cache share and CLI token share bar, and table wrapper is a focusable region', document.querySelector('[data-usage-summary]').textContent.includes('缓存占比') && Boolean(document.querySelector('[aria-label="Tokens 占比"]')) && document.querySelector('[role="region"][aria-labelledby="usage-table-heading"]')?.tabIndex === 0);
       check('usage summary shows the weekly request total', document.querySelector('[data-usage-summary]').textContent.includes(String(requests)));
       check('usage tokens are shown in compact units', text.includes('105.7M'));
       const cells = [...document.querySelectorAll('[data-usage-cell]')];
@@ -1291,6 +1308,21 @@ app.whenReady().then(async () => {
       check('no minimap for non-text previews', !mini());
       return checks;
     })()\`));
+    {
+      const { extractAgyModelChange } = require(require('node:path').join(__dirname, 'usage-stats.cjs'));
+      const bt = String.fromCharCode(96), bs = String.fromCharCode(92);
+      const mkTag = (from, to) => '<USER_SETTINGS_CHANGE>\\nThe user changed setting ' + bt + 'Model Selection' + bt + ' from ' + from + ' to ' + to + '. No need to comment on this change if the user doesn\\'t ask about it.\\n</USER_SETTINGS_CHANGE>';
+      const mkUser = (req, tail) => JSON.stringify({ source: 'USER_EXPLICIT', type: 'USER_INPUT', content: '<USER_REQUEST>\\n' + req + '\\n</USER_REQUEST>\\n<ADDITIONAL_METADATA>\\nt\\n</ADDITIONAL_METADATA>' + (tail ? '\\n' + tail : '') });
+      result.push({
+        name: 'Antigravity model parser extracts trailing USER_INPUT setting changes and ignores source/tool regex noise',
+        ok: extractAgyModelChange(mkUser('hi', mkTag('None', 'Gemini 4 Carbon (High)'))) === 'Gemini 4 Carbon'
+          && extractAgyModelChange(mkUser('reset', mkTag('Gemini 4 Carbon (High)', 'None'))) === ''
+          && extractAgyModelChange(JSON.stringify({ source: 'MODEL', type: 'PLANNER_RESPONSE', tool_calls: [{ args: '/' + bt + 'Model Selection' + bt + ' from .+? to (.+?)' + bs + '. No need/' }] })) === null
+          && extractAgyModelChange(JSON.stringify({ source: 'MODEL', type: 'GENERIC', content: '{"type":"USER_INPUT","content":' + JSON.stringify(mkTag('a', '(.+?)' + bs)) + '}' })) === null
+          && extractAgyModelChange(mkUser('pasted:\\n' + mkTag('None', '(.+?)' + bs), '')) === null
+          && extractAgyModelChange(mkUser('pasted:\\n' + mkTag('None', 'FakeModel (Low)'), mkTag('None', 'Gemini 4 Hydrogen (XHigh)'))) === 'Gemini 4 Hydrogen',
+      });
+    }
     console.log(JSON.stringify(result, null, 2));
     app.exit(result.every(r => r.ok) ? 0 : 1);
   } catch (error) { console.error(error); app.exit(1); }

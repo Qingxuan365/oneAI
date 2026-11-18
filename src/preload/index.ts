@@ -6,7 +6,11 @@ export interface CreateSessionOptions {
   cwd?: string;
   shell?: boolean;
   account?: { cliId: 'codex' | 'claude' | 'kimi'; configDir: string; env?: Record<string, string> };
+  cols?: number;
+  rows?: number;
 }
+
+let cachedHomeDir: string | null = null;
 
 contextBridge.exposeInMainWorld('electronAPI', {
   isWindowMaximized: () => ipcRenderer.invoke('window:is-maximized'),
@@ -25,6 +29,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectWorkspaceDirectory: (currentPath?: string) => ipcRenderer.invoke('workspace:select-directory', currentPath),
   listMusic: (dir?: string) => ipcRenderer.invoke('music:list', dir),
   readMusic: (filePath: string) => ipcRenderer.invoke('music:read', filePath),
+  getMusicTrackUrl: (filePath: string) => `oneai-music://track?file=${encodeURIComponent(filePath)}`,
   selectMusicDirectory: (currentPath?: string) => ipcRenderer.invoke('music:select-directory', currentPath),
   resolveMusicStream: (url: string) => ipcRenderer.invoke('music:resolve-stream', url),
   loadWorkspaceState: () => ipcRenderer.sendSync('state:load') as string | null,
@@ -32,13 +37,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   readPasteContent: () => ipcRenderer.invoke('clipboard:read-paste-content'),
   writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
-  listSessionHistory: () => ipcRenderer.invoke('history:list'),
-  deleteSessionHistory: (items: Array<{ cliId: string; id: string }>) => ipcRenderer.invoke('history:delete', items),
+  listSessionHistory: (accounts?: Array<{ id: string; name: string; cliId: string; configDir: string }>) => ipcRenderer.invoke('history:list', accounts),
+  deleteSessionHistory: (items: Array<{ cliId: string; id: string; accountId?: string }>) => ipcRenderer.invoke('history:delete', items),
   getUsageStats: (accounts: Array<{ id: string; name: string; cliId: string; configDir: string }>) => ipcRenderer.invoke('usage:stats', accounts),
   detectClis: (custom?: Array<{ id: string; command: string }>) => ipcRenderer.invoke('cli:detect', custom),
   listKnownClis: () => ipcRenderer.invoke('cli:known'),
   setLanguage: (language: string) => ipcRenderer.invoke('app:set-language', language),
-  getHomeDir: () => ipcRenderer.sendSync('app:home-dir') as string,
+  getHomeDir: () => {
+    if (cachedHomeDir === null) cachedHomeDir = ipcRenderer.sendSync('app:home-dir') as string;
+    return cachedHomeDir;
+  },
 
   // PTY 终端管理
   createSession: (options: CreateSessionOptions) =>
@@ -61,6 +69,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   clearSessionBuffer: (id: string) =>
     ipcRenderer.invoke('terminal:clear-buffer', { id }),
+
+  setActiveSession: (id: string | null, cliId?: string | null) =>
+    ipcRenderer.send('terminal:set-active', id, cliId),
 
   resolvePreviewPaths: (cwd: string, candidates: string[]) =>
     ipcRenderer.invoke('preview:resolve', cwd, candidates),
@@ -104,7 +115,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   refreshQuota: (cliId?: string) => ipcRenderer.invoke('quota:refresh', cliId),
   setQuotaAccounts: (accounts: Array<{ key: string; cliId: string; configDir: string }>) => ipcRenderer.invoke('quota:set-accounts', accounts),
   checkAccountLogin: (account: unknown) => ipcRenderer.invoke('account:login-status', account),
-  setTitleBarOverlay: (opts: { color: string; symbolColor: string; height: number }) => ipcRenderer.send('window:set-title-bar-overlay', opts),
+  setTitleBarOverlay: (opts: { color: string; symbolColor: string; height: number; backgroundColor?: string }) => ipcRenderer.send('window:set-title-bar-overlay', opts),
   getGitBranches: (paths: string[]) => ipcRenderer.invoke('git:branches', paths),
   getTaskSummaries: (tasks: unknown[]) => ipcRenderer.invoke('task:summaries', tasks),
 

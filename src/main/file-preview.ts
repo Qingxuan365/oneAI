@@ -29,36 +29,53 @@ function isInside(root: string, target: string): boolean {
   return !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
-/**
- * 把候选路径解析为 cwd 内真实存在的文件；越界、不存在或不是文件时返回 null。
- * 例外：OneAI 自己写入的粘贴截图目录（%TEMP%/OneAI_Images）里的图片也允许预览，其他位置一律拒绝。
- */
-function resolveInside(cwd: string, candidate: string): string | null {
+async function safeRealpath(target: string): Promise<string | null> {
+  try { return await fs.promises.realpath(target); } catch { return null; }
+}
+
+async function resolveWithRoots(
+  root: string | null,
+  pasteDir: string | null,
+  candidate: string,
+): Promise<string | null> {
+  if (!root) return null;
   try {
-    const root = fs.realpathSync(path.resolve(String(cwd || '')));
-    const target = fs.realpathSync(path.resolve(root, String(candidate || '')));
-    if (!fs.statSync(target).isFile()) return null;
+    const target = await fs.promises.realpath(path.resolve(root, String(candidate || '')));
+    const stat = await fs.promises.stat(target);
+    if (!stat.isFile()) return null;
     if (isInside(root, target)) return target;
     if (droppedImages.has(target)) return target;
-    const pasteDir = fs.realpathSync(path.join(app.getPath('temp'), 'OneAI_Images'));
-    return isInside(pasteDir, target) && IMAGE_MIME[path.extname(target).toLowerCase()] ? target : null;
+    return pasteDir && isInside(pasteDir, target) && IMAGE_MIME[path.extname(target).toLowerCase()] ? target : null;
   } catch {
     return null;
   }
 }
 
-function readPreview(cwd: string, candidate: string): FilePreviewResult {
-  const target = resolveInside(cwd, candidate);
+/**
+ * 把候选路径解析为 cwd 内真实存在的文件；越界、不存在或不是文件时返回 null。
+ * 例外：OneAI 自己写入的粘贴截图目录（%TEMP%/OneAI_Images）里的图片也允许预览，其他位置一律拒绝。
+ */
+async function resolveInside(cwd: string, candidate: string): Promise<string | null> {
+  const [root, pasteDir] = await Promise.all([
+    safeRealpath(path.resolve(String(cwd || ''))),
+    safeRealpath(path.join(app.getPath('temp'), 'OneAI_Images')),
+  ]);
+  return resolveWithRoots(root, pasteDir, candidate);
+}
+
+async function readPreview(cwd: string, candidate: string): Promise<FilePreviewResult> {
+  const target = await resolveInside(cwd, candidate);
   if (!target) return { kind: 'error', path: String(candidate), message: t('文件不存在，或不在当前任务工作目录内') };
   try {
-    const { size } = fs.statSync(target);
+    const { size } = await fs.promises.stat(target);
     const mime = IMAGE_MIME[path.extname(target).toLowerCase()];
     if (mime) {
       if (size > MAX_IMAGE_BYTES) return { kind: 'too-large', path: target, size };
-      return { kind: 'image', path: target, size, dataUrl: `data:${mime};base64,${fs.readFileSync(target).toString('base64')}` };
+      const bytes = await fs.promises.readFile(target);
+      return { kind: 'image', path: target, size, dataUrl: `data:${mime};base64,${bytes.toString('base64')}` };
     }
     if (size > MAX_TEXT_BYTES) return { kind: 'too-large', path: target, size };
-    const buffer = fs.readFileSync(target);
+    const buffer = await fs.promises.readFile(target);
     if (buffer.subarray(0, 8192).includes(0)) return { kind: 'binary', path: target, size };
     return { kind: 'text', path: target, size, content: buffer.toString('utf8') };
   } catch (error) {
@@ -67,17 +84,22 @@ function readPreview(cwd: string, candidate: string): FilePreviewResult {
 }
 
 export function setupFilePreview() {
-  ipcMain.handle('preview:resolve', (_event, cwd: string, candidates: unknown) => {
+  ipcMain.handle('preview:resolve', async (_event, cwd: string, candidates: unknown) => {
     const list = Array.isArray(candidates) ? candidates.slice(0, 20) : [];
-    return list.map((item) => resolveInside(cwd, String(item)));
+    if (list.length === 0) return [];
+    const [root, pasteDir] = await Promise.all([
+      safeRealpath(path.resolve(String(cwd || ''))),
+      safeRealpath(path.join(app.getPath('temp'), 'OneAI_Images')),
+    ]);
+    return Promise.all(list.map((item) => resolveWithRoots(root, pasteDir, String(item))));
   });
-  ipcMain.handle('preview:allow-dropped', (_event, paths: unknown) => {
-    for (const item of (Array.isArray(paths) ? paths.slice(0, 50) : [])) {
+  ipcMain.handle('preview:allow-dropped', async (_event, paths: unknown) => {
+    await Promise.all((Array.isArray(paths) ? paths.slice(0, 50) : []).map(async (item) => {
       try {
-        const real = fs.realpathSync(path.resolve(String(item)));
-        if (fs.statSync(real).isFile() && IMAGE_MIME[path.extname(real).toLowerCase()]) droppedImages.add(real);
+        const real = await fs.promises.realpath(path.resolve(String(item)));
+        if ((await fs.promises.stat(real)).isFile() && IMAGE_MIME[path.extname(real).toLowerCase()]) droppedImages.add(real);
       } catch { /* 不存在或无权限的路径忽略 */ }
-    }
+    }));
     return true;
   });
   ipcMain.handle('preview:read', (_event, cwd: string, filePath: string) => readPreview(cwd, filePath));

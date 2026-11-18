@@ -74,6 +74,13 @@ export class QuotaService {
   private agyUsageAt = 0;
   private agyUsageError = '';
   private agyUsagePending: Promise<void> | null = null;
+  private agyMissing = false;
+  private activeCliId: string | null = null;
+  private pollingActive = false;
+  private baseWatchersStarted = false;
+  private baseWatchers: fs.FSWatcher[] = [];
+  private accountWatchers = new Map<string, { dir: string; watcher: fs.FSWatcher }>();
+  private debounceMap = new Map<string, NodeJS.Timeout>();
   // 多账号：key 为渲染进程里的账号 id，与默认账号（key 为 cliId）并列缓存、轮询和广播
   private accounts = new Map<string, { cliId: AccountCliId; dir: string }>();
 
@@ -192,25 +199,25 @@ export class QuotaService {
         message: 'PowerShell Ready',
       },
     };
-
-    for (const [id, info] of [
-      ['kimi', this.getKimiInfo()], ['codex', this.getCodexInfo()],
-      ['claude', this.getClaudeInfo()], ['grok', this.getGrokInfo()],
-      ['opencode', this.getOpenCodeInfo()], ['agy', this.getAgyInfo()], ['pi', this.getPiInfo()],
-    ] as const) {
-      void info.then((value) => {
-        if (!this.cacheExpiry[id]) Object.assign(this.quotasCache[id], value);
-      });
-    }
-    void this.setupFileWatchers();
   }
 
-  private async setupFileWatchers(): Promise<void> {
+  private scheduleWatchedRefresh(key: string, delayMs = 300): void {
+    const prev = this.debounceMap.get(key);
+    if (prev) clearTimeout(prev);
+    this.debounceMap.set(key, setTimeout(() => {
+      this.debounceMap.delete(key);
+      void this.refreshQuota(key);
+    }, delayMs));
+  }
+
+  private async ensureBaseWatchers(): Promise<void> {
+    if (this.baseWatchersStarted) return;
+    this.baseWatchersStarted = true;
+    // 不在此处监听 ~/.claude.json：其父目录是整个用户主目录，任何主目录文件变动都会唤醒回调，且实时模型切换已由 CLAUDE_STATUS_FILE 与 settings.json 覆盖
     const watchList: Array<{ filePath: string; cliId: string }> = [
       { filePath: path.join(os.homedir(), '.kimi-code', 'config.toml'), cliId: 'kimi' },
       { filePath: path.join(os.homedir(), '.codex', 'config.toml'), cliId: 'codex' },
       { filePath: path.join(os.homedir(), '.claude', 'settings.json'), cliId: 'claude' },
-      { filePath: path.join(os.homedir(), '.claude.json'), cliId: 'claude' },
       { filePath: CLAUDE_STATUS_FILE, cliId: 'claude' },
       { filePath: path.join(os.homedir(), '.grok', 'settings_cache.json'), cliId: 'grok' },
       { filePath: path.join(os.homedir(), '.grok', 'models_cache.json'), cliId: 'grok' },
@@ -221,8 +228,6 @@ export class QuotaService {
       { filePath: PI_MODELS_FILE, cliId: 'pi' },
     ];
 
-    const debounceMap = new Map<string, NodeJS.Timeout>();
-
     const directories = new Map<string, typeof watchList>();
     for (const item of watchList) {
       const dir = path.dirname(item.filePath);
@@ -232,15 +237,14 @@ export class QuotaService {
     }
     for (const [dir, items] of directories) {
       try {
-        fs.watch(dir, (_event, filename) => {
+        const watcher = fs.watch(dir, (_event, filename) => {
           const name = filename?.toString().toLowerCase();
           for (const item of items) {
             if (name != null && name !== path.basename(item.filePath).toLowerCase()) continue;
-            const prev = debounceMap.get(item.cliId);
-            if (prev) clearTimeout(prev);
-            debounceMap.set(item.cliId, setTimeout(() => { void this.refreshQuota(item.cliId); }, 300));
+            this.scheduleWatchedRefresh(item.cliId, 300);
           }
         });
+        this.baseWatchers.push(watcher);
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== 'ENOENT') console.warn('[QuotaService] Failed to watch directory:', dir, err);
       }
@@ -249,37 +253,98 @@ export class QuotaService {
     // pi 切换模型只追加会话 jsonl，监听会话目录以便即时刷新
     try {
       if (await exists(PI_SESSIONS_DIR)) {
-        fs.watch(PI_SESSIONS_DIR, { recursive: true }, () => {
-          const prev = debounceMap.get('pi');
-          if (prev) clearTimeout(prev);
-          debounceMap.set('pi', setTimeout(() => this.refreshQuota('pi'), 500));
+        const watcher = fs.watch(PI_SESSIONS_DIR, { recursive: true }, () => {
+          this.scheduleWatchedRefresh('pi', 500);
         });
+        this.baseWatchers.push(watcher);
       }
     } catch (err) {
       console.warn('[QuotaService] Failed to watch pi sessions:', err);
     }
   }
 
+  private syncAccountWatchers(): void {
+    const configNameOf: Record<AccountCliId, string> = {
+      kimi: 'config.toml',
+      codex: 'config.toml',
+      claude: 'settings.json',
+    };
+    for (const [key, entry] of this.accountWatchers) {
+      const current = this.accounts.get(key);
+      if (!current || current.dir !== entry.dir) {
+        try { entry.watcher.close(); } catch {}
+        this.accountWatchers.delete(key);
+      }
+    }
+    for (const [key, { cliId, dir }] of this.accounts) {
+      if (this.accountWatchers.has(key)) continue;
+      const expected = configNameOf[cliId];
+      try {
+        const watcher = fs.watch(dir, (_event, filename) => {
+          const name = filename?.toString().toLowerCase();
+          if (name != null && name !== expected) return;
+          this.scheduleWatchedRefresh(key, 300);
+        });
+        this.accountWatchers.set(key, { dir, watcher });
+      } catch {
+        // 账号配置目录尚未生成时跳过监听，后续仍由轮询兜底
+      }
+    }
+  }
+
+  public setActiveCli(cliId: string | null): void {
+    const prev = this.activeCliId;
+    this.activeCliId = cliId;
+    if (cliId === 'agy' && prev !== 'agy' && !this.agyMissing && (this.agyUsageRaw === null || Date.now() - this.agyUsageAt >= this.AGY_USAGE_TTL_MS)) {
+      void this.refreshQuota('agy');
+    }
+  }
+
   public setWindow(win: BrowserWindow) {
     this.mainWindow = win;
+    const refreshOnVisible = () => {
+      if (this.pollingActive && !win.isDestroyed() && win.isVisible() && !win.isMinimized()) {
+        void this.refreshAllQuotas();
+      }
+    };
+    win.on('restore', refreshOnVisible);
+    win.on('show', refreshOnVisible);
   }
 
   public startPolling(intervalMs: number = 30000) {
     if (this.intervalTimer) {
       clearInterval(this.intervalTimer);
     }
-    this.refreshAllQuotas();
+    this.pollingActive = true;
+    void this.ensureBaseWatchers();
+    this.syncAccountWatchers();
+    void this.refreshAllQuotas();
 
     this.intervalTimer = setInterval(() => {
-      this.refreshAllQuotas();
+      if (this.mainWindow && !this.mainWindow.isDestroyed() && (!this.mainWindow.isVisible() || this.mainWindow.isMinimized())) {
+        return;
+      }
+      void this.refreshAllQuotas();
     }, intervalMs);
   }
 
   public stopPolling() {
+    this.pollingActive = false;
     if (this.intervalTimer) {
       clearInterval(this.intervalTimer);
       this.intervalTimer = null;
     }
+    for (const timer of this.debounceMap.values()) clearTimeout(timer);
+    this.debounceMap.clear();
+    for (const { watcher } of this.accountWatchers.values()) {
+      try { watcher.close(); } catch {}
+    }
+    this.accountWatchers.clear();
+    for (const watcher of this.baseWatchers) {
+      try { watcher.close(); } catch {}
+    }
+    this.baseWatchers = [];
+    this.baseWatchersStarted = false;
   }
 
   public getQuota(cliId: string = 'kimi'): QuotaData {
@@ -290,13 +355,19 @@ export class QuotaService {
     return this.quotasCache;
   }
 
-  /** 同步账号列表：只保留有效账号，配置目录变化或已删除的账号丢弃旧缓存，然后立即刷新 */
+  /** 同步账号列表：只保留有效账号，配置目录变化或已删除的账号丢弃旧缓存；轮询启动后按需同步监听并刷新 */
   public setAccounts(list: Array<{ key: string; cliId: string; configDir: string }>): void {
     const next = new Map<string, { cliId: AccountCliId; dir: string }>();
     for (const item of list) {
       const dir = resolveConfigDir(item?.configDir);
       if (typeof item?.key === 'string' && item.key && isAccountCli(item.cliId) && dir) next.set(item.key, { cliId: item.cliId, dir });
     }
+    const unchanged = next.size === this.accounts.size
+      && [...next.entries()].every(([key, val]) => {
+        const cur = this.accounts.get(key);
+        return cur?.cliId === val.cliId && cur?.dir === val.dir;
+      });
+    if (unchanged) return;
     for (const [key, old] of this.accounts) {
       if (next.get(key)?.dir !== old.dir) {
         delete this.quotasCache[key];
@@ -304,13 +375,21 @@ export class QuotaService {
       }
     }
     this.accounts = next;
-    void this.refreshAllQuotas();
+    if (this.pollingActive) {
+      this.syncAccountWatchers();
+      void this.refreshAllQuotas();
+    }
   }
 
   public async refreshQuota(cliId?: string): Promise<Record<string, QuotaData>> {
-    if (cliId && this.quotasCache[cliId]) {
+    const forceAgyUsage = cliId === 'agy';
+    if (forceAgyUsage) {
+      this.agyMissing = false;
+      this.agyUsageAt = 0;
+    }
+    if (cliId && (this.quotasCache[cliId] || this.accounts.has(cliId))) {
       this.cacheExpiry[cliId] = 0;
-      await this.fetchQuotaForCli(cliId);
+      await this.fetchQuotaForCli(cliId, forceAgyUsage);
       this.broadcast();
       return this.quotasCache;
     }
@@ -324,9 +403,9 @@ export class QuotaService {
     return this.quotasCache;
   }
 
-  private async fetchQuotaForCli(cliId: string): Promise<void> {
+  private async fetchQuotaForCli(cliId: string, forceUsage = false): Promise<void> {
     const now = Date.now();
-    if (this.cacheExpiry[cliId] && now < this.cacheExpiry[cliId]) {
+    if (!forceUsage && this.cacheExpiry[cliId] && now < this.cacheExpiry[cliId]) {
       return;
     }
 
@@ -350,7 +429,7 @@ export class QuotaService {
           data = await this.fetchPiQuota();
           break;
         case 'agy':
-          data = await this.fetchAgyQuota();
+          data = await this.fetchAgyQuota(forceUsage);
           break;
         case 'grok':
           data = await this.fetchGrokQuota();
@@ -573,17 +652,19 @@ export class QuotaService {
 
   private async loadPiSessionState(): Promise<{ provider?: string; modelId?: string; thinkingLevel?: string }> {
     try {
-      let latest: { file: string; mtime: number } | null = null;
-      for (const dir of await fs.promises.readdir(PI_SESSIONS_DIR)) {
+      const dirs = await fs.promises.readdir(PI_SESSIONS_DIR);
+      const candidates = (await Promise.all(dirs.map(async (dir) => {
         const dirPath = path.join(PI_SESSIONS_DIR, dir);
         let names: string[];
-        try { names = await fs.promises.readdir(dirPath); } catch { continue; }
-        for (const name of names) {
-          if (!name.endsWith('.jsonl')) continue;
+        try { names = await fs.promises.readdir(dirPath); } catch { return []; }
+        return Promise.all(names.filter((name) => name.endsWith('.jsonl')).map(async (name) => {
           const file = path.join(dirPath, name);
-          const mtime = (await fs.promises.stat(file)).mtimeMs;
-          if (!latest || mtime > latest.mtime) latest = { file, mtime };
-        }
+          try { return { file, mtime: (await fs.promises.stat(file)).mtimeMs }; } catch { return null; }
+        }));
+      }))).flat();
+      let latest: { file: string; mtime: number } | null = null;
+      for (const item of candidates) {
+        if (item && (!latest || item.mtime > latest.mtime)) latest = item;
       }
       if (!latest) return {};
       // 会话文件只追加：记住已读到的位置，之后只读新增的部分，避免长会话每次刷新都整份重读
@@ -1155,9 +1236,9 @@ export class QuotaService {
 
   /**
    * 通过 `agy -p /usage` 读取额度：输出为制表符分隔的「分组 / 窗口 / 剩余百分比 / 重置时间(UTC)」，
-   * 不读取 agy 的凭据。单次约 5 秒，故独立节流并避免并发重复调用。
+   * 不读取 agy 的凭据。单次约 5 秒，仅在当前活动任务为 agy 或手动刷新时按 TTL 调用，避免后台空闲时无谓拉起子进程。
    */
-  private async fetchAgyQuota(): Promise<QuotaData> {
+  private async fetchAgyQuota(forceUsage = false): Promise<QuotaData> {
     const agyInfo = await this.getAgyInfo();
     const base = {
       cliId: 'agy',
@@ -1167,14 +1248,16 @@ export class QuotaService {
     };
     const prev = this.quotasCache['agy'];
     const now = Date.now();
-    if (this.agyUsageRaw === null || now - this.agyUsageAt >= this.AGY_USAGE_TTL_MS) {
+    const shouldRunUsage = forceUsage || this.activeCliId === 'agy';
+    if (shouldRunUsage && !this.agyMissing && (this.agyUsageRaw === null || now - this.agyUsageAt >= this.AGY_USAGE_TTL_MS)) {
       if (!this.agyUsagePending) {
         this.agyUsagePending = this.runAgyUsage()
           .then((raw) => {
             this.agyUsageRaw = raw;
             this.agyUsageError = '';
           })
-          .catch((err: Error) => {
+          .catch((err: Error & { code?: string }) => {
+            if (err.code === 'ENOENT' || /ENOENT/i.test(err.message)) this.agyMissing = true;
             this.agyUsageError = err.message;
           })
           .finally(() => {
@@ -1194,7 +1277,9 @@ export class QuotaService {
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'normal',
-        message: this.agyUsageError ? t('额度读取失败：{reason}', { reason: this.agyUsageError }) : t('额度读取中'),
+        message: this.agyUsageError
+          ? t('额度读取失败：{reason}', { reason: this.agyUsageError })
+          : (shouldRunUsage ? t('额度读取中') : t('无额度接口')),
       };
     }
 
@@ -1235,7 +1320,11 @@ export class QuotaService {
     const bin = await exists(local) ? local : 'agy';
     return new Promise((resolve, reject) => {
       execFile(bin, ['-p', '/usage'], { cwd: os.homedir(), windowsHide: true, timeout: 30000 }, (err, stdout) => {
-        if (err) return reject(new Error(err.message.split('\n')[0]));
+        if (err) {
+          const wrapped = new Error(err.message.split('\n')[0]) as Error & { code?: string };
+          wrapped.code = (err as NodeJS.ErrnoException).code;
+          return reject(wrapped);
+        }
         if (!stdout.includes('\t')) return reject(new Error(t('输出中没有额度数据')));
         resolve(stdout);
       });

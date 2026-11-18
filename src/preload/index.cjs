@@ -1,5 +1,7 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
+let cachedHomeDir = null;
+
 contextBridge.exposeInMainWorld('electronAPI', {
   isWindowMaximized: () => ipcRenderer.invoke('window:is-maximized'),
   onWindowMaximizedChange: (callback) => {
@@ -19,18 +21,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveWorkspaceState: (json) => ipcRenderer.send('state:save', json),
   listMusic: (dir) => ipcRenderer.invoke('music:list', dir),
   readMusic: (filePath) => ipcRenderer.invoke('music:read', filePath),
+  getMusicTrackUrl: (filePath) => `oneai-music://track?file=${encodeURIComponent(filePath)}`,
   selectMusicDirectory: (currentPath) => ipcRenderer.invoke('music:select-directory', currentPath),
   resolveMusicStream: (url) => ipcRenderer.invoke('music:resolve-stream', url),
   getPathForFile: (file) => webUtils.getPathForFile(file),
   readPasteContent: () => ipcRenderer.invoke('clipboard:read-paste-content'),
   writeClipboardText: (text) => ipcRenderer.invoke('clipboard:write-text', text),
-  listSessionHistory: () => ipcRenderer.invoke('history:list'),
+  listSessionHistory: (accounts) => ipcRenderer.invoke('history:list', accounts),
   deleteSessionHistory: (items) => ipcRenderer.invoke('history:delete', items),
   getUsageStats: (accounts) => ipcRenderer.invoke('usage:stats', accounts),
   detectClis: (custom) => ipcRenderer.invoke('cli:detect', custom),
   listKnownClis: () => ipcRenderer.invoke('cli:known'),
   setLanguage: (language) => ipcRenderer.invoke('app:set-language', language),
-  getHomeDir: () => ipcRenderer.sendSync('app:home-dir'),
+  getHomeDir: () => {
+    if (cachedHomeDir === null) cachedHomeDir = ipcRenderer.sendSync('app:home-dir');
+    return cachedHomeDir;
+  },
   createSession: (options) => ipcRenderer.invoke('terminal:create', options),
   getSessionBuffer: (id) => ipcRenderer.invoke('terminal:get-buffer', { id }),
   writeSession: (id, data) => ipcRenderer.invoke('terminal:write', { id, data }),
@@ -38,6 +44,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   killSession: (id) => ipcRenderer.invoke('terminal:kill', { id }),
   restartSession: (id) => ipcRenderer.invoke('terminal:restart', { id }),
   clearSessionBuffer: (id) => ipcRenderer.invoke('terminal:clear-buffer', { id }),
+  setActiveSession: (id, cliId) => ipcRenderer.send('terminal:set-active', id, cliId),
   resolvePreviewPaths: (cwd, candidates) => ipcRenderer.invoke('preview:resolve', cwd, candidates),
   allowDroppedPreview: (paths) => ipcRenderer.invoke('preview:allow-dropped', paths),
   readPreviewFile: (cwd, filePath) => ipcRenderer.invoke('preview:read', cwd, filePath),

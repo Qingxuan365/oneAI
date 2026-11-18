@@ -54,6 +54,8 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams, hi
   const lastVolumeRef = useRef(volume > 0 ? volume : 1);
   if (volume > 0) lastVolumeRef.current = volume;
   const playingRef = useRef(false);
+  const hiddenRef = useRef(hidden);
+  hiddenRef.current = hidden;
   const tracksRef = useRef<Track[]>([]);
   const indexRef = useRef(0);
   tracksRef.current = tracks;
@@ -102,11 +104,13 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams, hi
   }, []);
 
   const drawBars = useCallback(() => {
-    // 切歌时 play 可能连续触发而中间没有 pause：先停掉上一轮，保证同一时间只有一个动画循环
+    // 切歌时 play 可能连续触发而中间没有 pause：先停掉上一轮，保证同一时间只有一个动画循环；隐藏或窗口不可见时不空跑 rAF
     cancelAnimationFrame(rafRef.current);
+    if (hiddenRef.current || document.hidden || !playingRef.current) return;
     const analyser = audioRef.current === localAudioRef.current ? analyserRef.current : null;
     const data = new Uint8Array(analyser ? analyser.frequencyBinCount : 0);
     const step = () => {
+      if (hiddenRef.current || document.hidden || !playingRef.current) return;
       if (analyser) analyser.getByteFrequencyData(data);
       const bucket = Math.max(1, Math.floor(data.length * 0.6 / (BAR_MID + 1)));
       barsRef.current.forEach((bar, i) => {
@@ -129,8 +133,24 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams, hi
     step();
   }, []);
 
+  // 侧栏展开或窗口恢复可见时：同步一次当前播放进度，并按需恢复声波动画；折叠或隐藏时立即停掉 rAF
+  useEffect(() => {
+    const syncVisibility = () => {
+      if (hiddenRef.current || document.hidden) {
+        cancelAnimationFrame(rafRef.current);
+        return;
+      }
+      if (audioRef.current && !seekingRef.current) setTime(audioRef.current.currentTime);
+      if (playingRef.current) drawBars();
+    };
+    syncVisibility();
+    document.addEventListener('visibilitychange', syncVisibility);
+    return () => document.removeEventListener('visibilitychange', syncVisibility);
+  }, [hidden, drawBars]);
+
   const createAudio = useCallback((withAnalyser: boolean) => {
     const audio = new Audio();
+    if (withAnalyser) audio.crossOrigin = 'anonymous';
     audio.volume = volumeRef.current;
     const isCurrent = () => audioRef.current === audio;
     audio.addEventListener('play', () => { if (!isCurrent()) return; setPlaying(true); playingRef.current = true; ctxRef.current?.resume(); drawBars(); });
@@ -141,7 +161,7 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams, hi
       if (count > 0) loadTrack((indexRef.current + 1) % count, true);
     });
     audio.addEventListener('error', () => { if (isCurrent() && audio.getAttribute('src')) setError(t('无法播放该文件')); });
-    audio.addEventListener('timeupdate', () => { if (isCurrent() && !seekingRef.current) setTime(audio.currentTime); });
+    audio.addEventListener('timeupdate', () => { if (isCurrent() && !seekingRef.current && !hiddenRef.current && !document.hidden) setTime(audio.currentTime); });
     const syncDuration = () => { if (isCurrent()) setDuration(Number.isFinite(audio.duration) ? audio.duration : 0); };
     audio.addEventListener('loadedmetadata', syncDuration);
     audio.addEventListener('durationchange', syncDuration);
@@ -185,6 +205,12 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams, hi
     setDuration(0);
     if (track.url) {
       audio.src = track.url;
+      if (autoPlay) audio.play().catch((e) => { if (e?.name !== 'AbortError') setError(t('无法播放该文件')); });
+      return;
+    }
+    const streamUrl = track.path ? window.electronAPI?.getMusicTrackUrl?.(track.path) : undefined;
+    if (streamUrl) {
+      audio.src = streamUrl;
       if (autoPlay) audio.play().catch((e) => { if (e?.name !== 'AbortError') setError(t('无法播放该文件')); });
       return;
     }
