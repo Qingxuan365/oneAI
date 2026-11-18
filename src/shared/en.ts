@@ -559,4 +559,7 @@ export const EN: Record<string, string> = {
   '{n} 个模型': '{n} models',
   'Tokens 占比': 'Token share',
   '近 {n} 周共 {total} 次请求 · 单日最高 {max} 次': '{total} requests in {n} weeks · peak {max}/day',
+  '未找到该终端会话的启动配置': 'No launch configuration found for this terminal session',
+  '调整预览面板宽度': 'Resize preview panel',
+  '拖动调整预览宽度，双击恢复默认': 'Drag to resize preview panel, double-click to reset',
 };

@@ -13,9 +13,10 @@ import { getUsageStats } from './usage-stats';
 import { detectInstalledClis, listKnownClis } from './cli-detect';
 import { setupWorkspaceStore } from './workspace-store';
 import { registerMusicScheme, setupMusicLibrary } from './music-library';
-import { setupFilePreview } from './file-preview';
+import { allowPreviewFilePaths, isImageExtension, setupFilePreview } from './file-preview';
 import { bindWindowState, loadWindowState, WindowStateTracker } from './window-state';
 import { getLanguage, setLanguage, t } from './i18n';
+import { quoteTerminalPath } from '../shared/paths';
 
 registerMusicScheme();
 
@@ -188,6 +189,10 @@ function setupIPC() {
     return ptyManager.getSessionBuffer(id);
   });
 
+  ipcMain.handle('terminal:get-snapshot', async (_event, { id }) => {
+    return ptyManager.getSessionSnapshot(id);
+  });
+
   ipcMain.handle('terminal:write', async (_event, { id, data }) => ptyManager.writeSession(id, data));
 
   ipcMain.handle('terminal:resize', async (_event, { id, cols, rows }) => {
@@ -198,8 +203,9 @@ function setupIPC() {
     ptyManager.killSession(id);
   });
 
-  ipcMain.handle('terminal:restart', async (_event, { id }) => {
-    return ptyManager.restartSession(id);
+  ipcMain.handle('terminal:restart', async (_event, payload) => {
+    const { id, ...freshOptions } = payload || {};
+    return ptyManager.restartSession(id, freshOptions);
   });
 
   ipcMain.handle('terminal:clear-buffer', async (_event, { id }) => {
@@ -244,24 +250,28 @@ function setupIPC() {
     quotaService.setAccounts(Array.isArray(accounts) ? accounts : []);
   });
 
-  // 读取剪贴板内容（支持纯文本，以及图片自动存盘返回临时路径）
+  // 读取剪贴板内容（支持纯文本含空白缩进、复制文件转路径，以及图片自动存盘返回临时路径）
+  let pasteSeq = 0;
   ipcMain.handle('clipboard:read-paste-content', async () => {
     try {
-      // 1. 优先读取纯文本
+      // 1. 优先读取纯文本（保留纯空格、缩进或换行文本，不再用 trim() 丢弃）
       const text = clipboard.readText();
-      if (text && text.trim().length > 0) {
+      if (text && text.length > 0) {
         return { type: 'text', content: text };
       }
 
       // 2. 复制的是文件（资源管理器、微信等常以文件形式放图片）：readText / readImage 都为空，
-      //    改读 FileNameW 拿到路径，与拖拽文件的行为一致；Electron 只能读到第一个文件
+      //    改读 FileNameW 拿到路径，与拖拽文件的行为一致；若是图片则同步登记至预览白名单
       const fileNameW = clipboard.readBuffer('FileNameW');
       if (fileNameW.length > 0) {
         const filePath = fileNameW.toString('utf16le').replace(/\0+$/, '');
         if (filePath) {
           try {
             await fs.promises.access(filePath);
-            return { type: 'file-path', content: filePath.includes(' ') ? `"${filePath}"` : filePath };
+            if (isImageExtension(filePath)) {
+              await allowPreviewFilePaths([filePath]);
+            }
+            return { type: 'file-path', content: quoteTerminalPath(filePath) };
           } catch {}
         }
       }
@@ -272,10 +282,11 @@ function setupIPC() {
         const pngBuffer = img.toPNG();
         const tempDir = path.join(app.getPath('temp'), 'OneAI_Images');
         await fs.promises.mkdir(tempDir, { recursive: true });
-        const filename = `paste_${Date.now()}.png`;
+        pasteSeq = (pasteSeq + 1) % 10000;
+        const filename = pasteSeq === 1 ? `paste_${Date.now()}.png` : `paste_${Date.now()}_${pasteSeq}.png`;
         const fullPath = path.join(tempDir, filename);
         await fs.promises.writeFile(fullPath, pngBuffer);
-        return { type: 'image-path', content: fullPath.includes(' ') ? `"${fullPath}"` : fullPath };
+        return { type: 'image-path', content: quoteTerminalPath(fullPath) };
       }
     } catch (e) {
       console.error('[OneAI] Error reading clipboard paste content:', e);
@@ -353,7 +364,7 @@ async function cleanupPastedImages(): Promise<void> {
   let names: string[];
   try { names = await fs.promises.readdir(dir); } catch { return; }
   for (const name of names) {
-    if (!/^paste_\d+\.png$/.test(name)) continue;
+    if (!/^paste_\d+(?:_\d+)?\.png$/.test(name)) continue;
     const file = path.join(dir, name);
     try {
       if ((await fs.promises.stat(file)).mtimeMs < cutoff) await fs.promises.unlink(file);
@@ -373,6 +384,11 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+});
+
+app.on('before-quit', () => {
+  quotaService.stopPolling();
+  ptyManager.destroyAll();
 });
 
 app.on('window-all-closed', () => {

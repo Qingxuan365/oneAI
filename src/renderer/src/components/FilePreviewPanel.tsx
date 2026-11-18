@@ -16,12 +16,14 @@ interface FilePreviewPanelProps {
   minimap?: boolean;
   width: number;
   onResize: (width: number) => void;
+  onResetWidth?: () => void;
   onClose: () => void;
   /** 传入当前语言，使 React.memo 在切换语言时同步重绘 */
   language?: string;
 }
 
 const MIN_WIDTH = 280;
+const MIN_TERMINAL_WIDTH = 320;
 const LARGE_PREVIEW_LINES = 400;
 const LARGE_LINE_STYLE: React.CSSProperties = { contentVisibility: 'auto', containIntrinsicSize: 'auto 20px' };
 
@@ -31,7 +33,7 @@ function formatSize(size?: number): string {
 }
 
 /** 终端右侧的只读文件预览面板：文本、图片，其他类型给出提示。 */
-export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = React.memo(({ cwd, filePath, line, openedAt, minimap = true, width, onResize, onClose }) => {
+export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = React.memo(({ cwd, filePath, line, openedAt, minimap = true, width, onResize, onResetWidth, onClose }) => {
   const asideRef = useRef<HTMLElement | null>(null);
   const [result, setResult] = useState<FilePreviewResult | null>(null);
   const [reloadCount, setReloadCount] = useState(0);
@@ -62,7 +64,12 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = React.memo(({ c
     document.body.style.cursor = 'col-resize';
     let latestWidth: number | null = null;
     const onMove = (e: MouseEvent) => {
-      const next = Math.round(Math.max(MIN_WIDTH, Math.min(window.innerWidth * 0.6, window.innerWidth - e.clientX)));
+      const parentRect = asideRef.current?.parentElement?.getBoundingClientRect();
+      const rightEdge = parentRect ? parentRect.right : window.innerWidth;
+      const maxAllowed = parentRect
+        ? Math.max(MIN_WIDTH, Math.min(parentRect.width - MIN_TERMINAL_WIDTH, window.innerWidth * 0.6))
+        : window.innerWidth * 0.6;
+      const next = Math.round(Math.max(MIN_WIDTH, Math.min(maxAllowed, rightEdge - e.clientX)));
       latestWidth = next;
       if (asideRef.current) asideRef.current.style.width = `${next}px`;
     };
@@ -111,11 +118,19 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = React.memo(({ c
   }
 
   return (
-    <aside ref={asideRef} className="relative flex h-full shrink-0 flex-col border-l border-line bg-surface" style={{ width }} aria-label={t('文件预览')}>
+    <aside
+      ref={asideRef}
+      className="relative flex h-full shrink-0 flex-col border-l border-line bg-surface"
+      style={{ width, maxWidth: `calc(100% - ${MIN_TERMINAL_WIDTH}px)` }}
+      aria-label={t('文件预览')}
+    >
       <div
         role="separator"
         aria-orientation="vertical"
+        aria-label={t('调整预览面板宽度')}
+        title={t('拖动调整预览宽度，双击恢复默认')}
         onMouseDown={startDrag}
+        onDoubleClick={() => onResetWidth?.()}
         className="absolute -left-1 top-0 z-10 h-full w-2 cursor-col-resize hover:bg-accent/30"
       />
       <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3">

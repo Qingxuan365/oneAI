@@ -1,0 +1,120 @@
+export type AccountCliId = 'codex' | 'claude' | 'kimi';
+
+export interface SessionAccount {
+  cliId: AccountCliId;
+  configDir: string;
+  env?: Record<string, string>;
+}
+
+export interface LoginStatus {
+  loggedIn: boolean | null;  // null：命令输出无法识别
+  detail?: string;           // 可显示的补充信息，如 Claude 返回的邮箱；无则缺省
+}
+
+export interface HistoryEntry {
+  id: string;
+  cliId: 'claude' | 'codex' | 'kimi';
+  title: string;
+  cwd: string;
+  updatedAt: number;
+  command: string;           // 恢复该会话的完整启动命令
+  accountId?: string;        // 非默认账号时携带账号配置 id；默认账号缺省
+  accountName?: string;      // 非默认账号时携带账号名称
+}
+
+export interface HistoryAccountRef {
+  id: string;
+  name: string;
+  cliId: string;
+  configDir: string;
+}
+
+export interface QuotaData {
+  cliId: string;
+  cliName: string;
+  model?: string;
+  effort?: string;           // 推理思考等级: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+  planType?: string;
+  tokens?: number;           // 最近活跃会话累计 token（输入 + 输出 + 缓存读写），无数据时缺省
+  costUsd?: number;          // 最近活跃会话累计费用（美元），仅 Claude Code 提供
+  fiveHourPercent: number;   // 5h remaining pct (0-100)，未知为 -1
+  fiveHourResetsIn: string;  // e.g. "2h 45m"
+  sevenDayPercent: number;   // 7d remaining pct (0-100)，未知为 -1
+  sevenDayResetsOn: string;  // e.g. "Resets Sun"
+  lastUpdated: number;
+  status: 'normal' | 'warning' | 'critical' | 'offline';
+  message?: string;
+}
+
+export type UsageCli = 'claude' | 'codex' | 'agy' | 'pi';
+
+export interface UsageRow {
+  cliId: UsageCli;
+  accountId: string;         // OneAI 账号 id；默认账号为 'default'
+  accountName: string;       // 账号名，默认账号为「默认账号」
+  model: string;
+  requests: number;          // 请求数：一次模型回复算一次
+  sessions: number;          // 本周内出现过该模型回复的会话数
+  subagent?: boolean;        // CLI 自动发起的子会话（如 Codex 自动审查），不是用户选用的模型
+  input: number;             // 未命中缓存的输入 tokens
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+export interface UsageDay {
+  date: string;              // 本地日期 YYYY-MM-DD
+  requests: number;
+  by: Record<string, number>; // 键为 `${cliId}:${accountId}`，值为当天该 CLI 账号的请求数
+}
+
+export interface UsageAccountInfo {
+  cliId: UsageCli;
+  accountId: string;
+  name: string;
+}
+
+export interface UsageStats {
+  generatedAt: number;
+  weekStart: number;         // 本周周一 00:00（本地时间）的毫秒时间戳
+  accounts: UsageAccountInfo[]; // 统计范围内出现过用量的 CLI 账号
+  rows: UsageRow[];          // 本周各 CLI × 账号 × 模型，按 tokens 降序
+  days: UsageDay[];          // 周一对齐、连续的每日请求数，到本周周日为止
+}
+
+export interface UsageAccountRef {
+  id: string;
+  name: string;
+  cliId: string;
+  configDir: string;
+}
+
+export interface SystemStats {
+  cpuPercent: number;
+  memUsedBytes: number;
+  memTotalBytes: number;
+  netUpBytesPerSec: number | null;
+  netDownBytesPerSec: number | null;
+}
+
+export type FilePreviewResult =
+  | { kind: 'text'; path: string; size: number; content: string }
+  | { kind: 'image'; path: string; size: number; dataUrl: string }
+  | { kind: 'binary' | 'too-large' | 'error'; path: string; size?: number; message?: string };
+
+export interface SessionSnapshot {
+  buffer: string;
+  seq: number;
+  alive: boolean;
+  exitCode?: number;
+}
+
+/** 全部内置主题 ID 单一事实源；新增主题须同步 themes.ts、index.css、index.html 与 TerminalViewport.tsx */
+export const THEME_IDS = [
+  'light', 'dark', 'bean', 'parchment', 'dusk', 'nord', 'lavender', 'mist', 'forest', 'ink',
+  'darcula', 'material', 'monokai', 'mariana', 'breakers', 'solarized-dark', 'solarized-light', 'cobalt',
+  'idea-classic-light', 'idea-light', 'idea-dark', 'idea-contrast',
+  'kiro-dark', 'kiro-light',
+] as const;
+
+export type ThemeId = (typeof THEME_IDS)[number];

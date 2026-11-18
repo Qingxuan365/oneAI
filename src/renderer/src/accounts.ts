@@ -1,5 +1,6 @@
 import { Account, SessionAccount } from './types';
 import { t } from './i18n';
+import { folderKey } from '../../shared/paths';
 
 /** 支持多账号的 CLI：id 即 CliDef.id。登录命令在该账号的环境下于终端任务中运行。 */
 export const ACCOUNT_CLIS: Array<{
@@ -74,10 +75,10 @@ export function validateAccount(draft: Pick<Account, 'cliId' | 'name' | 'configD
   if (others.some((a) => a.cliId === draft.cliId && a.name.trim().toLowerCase() === name.toLowerCase())) return t('同一 CLI 下已有同名账号。');
   if (!dir) return t('请填写配置目录。');
   if (!/^(~([\\/]|$)|[A-Za-z]:[\\/]|\\\\)/.test(dir)) return t('配置目录必须是绝对路径（如 {example}），或以 ~ 开头。', { example: exampleConfigDir(draft.cliId) });
-  const normalize = (p: string) => p.replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase();
-  const expanded = dir.replace(/^~(?=[\\/]|$)/, homeDir());
-  if (normalize(expanded) === normalize(defaultConfigDir(draft.cliId))) return t('该目录是默认账号的配置目录，请换一个新目录。');
-  if (others.some((a) => a.cliId === draft.cliId && normalize(a.configDir) === normalize(dir))) return t('该目录已被同一 CLI 的另一个账号使用。');
+  const expandKey = (p: string) => folderKey(p.trim().replace(/^~(?=[\\/]|$)/, homeDir()));
+  const expanded = expandKey(dir);
+  if (expanded === folderKey(defaultConfigDir(draft.cliId))) return t('该目录是默认账号的配置目录，请换一个新目录。');
+  if (others.some((a) => a.cliId === draft.cliId && expandKey(a.configDir) === expanded)) return t('该目录已被同一 CLI 的另一个账号使用。');
   const parsed = parseEnvLines(draft.env);
   if (parsed.error) return t('附加环境变量：{reason}', { reason: parsed.error });
   return '';

@@ -23,17 +23,18 @@ d:/GitHub/OneAI/
 ├── LICENSE                    # MIT 许可证
 ├── package.json
 ├── tsconfig.json
-├── vite.config.ts             # 渲染进程、主进程构建、preload 同步校验与复制、生产 CSP 注入
+├── vite.config.ts             # 渲染进程、主进程构建、preload 与主题白名单同步校验、生产 CSP 注入
 ├── electron-builder.json      # Windows 打包配置：默认安装版（NSIS），便携版通过 build:portable 生成，产物输出到 release/
 ├── tailwind.config.js
 ├── postcss.config.js
 ├── index.html                 # 渲染进程 HTML 入口
 ├── public/                    # 静态资源（favicon 等）
 ├── resources/                 # 应用图标等打包资源
-├── scripts/                   # 界面回归检查脚本 check-ui.mjs；多语言完整性检查 check-i18n.mjs（npm run check:i18n）
+├── scripts/                   # 界面回归检查 check-ui.mjs；主进程与共享逻辑测试 check-main.mjs（npm run check:main）；多语言检查 check-i18n.mjs（npm run check:i18n）
 ├── src/
 │   ├── main/                  # Electron 主进程代码
 │   │   ├── index.ts           # 窗口创建、应用生命周期与 IPC 注册
+│   │   ├── fs-utils.ts        # 路径大小写归一化、目录包含判断、文件切片与 .zst 流式解压、LRU 容量上限 Map
 │   │   ├── pty-manager.ts     # node-pty 进程池管理器；按任务账号注入 CODEX_HOME / CLAUDE_CONFIG_DIR / KIMI_CODE_HOME
 │   │   ├── quota-service.ts   # 大模型配额、模型与推理等级、会话累计 Tokens / Cost 读取及配置热监听
 │   │   ├── system-stats.ts    # 整机 CPU / 内存 / 网速采样（网速读物理网卡，常驻 PowerShell），每 2 秒推送给顶栏
@@ -55,6 +56,8 @@ d:/GitHub/OneAI/
 │   │   ├── index.cjs          # 运行时实际加载的 preload，由 vite.config.ts 复制到 dist-electron/preload/
 │   │   └── index.ts           # 同一组接口的 TS 版本，不参与构建；修改接口时须与 index.cjs 同步
 │   ├── shared/                # 主进程与渲染进程共用
+│   │   ├── types.ts           # 跨进程共享数据结构与内置主题 ID 清单（THEME_IDS）单一事实源
+│   │   ├── paths.ts           # folderKey、终端路径安全加引号与终端输出路径候选提取
 │   │   ├── i18n.ts            # 语言类型、系统语言判断与 translate()
 │   │   └── en.ts              # 英文对照表：键是代码里的中文原文，值是英文
 │   └── renderer/              # React 前端渲染进程
@@ -63,7 +66,8 @@ d:/GitHub/OneAI/
 │           ├── dropGuard.ts              # 拦截拖到终端以外区域的文件，避免窗口被导航到该文件
 │           ├── App.tsx                   # 全局状态、工作区持久化与会话调度
 │           ├── index.css                 # 语义颜色 token、各主题配色变量、通用控件类（icon-btn / btn-* / input / option）与顶栏容器查询断点
-│           ├── themes.ts                 # 主题明暗基调与设置页主题选项（浅 / 深、护眼、编辑器三组）；新增主题须同步 index.css、index.html 首帧脚本的主题白名单与 TerminalViewport 终端配色
+│           ├── themes.ts                 # 主题明暗基调与设置页主题选项（浅 / 深、护眼、编辑器三组）；新增主题须同步 shared/types.ts、index.css、index.html 与 TerminalViewport
+│           ├── taskStatus.ts             # 任务存活态（starting / running / idle / waiting）判断
 │           ├── taskSummary.ts            # 任务行第二行支持的 CLI 与「新会话 · 时间」的格式化
 │           ├── clis.ts                   # 内置 CLI 定义（CliDef）与默认文件夹（本机用户主目录，由主进程提供）；全新安装不再预置示例任务
 │           ├── i18n.ts                   # 渲染进程多语言：t() / T() / setLanguage，文案以中文原文为键
@@ -81,14 +85,14 @@ d:/GitHub/OneAI/
 │           │   ├── TerminalSearchBar.tsx # 终端关键字搜索栏
 │           │   ├── NewTaskModal.tsx      # 新建 Task 弹窗（该 CLI 配置了账号时可选账号）
 │           │   ├── PreviewMinimap.tsx    # 文件预览右侧的代码缩略图（canvas 绘制，滑块可点击 / 拖动；由设置 previewMinimap 控制）
-│           │   ├── FilePreviewPanel.tsx  # 终端右侧只读文件预览面板（Ctrl+单击终端路径打开，宽度可拖拽）
+│           │   ├── FilePreviewPanel.tsx  # 终端右侧只读文件预览面板（Ctrl+单击终端路径打开，宽度可拖拽、持久化并支持双击重置）
 │           │   ├── HistoryModal.tsx      # 历史会话抽屉（顶栏右上角入口）：按日期分段，显示文件夹、分支与「已打开」
 │           │   ├── UsageModal.tsx        # 本周用量弹窗（顶栏用量按钮 / Ctrl+Shift+U）：按 CLI → 账号 → 模型分组的用量表与近 26 周每日请求数方块图
-│           │   ├── SettingsModal.tsx     # 分页设置：外观、时间、终端、账号、提醒、快捷键列表
+│           │   ├── SettingsModal.tsx     # 分页设置：外观、时间、终端、账号、CLI、提醒、快捷键列表
 │           │   ├── AccountsSettings.tsx  # 设置 → 账号：添加 / 编辑 / 删除账号、登录入口与登录状态
 │           │   ├── CliSettings.tsx       # 设置 → CLI：已知 CLI 的检测状态（清单取自主进程）、重新检测、添加 / 编辑 / 删除自定义 CLI
 │           │   ├── OnboardingModal.tsx   # 首次启动引导：选择界面语言，再显示检测到的 CLI、默认文件夹与小提示；完成后不再弹出
-│           │   ├── Modal.tsx             # 所有弹窗共用的外壳（遮罩、标题栏、Esc 关闭、焦点归还）
+│           │   ├── Modal.tsx             # 所有弹窗共用的外壳（遮罩、标题栏、Esc 关闭、Tab 焦点陷阱、焦点归还）
 │           │   ├── ConfirmDialog.tsx     # 应用内确认与通知弹窗，替代原生 confirm / alert
 │           │   ├── MusicPlayer.tsx       # 侧栏底部迷你音乐播放器（本地目录 + 在线音乐），没有任何曲目时不显示
 │           │   ├── MusicStreamsSettings.tsx # 设置 → 提醒：添加 / 删除在线音乐（列表最多显示 5 行，超出滚动）

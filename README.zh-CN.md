@@ -24,7 +24,7 @@ OneAI 把 Codex、Claude Code、Kimi Code、OpenCode 等 AI 编程 CLI 放进同
 - **历史会话**：浏览并恢复 Claude Code、Codex、Kimi Code 的历史会话。
 - **文件预览**：在终端里按住 Ctrl 单击路径，即可只读预览文件，支持语法高亮并带代码缩略图。
 - **任意 CLI**：按 `PATH` 自动检测已安装的 CLI，其他命令可添加为自定义 CLI。
-- **简体中文与英文**、20 个主题（浅色、深色、护眼与编辑器配色），以及简短的首次引导。
+- **简体中文与英文**、24 个主题（浅色、深色、护眼与编辑器配色），以及简短的首次引导。
 
 每项功能的详细行为见 [docs/features.zh-CN.md](docs/features.zh-CN.md)。
 
@@ -75,6 +75,7 @@ npm run build:win -- --config.directories.output=release/ui-polish
 
 ```bash
 npm run check:ui     # 在隐藏的 Electron 窗口里做界面回归检查（主题、布局、键盘、终端、设置、首次引导）
+npm run check:main   # 主进程与共享核心逻辑单元测试（PTY、TOML、音乐、摘要、文件预览）
 npm run check:i18n   # 每条界面文案都有英文译文
 ```
 
@@ -90,7 +91,7 @@ OneAI 在本机运行，没有遥测和统计，也没有更新检查。它读�
 
 ## 参与贡献
 
-欢迎提交 Issue 和 Pull Request。项目约定、目录结构和检查方式见 [AGENTS.md](AGENTS.md)。要点：commit 信息使用英文，所有界面文案都要经过 `t()` 并在 `src/shared/en.ts` 里登记英文，`npm run check:ui` 与 `npm run check:i18n` 应通过。
+欢迎提交 Issue 和 Pull Request。项目约定、目录结构和检查方式见 [AGENTS.md](AGENTS.md)。要点：commit 信息使用英文，所有界面文案都要经过 `t()` 并在 `src/shared/en.ts` 里登记英文，`npm run check:ui`、`npm run check:main` 与 `npm run check:i18n` 应通过。
 
 ## 贡献者
 

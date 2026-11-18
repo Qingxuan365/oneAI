@@ -13,6 +13,8 @@ interface NewTaskModalProps {
   clis: CliDef[];
   /** 打开时预选的 CLI */
   initialCliId?: string;
+  /** 打开时预选的账号 ID（仅在匹配所选 CLI 时生效） */
+  initialAccountId?: string;
   /** 新任务默认的工作目录，即在哪个文件夹上点的「+」 */
   folderPath: string;
   /** 用于生成默认任务名（取该文件夹里已有的「Task N」） */
@@ -27,6 +29,7 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
   onClose,
   clis,
   initialCliId,
+  initialAccountId,
   folderPath,
   tasks,
   accounts = [],
@@ -48,9 +51,12 @@ export const NewTaskModal: React.FC<NewTaskModalProps> = ({
     setTitle(nextTaskTitle(tasksInFolder(tasks, folderPath)));
     setCommand(cli?.defaultCommand ?? '');
     setCwd(folderPath);
-    setAccountId('');
+    const validAccount = cli && initialAccountId && accounts.some((a) => a.id === initialAccountId && a.cliId === cli.id)
+      ? initialAccountId
+      : '';
+    setAccountId(validAccount);
     setError('');
-  }, [isOpen, initialCliId, folderPath]);
+  }, [isOpen, initialCliId, initialAccountId, folderPath]);
 
   const cli = clis.find((item) => item.id === cliId);
   if (!isOpen || !cli) return null;

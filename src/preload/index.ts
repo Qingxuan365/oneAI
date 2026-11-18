@@ -1,11 +1,21 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import type {
+  ElectronTerminalAPI,
+  HistoryAccountRef,
+  HistoryEntry,
+  QuotaData,
+  RestartSessionOptions,
+  SessionAccount,
+  SystemStats,
+  UsageAccountRef,
+} from '../renderer/src/types';
 
 export interface CreateSessionOptions {
   id: string;
   command?: string;
   cwd?: string;
   shell?: boolean;
-  account?: { cliId: 'codex' | 'claude' | 'kimi'; configDir: string; env?: Record<string, string> };
+  account?: SessionAccount;
   cols?: number;
   rows?: number;
 }
@@ -37,9 +47,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   readPasteContent: () => ipcRenderer.invoke('clipboard:read-paste-content'),
   writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
-  listSessionHistory: (accounts?: Array<{ id: string; name: string; cliId: string; configDir: string }>) => ipcRenderer.invoke('history:list', accounts),
-  deleteSessionHistory: (items: Array<{ cliId: string; id: string; accountId?: string }>) => ipcRenderer.invoke('history:delete', items),
-  getUsageStats: (accounts: Array<{ id: string; name: string; cliId: string; configDir: string }>) => ipcRenderer.invoke('usage:stats', accounts),
+  listSessionHistory: (accounts?: HistoryAccountRef[]) => ipcRenderer.invoke('history:list', accounts),
+  deleteSessionHistory: (items: Array<{ cliId: HistoryEntry['cliId']; id: string; accountId?: string }>) => ipcRenderer.invoke('history:delete', items),
+  getUsageStats: (accounts: UsageAccountRef[]) => ipcRenderer.invoke('usage:stats', accounts),
   detectClis: (custom?: Array<{ id: string; command: string }>) => ipcRenderer.invoke('cli:detect', custom),
   listKnownClis: () => ipcRenderer.invoke('cli:known'),
   setLanguage: (language: string) => ipcRenderer.invoke('app:set-language', language),
@@ -55,6 +65,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSessionBuffer: (id: string) =>
     ipcRenderer.invoke('terminal:get-buffer', { id }),
 
+  getSessionSnapshot: (id: string) =>
+    ipcRenderer.invoke('terminal:get-snapshot', { id }),
+
   writeSession: (id: string, data: string) =>
     ipcRenderer.invoke('terminal:write', { id, data }),
 
@@ -64,8 +77,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   killSession: (id: string) =>
     ipcRenderer.invoke('terminal:kill', { id }),
 
-  restartSession: (id: string) =>
-    ipcRenderer.invoke('terminal:restart', { id }),
+  restartSession: (id: string, options?: RestartSessionOptions) =>
+    ipcRenderer.invoke('terminal:restart', { id, ...(options || {}) }),
 
   clearSessionBuffer: (id: string) =>
     ipcRenderer.invoke('terminal:clear-buffer', { id }),
@@ -91,8 +104,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveLogFile: (defaultName: string, content: string) =>
     ipcRenderer.invoke('dialog:save-log-file', { defaultName, content }),
 
-  onSessionData: (callback: (event: { id: string; data: string }) => void) => {
-    const subscription = (_event: any, value: { id: string; data: string }) => callback(value);
+  onSessionData: (callback: (event: { id: string; data: string; seq?: number }) => void) => {
+    const subscription = (_event: Electron.IpcRendererEvent, value: { id: string; data: string; seq?: number }) => callback(value);
     ipcRenderer.on('terminal:data', subscription);
     return () => {
       ipcRenderer.removeListener('terminal:data', subscription);
@@ -100,7 +113,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   onSessionExit: (callback: (event: { id: string; exitCode: number }) => void) => {
-    const subscription = (_event: any, value: { id: string; exitCode: number }) => callback(value);
+    const subscription = (_event: Electron.IpcRendererEvent, value: { id: string; exitCode: number }) => callback(value);
     ipcRenderer.on('terminal:exit', subscription);
     return () => {
       ipcRenderer.removeListener('terminal:exit', subscription);
@@ -114,24 +127,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   refreshQuota: (cliId?: string) => ipcRenderer.invoke('quota:refresh', cliId),
   setQuotaAccounts: (accounts: Array<{ key: string; cliId: string; configDir: string }>) => ipcRenderer.invoke('quota:set-accounts', accounts),
-  checkAccountLogin: (account: unknown) => ipcRenderer.invoke('account:login-status', account),
+  checkAccountLogin: (account: SessionAccount) => ipcRenderer.invoke('account:login-status', account),
   setTitleBarOverlay: (opts: { color: string; symbolColor: string; height: number; backgroundColor?: string }) => ipcRenderer.send('window:set-title-bar-overlay', opts),
   getGitBranches: (paths: string[]) => ipcRenderer.invoke('git:branches', paths),
-  getTaskSummaries: (tasks: unknown[]) => ipcRenderer.invoke('task:summaries', tasks),
+  getTaskSummaries: (tasks: Array<{ id: string; cliId: string; cwd: string; createdAt: number; historyId?: string; configDir?: string }>) => ipcRenderer.invoke('task:summaries', tasks),
 
-  onQuotaUpdate: (callback: (quotas: any) => void) => {
-    const subscription = (_event: any, value: any) => callback(value);
+  onQuotaUpdate: (callback: (quotas: Record<string, QuotaData>) => void) => {
+    const subscription = (_event: Electron.IpcRendererEvent, value: Record<string, QuotaData>) => callback(value);
     ipcRenderer.on('quota:update', subscription);
     return () => {
       ipcRenderer.removeListener('quota:update', subscription);
     };
   },
 
-  onSystemStats: (callback: (stats: any) => void) => {
-    const subscription = (_event: any, value: any) => callback(value);
+  onSystemStats: (callback: (stats: SystemStats) => void) => {
+    const subscription = (_event: Electron.IpcRendererEvent, value: SystemStats) => callback(value);
     ipcRenderer.on('system:stats', subscription);
     return () => {
       ipcRenderer.removeListener('system:stats', subscription);
     };
   },
-});
+} satisfies Required<ElectronTerminalAPI>);

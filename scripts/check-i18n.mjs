@@ -21,13 +21,21 @@ const en = new Map();
 for (const m of enSource.matchAll(/^ {2}'((?:[^'\\]|\\.)*)': '((?:[^'\\]|\\.)*)',$/gm)) en.set(unescapeText(m[1]), unescapeText(m[2]));
 
 const keyPattern = /(?<![\w.$])[tT]\(\s*(?:'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|`([^`$\n]*)`)/g;
+const dynamicCallPattern = /(?<![\w.$])[tT]\(\s*(?!['"`])([^\n;)]+)/g;
+const cjkPattern = /[一-鿿　-〿＀-￯]/;
 const used = new Map();
+const dynamicCjk = [];
 for (const file of walk(path.join(root, 'src'))) {
   const text = fs.readFileSync(file, 'utf-8');
+  const rel = path.relative(root, file);
   for (const m of text.matchAll(keyPattern)) {
     const key = unescapeText(m[1] ?? m[2] ?? m[3]);
-    if (!/[一-鿿　-〿＀-￯]/.test(key)) continue;
-    if (!used.has(key)) used.set(key, path.relative(root, file));
+    if (!cjkPattern.test(key)) continue;
+    if (!used.has(key)) used.set(key, rel);
+  }
+  for (const m of text.matchAll(dynamicCallPattern)) {
+    const expr = m[1].trim();
+    if (cjkPattern.test(expr)) dynamicCjk.push([expr, rel]);
   }
 }
 
@@ -39,6 +47,7 @@ const unused = [...en.keys()].filter((key) => !used.has(key) && !/^\d+月$/.test
 
 for (const [key, file] of missing) console.log(`MISSING  ${file}: ${key}`);
 for (const [key, file] of mismatched) console.log(`PLACEHOLDER MISMATCH  ${file}: ${key}`);
-for (const key of unused) console.log(`unused   ${key}`);
-console.log(`\n${used.size} keys used, ${en.size} translations, ${missing.length} missing, ${mismatched.length} placeholder mismatches, ${unused.length} unused`);
-process.exit(missing.length || mismatched.length ? 1 : 0);
+for (const [expr, file] of dynamicCjk) console.log(`DYNAMIC CJK  ${file}: t(${expr})`);
+for (const key of unused) console.log(`UNUSED   ${key}`);
+console.log(`\n${used.size} keys used, ${en.size} translations, ${missing.length} missing, ${mismatched.length} placeholder mismatches, ${dynamicCjk.length} dynamic CJK, ${unused.length} unused`);
+process.exit(missing.length || mismatched.length || dynamicCjk.length || unused.length ? 1 : 0);

@@ -63,6 +63,9 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams, hi
   const streamsRef = useRef<MusicStream[]>(streams);
   streamsRef.current = streams;
   const streamsKey = JSON.stringify(streams.map((item) => [item.id, item.name, item.url]));
+  const streamCacheRef = useRef<Map<string, Array<{ name: string; url: string }>>>(new Map());
+  const initialScanDoneRef = useRef(false);
+  const scanEpochRef = useRef(0);
 
   const resetAudio = useCallback(() => {
     [localAudioRef.current, streamAudioRef.current].forEach((audio) => {
@@ -72,30 +75,83 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams, hi
       audio.load();
     });
     setPlaying(false);
+    playingRef.current = false;
     setTime(0);
     setDuration(0);
   }, []);
 
-  // 目录或在线音乐变化时重新读取曲目（本地在前、在线在后），并停止当前播放
+  // 目录或在线音乐变化时重新读取曲目（本地在前、在线在后）；首次挂载让出首帧绘制，当前正在播放的曲目仍在新列表中时不中断播放
   useEffect(() => {
     let active = true;
-    resetAudio();
+    let cancelIdle: (() => void) | null = null;
+    const epoch = ++scanEpochRef.current;
     setError('');
-    const local = window.electronAPI?.listMusic?.(directory || undefined)
-      .then((result): Track[] => result.tracks)
-      .catch((): Track[] => []) ?? Promise.resolve<Track[]>([]);
-    const online = Promise.all(streamsRef.current.map(async (stream): Promise<Track[]> => {
-      const base = stream.name.trim() || defaultStreamName(stream.url);
-      const fallback = [{ name: '', url: stream.url }];
-      const entries = await (window.electronAPI?.resolveMusicStream?.(stream.url) ?? Promise.resolve(fallback)).catch(() => fallback);
-      return entries.map((entry) => ({ name: entries.length > 1 ? `${base} - ${entry.name || entry.url}` : base, url: entry.url }));
-    })).then((lists) => lists.flat());
-    Promise.all([local, online]).then(([localTracks, onlineTracks]) => {
-      if (!active) return;
-      setTracks([...localTracks, ...onlineTracks]);
-      setIndex(0);
-    });
-    return () => { active = false; };
+    const runScan = () => {
+      if (!active || scanEpochRef.current !== epoch) return;
+      const currentStreams = streamsRef.current;
+      const validUrls = new Set(currentStreams.map((item) => item.url));
+      for (const cachedUrl of [...streamCacheRef.current.keys()]) {
+        if (!validUrls.has(cachedUrl)) streamCacheRef.current.delete(cachedUrl);
+      }
+      const local = window.electronAPI?.listMusic?.(directory || undefined)
+        .then((result): Track[] => result.tracks)
+        .catch((): Track[] => []) ?? Promise.resolve<Track[]>([]);
+      const online = Promise.all(currentStreams.map(async (stream): Promise<Track[]> => {
+        const base = stream.name.trim() || defaultStreamName(stream.url);
+        const fallback = [{ name: '', url: stream.url }];
+        const isPlaylist = /\.(m3u|pls)(\?|#|$)/i.test(stream.url);
+        let entries = streamCacheRef.current.get(stream.url);
+        if (!entries) {
+          const resolved = await (window.electronAPI?.resolveMusicStream?.(stream.url) ?? Promise.resolve(fallback)).catch(() => null);
+          if (resolved && resolved.length > 0) {
+            const expandedOk = !isPlaylist || resolved.length > 1 || resolved[0].url !== stream.url;
+            if (expandedOk) streamCacheRef.current.set(stream.url, resolved);
+            entries = resolved;
+          } else {
+            entries = fallback;
+          }
+        }
+        return entries.map((entry) => ({ name: entries!.length > 1 ? `${base} - ${entry.name || entry.url}` : base, url: entry.url }));
+      })).then((lists) => lists.flat());
+      void Promise.all([local, online]).then(([localTracks, onlineTracks]) => {
+        if (!active || scanEpochRef.current !== epoch) return;
+        const nextTracks = [...localTracks, ...onlineTracks];
+        const prevTrack = tracksRef.current[indexRef.current];
+        const prevKey = prevTrack ? (prevTrack.url ? `u:${prevTrack.url}` : `p:${prevTrack.path ?? ''}`) : '';
+        const hasLoadedSrc = Boolean(audioRef.current?.getAttribute('src'));
+        const keptIndex = prevKey && hasLoadedSrc
+          ? nextTracks.findIndex((item) => (item.url ? `u:${item.url}` : `p:${item.path ?? ''}`) === prevKey)
+          : -1;
+        if (keptIndex >= 0) {
+          setTracks(nextTracks);
+          setIndex(keptIndex);
+          indexRef.current = keptIndex;
+        } else {
+          resetAudio();
+          setTracks(nextTracks);
+          setIndex(0);
+          indexRef.current = 0;
+        }
+      });
+    };
+    if (!initialScanDoneRef.current) {
+      initialScanDoneRef.current = true;
+      const ric = (window as Window & { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void }).requestIdleCallback;
+      const cic = (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback;
+      if (typeof ric === 'function') {
+        const id = ric(runScan, { timeout: 100 });
+        cancelIdle = () => cic?.(id);
+      } else {
+        const timer = window.setTimeout(runScan, 50);
+        cancelIdle = () => window.clearTimeout(timer);
+      }
+    } else {
+      runScan();
+    }
+    return () => {
+      active = false;
+      cancelIdle?.();
+    };
   }, [directory, streamsKey, resetAudio]);
 
   const stopBars = useCallback(() => {
@@ -214,9 +270,10 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams, hi
       if (autoPlay) audio.play().catch((e) => { if (e?.name !== 'AbortError') setError(t('无法播放该文件')); });
       return;
     }
+    const startEpoch = scanEpochRef.current;
     const bytes = await window.electronAPI?.readMusic?.(track.path ?? '');
     if (!bytes) { setError(t('读取音频失败')); return; }
-    if (indexRef.current !== next) return; // 期间已切换到其他曲目
+    if (indexRef.current !== next || scanEpochRef.current !== startEpoch) return; // 期间已切换到其他曲目或刷新了列表
     urlRef.current = URL.createObjectURL(new Blob([bytes as BlobPart]));
     audio.src = urlRef.current;
     if (autoPlay) audio.play().catch(() => setError(t('无法播放该文件')));

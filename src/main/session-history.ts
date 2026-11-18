@@ -1,28 +1,12 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { StringDecoder } from 'node:string_decoder';
-import { Decompress as ZstdDecompress } from 'fzstd';
 import { isAccountCli, resolveConfigDir } from './account-env';
+import { isPathInside, normalizePathKey, readSlice, readZstHead, setBoundedMap } from './fs-utils';
+import type { HistoryAccountRef, HistoryEntry } from '../shared/types';
 import { t } from './i18n';
 
-export interface HistoryEntry {
-  id: string;
-  cliId: 'claude' | 'codex' | 'kimi';
-  title: string;
-  cwd: string;
-  updatedAt: number;
-  command: string; // 恢复该会话的完整启动命令
-  accountId?: string;   // 非默认账号时携带账号配置 id；默认账号缺省
-  accountName?: string; // 非默认账号时携带账号名称
-}
-
-export interface HistoryAccountRef {
-  id: string;
-  name: string;
-  cliId: string;
-  configDir: string;
-}
+export type { HistoryAccountRef, HistoryEntry };
 
 interface DirScope {
   dir: string;
@@ -36,6 +20,7 @@ const home = os.homedir();
 
 // 最近一次列表中每个会话对应的磁盘路径；删除只信任此表，不接受渲染进程传入的路径
 const deleteTargets = new Map<string, string[]>();
+const MAX_DELETE_TARGETS = 2500;
 const DEFAULT_DELETE_ROOTS = [
   path.join(home, '.claude', 'projects'),
   path.join(home, '.codex', 'sessions'),
@@ -44,9 +29,10 @@ const DEFAULT_DELETE_ROOTS = [
 ];
 let dynamicDeleteRoots: string[] = [...DEFAULT_DELETE_ROOTS];
 
-// 按文件 mtime + size 缓存解析结果，避免每 2 分钟与每次打开历史抽屉重复打开最多数百个文件
+// 按文件 mtime + size 缓存解析结果（LRU 容量淘汰，避免超限时整表 clear 引发重读尖峰）
 const claudeCache = new Map<string, { sig: string; base: Omit<HistoryEntry, 'accountId' | 'accountName'> | null; targets?: string[] }>();
 const codexMetaCache = new Map<string, { sig: string; meta: { id: string; cwd: string; prompt?: string } | null }>();
+const codexIndexCache = new Map<string, { sig: string; names: Map<string, string> }>();
 const kimiCache = new Map<string, { sig: string; base: Omit<HistoryEntry, 'accountId' | 'accountName'> | null; targets?: string[] }>();
 const MAX_HISTORY_CACHE = 1500;
 
@@ -54,18 +40,18 @@ function targetKey(cliId: HistoryEntry['cliId'], id: string, accountId?: string)
   return `${cliId}:${accountId || 'default'}:${id}`;
 }
 
-function normalizeDirKey(dir: string): string {
-  return process.platform === 'win32' ? path.resolve(dir).toLowerCase() : path.resolve(dir);
+function recordDeleteTarget(key: string, targets: string[]): void {
+  setBoundedMap(deleteTargets, key, targets, MAX_DELETE_TARGETS);
 }
 
 /** 默认目录优先；同目录的多账号配置自动去重并归入默认账号 */
 function scopesForCli(defaultDir: string, cliId: HistoryEntry['cliId'], accounts: HistoryAccountRef[]): DirScope[] {
-  const result = new Map<string, DirScope>([[normalizeDirKey(defaultDir), { dir: defaultDir }]]);
+  const result = new Map<string, DirScope>([[normalizePathKey(defaultDir), { dir: defaultDir }]]);
   for (const acc of accounts) {
     if (!acc || !isAccountCli(acc.cliId) || acc.cliId !== cliId || typeof acc.id !== 'string' || !acc.id) continue;
     const resolved = resolveConfigDir(acc.configDir);
     if (!resolved) continue;
-    const key = normalizeDirKey(resolved);
+    const key = normalizePathKey(resolved);
     if (result.has(key)) continue;
     result.set(key, {
       dir: resolved,
@@ -84,49 +70,7 @@ function withAccount(base: Omit<HistoryEntry, 'accountId' | 'accountName'>, scop
 
 function isInsideRoots(target: string): boolean {
   const resolvedTarget = path.resolve(target);
-  return dynamicDeleteRoots.some((root) => {
-    const rel = path.relative(path.resolve(root), resolvedTarget);
-    return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
-  });
-}
-
-async function readSlice(file: string, from: 'head' | 'tail', bytes: number): Promise<string> {
-  const handle = await fs.promises.open(file, 'r');
-  try {
-    const { size } = await handle.stat();
-    const length = Math.min(size, bytes);
-    const buffer = Buffer.alloc(length);
-    await handle.read(buffer, 0, length, from === 'head' ? 0 : size - length);
-    return buffer.toString('utf8');
-  } finally {
-    await handle.close();
-  }
-}
-
-/** 流式读取 .jsonl.zst 开头指定字节即中止解压，避免为提取会话元数据解压整个归档文件 */
-async function readZstHead(file: string, maxBytes: number): Promise<string> {
-  const decoder = new StringDecoder('utf8');
-  let out = '';
-  let total = 0;
-  const stream = fs.createReadStream(file, { highWaterMark: 16 * 1024 });
-  try {
-    const zstd = new ZstdDecompress((chunk) => {
-      if (total >= maxBytes) return;
-      const remain = maxBytes - total;
-      const slice = chunk.byteLength > remain ? chunk.subarray(0, remain) : chunk;
-      total += slice.byteLength;
-      out += decoder.write(Buffer.from(slice.buffer, slice.byteOffset, slice.byteLength));
-    });
-    for await (const chunk of stream) {
-      zstd.push(chunk as Buffer);
-      if (total >= maxBytes) break;
-    }
-    if (total < maxBytes) zstd.push(new Uint8Array(0), true);
-    out += decoder.end();
-    return out;
-  } finally {
-    stream.destroy();
-  }
+  return dynamicDeleteRoots.some((root) => isPathInside(root, resolvedTarget));
 }
 
 async function readHead(file: string, bytes: number): Promise<string> {
@@ -197,25 +141,25 @@ async function listClaudeScope(scope: DirScope): Promise<HistoryEntry[]> {
   const root = path.join(scope.dir, 'projects');
   const files = await listFiles(root, (name) => name.endsWith('.jsonl'), 1);
   const topLevel = files.filter((file) => path.dirname(path.dirname(file)) === root);
-  if (claudeCache.size > MAX_HISTORY_CACHE) claudeCache.clear();
   const result = await Promise.all((await newest(topLevel)).map(async ({ file, mtime, size }): Promise<HistoryEntry | null> => {
     const sig = `${mtime}:${size}`;
     const hit = claudeCache.get(file);
     if (hit && hit.sig === sig) {
+      setBoundedMap(claudeCache, file, hit, MAX_HISTORY_CACHE);
       if (!hit.base) return null;
-      if (hit.targets) deleteTargets.set(targetKey('claude', hit.base.id, scope.accountId), hit.targets);
+      if (hit.targets) recordDeleteTarget(targetKey('claude', hit.base.id, scope.accountId), hit.targets);
       return withAccount(hit.base, scope);
     }
     try {
       const id = path.basename(file, '.jsonl');
       if (!SAFE_ID.test(id)) {
-        claudeCache.set(file, { sig, base: null });
+        setBoundedMap(claudeCache, file, { sig, base: null }, MAX_HISTORY_CACHE);
         return null;
       }
       const head = await readSlice(file, 'head', 256 * 1024);
       const cwd = decodeJsonString(head.match(/"cwd":"((?:[^"\\]|\\.)*)"/)?.[1]);
       if (!cwd) {
-        claudeCache.set(file, { sig, base: null });
+        setBoundedMap(claudeCache, file, { sig, base: null }, MAX_HISTORY_CACHE);
         return null;
       }
       const tail = await readSlice(file, 'tail', 64 * 1024);
@@ -232,11 +176,11 @@ async function listClaudeScope(scope: DirScope): Promise<HistoryEntry[]> {
         }
       }
       if (!title) {
-        claudeCache.set(file, { sig, base: null });
+        setBoundedMap(claudeCache, file, { sig, base: null }, MAX_HISTORY_CACHE);
         return null;
       }
       const targets = [file, path.join(path.dirname(file), id)];
-      deleteTargets.set(targetKey('claude', id, scope.accountId), targets);
+      recordDeleteTarget(targetKey('claude', id, scope.accountId), targets);
       const base: Omit<HistoryEntry, 'accountId' | 'accountName'> = {
         id,
         cliId: 'claude',
@@ -245,45 +189,63 @@ async function listClaudeScope(scope: DirScope): Promise<HistoryEntry[]> {
         updatedAt: mtime,
         command: `claude --resume ${id}`,
       };
-      claudeCache.set(file, { sig, base, targets });
+      setBoundedMap(claudeCache, file, { sig, base, targets }, MAX_HISTORY_CACHE);
       return withAccount(base, scope);
     } catch { return null; }
   }));
   return result.filter((item): item is HistoryEntry => item !== null);
 }
 
-// Codex：<CODEX_HOME>/sessions 与 archived_sessions 下的 rollout-*.jsonl(.zst)，名称优先取自 session_index.jsonl
-async function listCodexScope(scope: DirScope): Promise<HistoryEntry[]> {
-  const names = new Map<string, string>();
+async function readCodexSessionNames(dir: string): Promise<Map<string, string>> {
+  const indexFile = path.join(dir, 'session_index.jsonl');
   try {
-    for (const line of (await fs.promises.readFile(path.join(scope.dir, 'session_index.jsonl'), 'utf8')).split('\n')) {
+    const stat = await fs.promises.stat(indexFile);
+    const sig = `${stat.mtimeMs}:${stat.size}`;
+    const cached = codexIndexCache.get(indexFile);
+    if (cached && cached.sig === sig) {
+      setBoundedMap(codexIndexCache, indexFile, cached, 32);
+      return cached.names;
+    }
+    const names = new Map<string, string>();
+    for (const line of (await fs.promises.readFile(indexFile, 'utf8')).split('\n')) {
+      if (!line) continue;
       try {
         const item = JSON.parse(line);
         if (item.id && item.thread_name) names.set(item.id, item.thread_name);
       } catch { /* 忽略坏行 */ }
     }
-  } catch { /* 无索引文件 */ }
+    setBoundedMap(codexIndexCache, indexFile, { sig, names }, 32);
+    return names;
+  } catch {
+    codexIndexCache.delete(indexFile);
+    return new Map();
+  }
+}
 
+// Codex：<CODEX_HOME>/sessions 与 archived_sessions 下的 rollout-*.jsonl(.zst)，名称优先取自 session_index.jsonl
+async function listCodexScope(scope: DirScope): Promise<HistoryEntry[]> {
+  const namesPromise = readCodexSessionNames(scope.dir);
   const companions = new Map<string, string[]>();
-  const [activeFiles, archivedFiles] = await Promise.all([
+  const [names, activeFiles, archivedFiles] = await Promise.all([
+    namesPromise,
     listCodexFiles(path.join(scope.dir, 'sessions'), 4, companions),
     listCodexFiles(path.join(scope.dir, 'archived_sessions'), 4, companions),
   ]);
   const files = [...activeFiles, ...archivedFiles];
-  if (codexMetaCache.size > MAX_HISTORY_CACHE) codexMetaCache.clear();
 
   const parsed = await Promise.all((await newest(files)).map(async ({ file, mtime, size }) => {
     const sig = `${mtime}:${size}`;
     let meta: { id: string; cwd: string; prompt?: string } | null | undefined;
     const hit = codexMetaCache.get(file);
     if (hit && hit.sig === sig) {
+      setBoundedMap(codexMetaCache, file, hit, MAX_HISTORY_CACHE);
       meta = hit.meta;
     } else {
       try {
         const head = await readHead(file, 32 * 1024);
         // source 为对象表示子代理（如 guardian 审查），不是用户会话
         if (!/"source":"/.test(head)) {
-          codexMetaCache.set(file, { sig, meta: null });
+          setBoundedMap(codexMetaCache, file, { sig, meta: null }, MAX_HISTORY_CACHE);
           return null;
         }
         const id = head.match(/"id":"([^"]+)"/)?.[1];
@@ -300,7 +262,7 @@ async function listCodexScope(scope: DirScope): Promise<HistoryEntry[]> {
           } catch { /* 行被截断则跳过 */ }
         }
         meta = id && SAFE_ID.test(id) && cwd ? { id, cwd, prompt } : null;
-        codexMetaCache.set(file, { sig, meta });
+        setBoundedMap(codexMetaCache, file, { sig, meta }, MAX_HISTORY_CACHE);
       } catch {
         return null;
       }
@@ -335,7 +297,7 @@ async function listCodexScope(scope: DirScope): Promise<HistoryEntry[]> {
   }
   const entries: HistoryEntry[] = [];
   for (const { entry, targets } of byId.values()) {
-    deleteTargets.set(targetKey('codex', entry.id, scope.accountId), [...new Set(targets)]);
+    recordDeleteTarget(targetKey('codex', entry.id, scope.accountId), [...new Set(targets)]);
     entries.push(entry);
   }
   return entries;
@@ -344,29 +306,29 @@ async function listCodexScope(scope: DirScope): Promise<HistoryEntry[]> {
 // Kimi Code：<KIMI_CODE_HOME>/sessions/<项目>/<session_id>/state.json
 async function listKimiScope(scope: DirScope): Promise<HistoryEntry[]> {
   const files = await listFiles(path.join(scope.dir, 'sessions'), (name) => name === 'state.json', 2);
-  if (kimiCache.size > MAX_HISTORY_CACHE) kimiCache.clear();
   const result = await Promise.all((await newest(files)).map(async ({ file, mtime, size }): Promise<HistoryEntry | null> => {
     const sig = `${mtime}:${size}`;
     const hit = kimiCache.get(file);
     if (hit && hit.sig === sig) {
+      setBoundedMap(kimiCache, file, hit, MAX_HISTORY_CACHE);
       if (!hit.base) return null;
-      if (hit.targets) deleteTargets.set(targetKey('kimi', hit.base.id, scope.accountId), hit.targets);
+      if (hit.targets) recordDeleteTarget(targetKey('kimi', hit.base.id, scope.accountId), hit.targets);
       return withAccount(hit.base, scope);
     }
     try {
       const state = JSON.parse(await fs.promises.readFile(file, 'utf8'));
       if (state.archived || !state.cwd || !SAFE_ID.test(state.id || '')) {
-        kimiCache.set(file, { sig, base: null });
+        setBoundedMap(kimiCache, file, { sig, base: null }, MAX_HISTORY_CACHE);
         return null;
       }
       const title = state.title || state.lastPrompt;
       if (!title) {
-        kimiCache.set(file, { sig, base: null });
+        setBoundedMap(kimiCache, file, { sig, base: null }, MAX_HISTORY_CACHE);
         return null;
       }
       const sessionDir = path.dirname(file);
       const targets = path.basename(sessionDir) === state.id ? [sessionDir] : undefined;
-      if (targets) deleteTargets.set(targetKey('kimi', state.id, scope.accountId), targets);
+      if (targets) recordDeleteTarget(targetKey('kimi', state.id, scope.accountId), targets);
       const base: Omit<HistoryEntry, 'accountId' | 'accountName'> = {
         id: state.id,
         cliId: 'kimi',
@@ -375,7 +337,7 @@ async function listKimiScope(scope: DirScope): Promise<HistoryEntry[]> {
         updatedAt: Number(state.updatedAt) || mtime,
         command: `kimi --session ${state.id}`,
       };
-      kimiCache.set(file, { sig, base, targets });
+      setBoundedMap(kimiCache, file, { sig, base, targets }, MAX_HISTORY_CACHE);
       return withAccount(base, scope);
     } catch { return null; }
   }));

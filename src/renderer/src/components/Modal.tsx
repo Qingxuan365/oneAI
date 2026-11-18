@@ -20,7 +20,16 @@ interface ModalProps {
   children: React.ReactNode;
 }
 
-/** 所有弹窗共用的外壳：统一遮罩、标题栏、Esc 关闭，并在关闭后把焦点还给触发元素。 */
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not(:disabled)',
+  'input:not(:disabled):not([type="hidden"])',
+  'select:not(:disabled)',
+  'textarea:not(:disabled)',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ');
+
+/** 所有弹窗共用的外壳：统一遮罩、标题栏、Esc 关闭、焦点陷阱（Tab 循环），并在关闭后把焦点还给触发元素。 */
 export const Modal: React.FC<ModalProps> = ({
   isOpen, onClose, title, titleId, icon, widthClass = 'max-w-md', closeDisabled = false, footer, bare = false, variant = 'center', children,
 }) => {
@@ -33,6 +42,32 @@ export const Modal: React.FC<ModalProps> = ({
     const previous = document.activeElement as HTMLElement | null;
     if (!panelRef.current?.contains(document.activeElement)) panelRef.current?.focus();
     const onKeyDown = (e: KeyboardEvent) => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      const dialogs = document.querySelectorAll('[role="dialog"]');
+      if (dialogs.length > 0 && dialogs[dialogs.length - 1] !== panel) return;
+      if (e.key === 'Tab') {
+        const nodes = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+          .filter((el) => el.tabIndex >= 0 && !el.hasAttribute('disabled') && el.getAttribute('aria-hidden') !== 'true' && el.getClientRects().length > 0);
+        if (nodes.length === 0) {
+          e.preventDefault();
+          panel.focus();
+          return;
+        }
+        const first = nodes[0];
+        const last = nodes[nodes.length - 1];
+        const active = document.activeElement as HTMLElement | null;
+        if (e.shiftKey) {
+          if (!active || !panel.contains(active) || active === first || active === panel) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else if (!active || !panel.contains(active) || active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+        return;
+      }
       if (e.key !== 'Escape' || closeRef.current.closeDisabled) return;
       e.stopPropagation();
       closeRef.current.onClose();

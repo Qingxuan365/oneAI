@@ -1,4 +1,4 @@
-import { detectLanguage, isLanguage, Language, translate } from '../../shared/i18n';
+import { detectLanguage, Language, translate } from '../../shared/i18n';
 
 export { LANGUAGES, isLanguage } from '../../shared/i18n';
 export type { Language } from '../../shared/i18n';

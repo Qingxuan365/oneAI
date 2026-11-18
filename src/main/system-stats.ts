@@ -12,6 +12,7 @@ export interface SystemStats {
 
 const SAMPLE_INTERVAL_MS = 2000;
 const NET_REQUEST_TIMEOUT_MS = 8000;
+const NET_FAILURE_COOLDOWN_MS = 60_000;
 
 function cpuTimes(): { idle: number; total: number } {
   let idle = 0;
@@ -46,6 +47,7 @@ class NetCounterReader {
   private buffer = '';
   private waiter: ((line: string | null) => void) | null = null;
   private failures = 0;
+  private cooldownUntil = 0;
 
   private start(): ChildProcessWithoutNullStreams {
     const child = spawn('powershell.exe', [
@@ -78,9 +80,9 @@ class NetCounterReader {
     return child;
   }
 
-  /** 一次只允许一个请求在途；超时或子进程退出算一次失败，连续两次后本次运行不再尝试，网速显示为「--」。 */
+  /** 一次只允许一个请求在途；连续失败两次后进入 60 秒冷却期（网速暂显「--」），避免系统休眠唤醒瞬态超时后永久无法恢复。 */
   async read(): Promise<NetCounters | null> {
-    if (process.platform !== 'win32' || this.failures >= 2) return null;
+    if (process.platform !== 'win32' || Date.now() < this.cooldownUntil) return null;
     const child = this.child ?? this.start();
     const line = await new Promise<string | null>((resolve) => {
       const timer = setTimeout(() => {
@@ -96,9 +98,14 @@ class NetCounterReader {
     });
     if (line === null) {
       this.failures++;
+      if (this.failures >= 2) {
+        this.failures = 0;
+        this.cooldownUntil = Date.now() + NET_FAILURE_COOLDOWN_MS;
+      }
       return null;
     }
     this.failures = 0;
+    this.cooldownUntil = 0;
     const match = line.match(/^(\d+) (\d+) (.*)$/); // 没有处于 Up 状态的物理网卡时回复 none
     return match ? { rx: Number(match[1]), tx: Number(match[2]), adapters: match[3] } : null;
   }

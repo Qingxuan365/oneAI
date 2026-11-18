@@ -3,6 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { ipcMain } from 'electron';
 import { resolveConfigDir } from './account-env';
+import { normalizePathKey, readSlice, readZstHead, readZstTail, setBoundedMap } from './fs-utils';
+import { folderKey } from '../shared/paths';
 
 /** 侧栏任务行第二行的数据：该任务会话里最近一条用户消息；text 为 null 表示会话里还没有用户消息（新会话） */
 export interface TaskSummary {
@@ -27,40 +29,26 @@ interface SessionInfo {
 const MAX_TASKS = 100;
 const MAX_SESSIONS_PER_GROUP = 40;
 const MAX_TEXT = 100;
+const MAX_SUMMARY_CACHE = 800;
 /** 任务创建时间是在 PTY 启动之后才记录的，CLI 不会更早生成会话文件；容差只用来兜住毫秒级的时钟与调度误差 */
 const SKEW_MS = 2_000;
-
-function folderKey(folder: string): string {
-  return folder.replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase();
-}
 
 function clip(text: string): string {
   const oneLine = text.replace(/\s+/g, ' ').trim();
   return oneLine.length > MAX_TEXT ? `${oneLine.slice(0, MAX_TEXT)}…` : oneLine;
 }
 
-async function readSlice(file: string, from: 'head' | 'tail', bytes: number): Promise<string> {
-  const handle = await fs.promises.open(file, 'r');
-  try {
-    const { size } = await handle.stat();
-    const length = Math.min(size, bytes);
-    const buffer = Buffer.alloc(length);
-    await handle.read(buffer, 0, length, from === 'head' ? 0 : size - length);
-    return buffer.toString('utf8');
-  } finally {
-    await handle.close();
-  }
-}
-
-// ---------- 按文件签名缓存解析结果，轮询时只重新解析有变化的文件 ----------
+// ---------- 按文件签名缓存解析结果（LRU 容量淘汰），轮询时只重新解析有变化的文件 ----------
 const cache = new Map<string, { sig: string; value: unknown }>();
 async function cached<T>(file: string, stat: fs.Stats, parse: () => Promise<T>): Promise<T> {
   const sig = `${stat.mtimeMs}:${stat.size}`;
   const hit = cache.get(file);
-  if (hit && hit.sig === sig) return hit.value as T;
+  if (hit && hit.sig === sig) {
+    setBoundedMap(cache, file, hit, MAX_SUMMARY_CACHE);
+    return hit.value as T;
+  }
   const value = await parse();
-  if (cache.size > 800) cache.clear();
-  cache.set(file, { sig, value });
+  setBoundedMap(cache, file, { sig, value }, MAX_SUMMARY_CACHE);
   return value;
 }
 
@@ -104,11 +92,12 @@ async function claudeSessions(home: string, cwd: string): Promise<SessionInfo[]>
   let names: string[];
   try {
     const stat = await fs.promises.stat(dir);
-    const cached = claudeDirectoryCache.get(dir);
-    if (cached && cached.mtimeMs === stat.mtimeMs) names = cached.names;
-    else {
+    const hit = claudeDirectoryCache.get(dir);
+    if (hit && hit.mtimeMs === stat.mtimeMs) {
+      names = hit.names;
+    } else {
       names = (await fs.promises.readdir(dir)).filter((name) => name.endsWith('.jsonl'));
-      claudeDirectoryCache.set(dir, { mtimeMs: stat.mtimeMs, names });
+      setBoundedMap(claudeDirectoryCache, dir, { mtimeMs: stat.mtimeMs, names }, 200);
     }
   } catch { claudeDirectoryCache.delete(dir); return []; }
   const stats = (await Promise.all(names.map(async (name) => ({ name, stat: await statOf(path.join(dir, name)) }))))
@@ -122,9 +111,10 @@ async function claudeSessions(home: string, cwd: string): Promise<SessionInfo[]>
   }));
 }
 
-// ---------- Codex：<CODEX_HOME>/sessions/YYYY/MM/DD/rollout-*.jsonl ----------
+// ---------- Codex：<CODEX_HOME>/sessions/YYYY/MM/DD/rollout-*.jsonl（历史恢复时覆盖 archived_sessions 与 .jsonl.zst） ----------
 async function lastCodexPrompt(file: string): Promise<string | null> {
-  const lines = (await readSlice(file, 'tail', 256 * 1024)).split('\n');
+  const tail = file.endsWith('.zst') ? await readZstTail(file, 256 * 1024) : await readSlice(file, 'tail', 256 * 1024);
+  const lines = tail.split('\n');
   for (let i = lines.length - 1; i >= 0; i--) {
     if (!lines[i].includes('"user_message"')) continue;
     try {
@@ -136,9 +126,42 @@ async function lastCodexPrompt(file: string): Promise<string | null> {
   return null;
 }
 
-async function codexSessionsByFolder(home: string, targetFolders: ReadonlySet<string>, earliest: number): Promise<Map<string, SessionInfo[]>> {
+async function readCodexMeta(file: string, stat: fs.Stats): Promise<{ id: string; cwd: string; birth: number } | null> {
+  return cached(`${file}#meta`, stat, async () => {
+    try {
+      const head = file.endsWith('.zst') ? await readZstHead(file, 32 * 1024) : await readSlice(file, 'head', 32 * 1024);
+      const first = head.split('\n')[0];
+      const payload = JSON.parse(first)?.payload;
+      // source 不是字符串表示子代理（如审查），不是用户会话
+      if (typeof payload?.source !== 'string') return null;
+      return { id: String(payload.id), cwd: String(payload.cwd ?? ''), birth: Date.parse(payload.timestamp) || stat.birthtimeMs };
+    } catch { return null; }
+  });
+}
+
+async function listCodexArchiveOrOldFiles(dir: string, depth: number): Promise<string[]> {
+  let entries: fs.Dirent[];
+  try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return []; }
+  const plainNames = new Set(entries.filter((e) => e.isFile() && e.name.endsWith('.jsonl')).map((e) => e.name));
+  const files: string[] = [];
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isFile() && entry.name.endsWith('.jsonl')) files.push(full);
+    else if (entry.isFile() && entry.name.endsWith('.jsonl.zst') && !plainNames.has(entry.name.slice(0, -4))) files.push(full);
+    else if (entry.isDirectory() && depth > 0) files.push(...await listCodexArchiveOrOldFiles(full, depth - 1));
+  }
+  return files;
+}
+
+async function codexSessionsByFolder(
+  home: string,
+  targetFolders: ReadonlySet<string>,
+  earliest: number,
+  wantedHistoryIds: ReadonlySet<string>,
+): Promise<Map<string, SessionInfo[]>> {
   const byFolder = new Map<string, SessionInfo[]>();
   if (targetFolders.size === 0) return byFolder;
+  const foundIds = new Set<string>();
   const root = path.join(home, 'sessions');
   // 只看修改时间不早于最早任务创建时间的文件；按日期目录由新到旧，早于这个日期前一天的整个目录跳过
   const cutoffDay = new Date(earliest - 24 * 3600_000);
@@ -162,15 +185,7 @@ async function codexSessionsByFolder(home: string, targetFolders: ReadonlySet<st
     const file = candidateFiles[i];
     const stat = stats[i];
     if (!stat || stat.mtimeMs < earliest - SKEW_MS) continue;
-    const meta = await cached(`${file}#meta`, stat, async () => {
-      try {
-        const first = (await readSlice(file, 'head', 32 * 1024)).split('\n')[0];
-        const payload = JSON.parse(first)?.payload;
-        // source 不是字符串表示子代理（如审查），不是用户会话
-        if (typeof payload?.source !== 'string') return null;
-        return { id: String(payload.id), cwd: String(payload.cwd ?? ''), birth: Date.parse(payload.timestamp) || stat.birthtimeMs };
-      } catch { return null; }
-    });
+    const meta = await readCodexMeta(file, stat);
     if (!meta) continue;
     const key = folderKey(meta.cwd);
     if (!targetFolders.has(key)) continue;
@@ -178,15 +193,55 @@ async function codexSessionsByFolder(home: string, targetFolders: ReadonlySet<st
     const list = byFolder.get(key) ?? [];
     list.push({ id: meta.id, birth: meta.birth, lastPrompt });
     byFolder.set(key, list);
+    foundIds.add(meta.id);
   }
+
+  // 从历史恢复的任务（带 historyId）：原会话文件的 mtime 早于恢复时刻 task.createdAt，或位于 archived_sessions / .jsonl.zst 中，定向补齐
+  const missingIds = [...wantedHistoryIds].filter((id) => !foundIds.has(id));
+  if (missingIds.length > 0) {
+    const [allActive, allArchived] = await Promise.all([
+      listCodexArchiveOrOldFiles(root, 4),
+      listCodexArchiveOrOldFiles(path.join(home, 'archived_sessions'), 4),
+    ]);
+    const allCandidates = [...allActive, ...allArchived];
+    // 优先匹配文件名包含会话 id 的 rollout 文件（O(1) 零额外读取）；未命中时再回退检查其余较新文件
+    const nameMatched = allCandidates.filter((file) => {
+      const base = path.basename(file);
+      return missingIds.some((id) => base.includes(id));
+    });
+    const probeList = nameMatched.length > 0 ? nameMatched : allCandidates.slice(0, 120);
+    const probeStats = await Promise.all(probeList.map((file) => statOf(file)));
+    for (let i = 0; i < probeList.length; i++) {
+      const file = probeList[i];
+      const stat = probeStats[i];
+      if (!stat) continue;
+      const meta = await readCodexMeta(file, stat);
+      if (!meta || !wantedHistoryIds.has(meta.id) || foundIds.has(meta.id)) continue;
+      const key = folderKey(meta.cwd);
+      if (!targetFolders.has(key)) continue;
+      const lastPrompt = await cached(file, stat, () => lastCodexPrompt(file).catch(() => null));
+      const list = byFolder.get(key) ?? [];
+      list.push({ id: meta.id, birth: meta.birth, lastPrompt });
+      byFolder.set(key, list);
+      foundIds.add(meta.id);
+    }
+  }
+
   for (const [key, list] of byFolder) {
-    byFolder.set(key, list.sort((a, b) => b.birth - a.birth).slice(0, MAX_SESSIONS_PER_GROUP));
+    const pinned = list.filter((item) => wantedHistoryIds.has(item.id));
+    const rest = list.filter((item) => !wantedHistoryIds.has(item.id)).sort((a, b) => b.birth - a.birth).slice(0, MAX_SESSIONS_PER_GROUP);
+    byFolder.set(key, [...pinned, ...rest]);
   }
   return byFolder;
 }
 
 // ---------- Kimi Code：<KIMI_CODE_HOME>/sessions/<项目>/<会话>/state.json（含 cwd、createdAt、lastPrompt） ----------
-async function kimiSessionsByFolder(home: string, targetFolders: ReadonlySet<string>, earliest: number): Promise<Map<string, SessionInfo[]>> {
+async function kimiSessionsByFolder(
+  home: string,
+  targetFolders: ReadonlySet<string>,
+  earliest: number,
+  wantedHistoryIds: ReadonlySet<string>,
+): Promise<Map<string, SessionInfo[]>> {
   const byFolder = new Map<string, SessionInfo[]>();
   if (targetFolders.size === 0) return byFolder;
   const root = path.join(home, 'sessions');
@@ -198,17 +253,20 @@ async function kimiSessionsByFolder(home: string, targetFolders: ReadonlySet<str
     await Promise.all(sessions.filter((e) => e.isDirectory()).map(async (session) => {
       const file = path.join(root, project.name, session.name, 'state.json');
       const stat = await statOf(file);
-      if (!stat || stat.mtimeMs < earliest - SKEW_MS) return;
+      const isWantedHistory = wantedHistoryIds.has(session.name);
+      if (!stat || (!isWantedHistory && stat.mtimeMs < earliest - SKEW_MS)) return;
       const state = await cached(file, stat, async () => {
         try { return JSON.parse(await fs.promises.readFile(file, 'utf8')); } catch { return null; }
       });
       if (!state || state.archived || typeof state.cwd !== 'string') return;
+      const sessionId = String(state.id ?? session.name);
+      if (!isWantedHistory && !wantedHistoryIds.has(sessionId) && stat.mtimeMs < earliest - SKEW_MS) return;
       const key = folderKey(state.cwd);
       if (!targetFolders.has(key)) return;
       const created = typeof state.createdAt === 'number' ? state.createdAt : Date.parse(state.createdAt);
       const list = byFolder.get(key) ?? [];
       list.push({
-        id: String(state.id ?? session.name),
+        id: sessionId,
         birth: Number.isFinite(created) ? created : stat.birthtimeMs,
         lastPrompt: typeof state.lastPrompt === 'string' && state.lastPrompt.trim() ? clip(state.lastPrompt) : null,
       });
@@ -216,7 +274,9 @@ async function kimiSessionsByFolder(home: string, targetFolders: ReadonlySet<str
     }));
   }));
   for (const [key, list] of byFolder) {
-    byFolder.set(key, list.sort((a, b) => b.birth - a.birth).slice(0, MAX_SESSIONS_PER_GROUP));
+    const pinned = list.filter((item) => wantedHistoryIds.has(item.id));
+    const rest = list.filter((item) => !wantedHistoryIds.has(item.id)).sort((a, b) => b.birth - a.birth).slice(0, MAX_SESSIONS_PER_GROUP);
+    byFolder.set(key, [...pinned, ...rest]);
   }
   return byFolder;
 }
@@ -260,7 +320,7 @@ function parseTasks(raw: unknown): SummaryTask[] {
     if (typeof cwd !== 'string' || !path.isAbsolute(cwd) || typeof createdAt !== 'number') continue;
     tasks.push({
       id, cliId, cwd, createdAt,
-      historyId: typeof historyId === 'string' ? historyId : undefined,
+      historyId: typeof historyId === 'string' && historyId ? historyId : undefined,
       configDir: typeof configDir === 'string' && configDir ? (resolveConfigDir(configDir) ?? undefined) : undefined,
     });
   }
@@ -278,7 +338,7 @@ export async function readTaskSummaries(raw: unknown): Promise<Record<string, Ta
   const byCliHome = new Map<string, { cliId: SummaryTask['cliId']; home: string; folders: Map<string, SummaryTask[]> }>();
   for (const task of parseTasks(raw)) {
     const home = task.configDir ?? DEFAULT_HOMES[task.cliId];
-    const homeKey = `${task.cliId}|${process.platform === 'win32' ? home.toLowerCase() : home}`;
+    const homeKey = `${task.cliId}|${normalizePathKey(home)}`;
     let bucket = byCliHome.get(homeKey);
     if (!bucket) {
       bucket = { cliId: task.cliId, home, folders: new Map() };
@@ -302,12 +362,13 @@ export async function readTaskSummaries(raw: unknown): Promise<Record<string, Ta
     }
     const allTasks = [...folders.values()].flat();
     const earliest = Math.min(...allTasks.map((task) => task.createdAt));
+    const wantedHistoryIds = new Set(allTasks.flatMap((task) => (task.historyId ? [task.historyId] : [])));
     const targetFolders = new Set(folders.keys());
     let grouped = new Map<string, SessionInfo[]>();
     try {
       grouped = cliId === 'codex'
-        ? await codexSessionsByFolder(home, targetFolders, earliest)
-        : await kimiSessionsByFolder(home, targetFolders, earliest);
+        ? await codexSessionsByFolder(home, targetFolders, earliest, wantedHistoryIds)
+        : await kimiSessionsByFolder(home, targetFolders, earliest, wantedHistoryIds);
     } catch { /* 读取失败时按「没有会话」处理 */ }
     for (const [fKey, tasks] of folders) {
       const assigned = assignSessions(tasks, grouped.get(fKey) ?? []);

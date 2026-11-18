@@ -58,7 +58,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
     if (!isOpen) return;
     let active = true;
     const hasSeed = Boolean(initialEntries && initialEntries.length > 0);
-    if (hasSeed && entries.length === 0) setEntries(initialEntries!);
+    if (hasSeed) setEntries(initialEntries!);
     setLoading(!hasSeed && entries.length === 0);
     setError('');
     window.electronAPI.listSessionHistory(accounts)

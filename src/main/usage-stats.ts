@@ -7,41 +7,11 @@ import { Decompress as ZstdDecompress } from 'fzstd';
 import { quotaService } from './quota-service';
 import { formatClaudeModel } from './model-format';
 import { isAccountCli, resolveConfigDir } from './account-env';
+import { normalizePathKey } from './fs-utils';
+import type { UsageAccountInfo, UsageAccountRef, UsageCli, UsageDay, UsageRow, UsageStats } from '../shared/types';
 import { t } from './i18n';
 
-export type UsageCli = 'claude' | 'codex' | 'agy' | 'pi';
-
-export interface UsageRow {
-  cliId: UsageCli;
-  accountId: string;   // OneAI 账号 id；默认账号为 'default'
-  accountName: string; // 账号名，默认账号为「默认账号」
-  model: string;
-  requests: number;   // 请求数：一次模型回复算一次
-  sessions: number;   // 本周内出现过该模型回复的会话数
-  subagent?: boolean; // CLI 自动发起的子会话（如 Codex 自动审查），不是用户选用的模型
-  input: number;      // 未命中缓存的输入 tokens
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-}
-
-export interface UsageDay {
-  date: string;       // 本地日期 YYYY-MM-DD
-  requests: number;
-  by: Record<string, number>; // 键为 `${cliId}:${accountId}`，值为当天该 CLI 账号的请求数
-}
-
-export interface UsageAccountInfo { cliId: UsageCli; accountId: string; name: string }
-
-export interface UsageStats {
-  generatedAt: number;
-  weekStart: number;  // 本周周一 00:00（本地时间）的毫秒时间戳
-  accounts: UsageAccountInfo[]; // 统计范围内出现过用量的 CLI 账号
-  rows: UsageRow[];   // 本周各 CLI × 账号 × 模型，按 tokens 降序
-  days: UsageDay[];   // 周一对齐、连续的每日请求数，到本周周日为止
-}
-
-export interface UsageAccountRef { id: string; name: string; cliId: string; configDir: string }
+export type { UsageAccountInfo, UsageAccountRef, UsageCli, UsageDay, UsageRow, UsageStats };
 
 /** 方块图覆盖的周数（含本周）；本机会话日志只保留一段时间，更早的天数记为 0 */
 export const HEATMAP_WEEKS = 26;
@@ -313,13 +283,12 @@ interface DirAccount { dir: string; id: string; name: string }
 
 /** 默认配置目录 + 各账号的独立配置目录；按目录去重，目录相同时默认账号优先（Windows 路径不区分大小写） */
 function accountDirs(defaultDir: string, cliId: 'claude' | 'codex', accounts: UsageAccountRef[]): DirAccount[] {
-  const keyOf = (dir: string) => (process.platform === 'win32' ? path.resolve(dir).toLowerCase() : path.resolve(dir));
-  const result = new Map<string, DirAccount>([[keyOf(defaultDir), { dir: defaultDir, ...DEFAULT_ACCOUNT }]]);
+  const result = new Map<string, DirAccount>([[normalizePathKey(defaultDir), { dir: defaultDir, ...DEFAULT_ACCOUNT }]]);
   for (const account of accounts) {
     if (account?.cliId !== cliId || typeof account.id !== 'string' || !account.id) continue;
     const dir = resolveConfigDir(account.configDir);
-    if (!dir || result.has(keyOf(dir))) continue;
-    result.set(keyOf(dir), { dir, id: account.id, name: typeof account.name === 'string' && account.name.trim() ? account.name.trim() : account.id });
+    if (!dir || result.has(normalizePathKey(dir))) continue;
+    result.set(normalizePathKey(dir), { dir, id: account.id, name: typeof account.name === 'string' && account.name.trim() ? account.name.trim() : account.id });
   }
   return [...result.values()];
 }
@@ -351,55 +320,89 @@ async function parsePi(file: string): Promise<Entry[]> {
   return entries;
 }
 
-/** 额度服务读取模型名是异步的：统计开始前先读出各 Codex 配置目录与 agy 的当前模型，作为缺少模型字段时的兜底 */
+/** 额度服务读取模型名是异步的：统计开始前并行扫描各 CLI 会话目录与默认模型，保持固定顺序以保证跨文件去重确定性 */
 async function collectSources(accounts: UsageAccountRef[]): Promise<FileSource[]> {
-  const codexModels = new Map<string, string>();
-  const agyModel = (await quotaService.getAgyInfo()).model;
   const valid = accounts.filter((account) => isAccountCli(account?.cliId));
-  const sources: FileSource[] = [];
-  for (const { dir, id, name } of accountDirs(path.join(home, '.claude'), 'claude', valid)) {
-    for (const file of await listJsonl(path.join(dir, 'projects'))) {
-      sources.push({ cliId: 'claude', accountId: id, accountName: name, file, fallbackModel: () => '' });
-    }
-  }
-  for (const { dir, id, name } of accountDirs(path.join(home, '.codex'), 'codex', valid)) {
-    codexModels.set(dir, (await quotaService.getCodexInfo(dir)).model);
-    // Codex 桌面应用的会话在 archived_sessions；sessions 里较新的主要是自动审查子会话，较旧的已压缩为 .zst
-    for (const sub of ['sessions', 'archived_sessions']) {
-      for (const file of await listJsonl(path.join(dir, sub))) {
-        sources.push({ cliId: 'codex', accountId: id, accountName: name, file, fallbackModel: () => codexModels.get(dir) ?? 'Auto' });
-      }
-    }
-  }
+
+  const claudePromise = Promise.all(
+    accountDirs(path.join(home, '.claude'), 'claude', valid).map(async ({ dir, id, name }) => (
+      (await listJsonl(path.join(dir, 'projects'))).map((file): FileSource => ({
+        cliId: 'claude',
+        accountId: id,
+        accountName: name,
+        file,
+        fallbackModel: () => '',
+      }))
+    )),
+  ).then((lists) => lists.flat());
+
+  const codexPromise = Promise.all(
+    accountDirs(path.join(home, '.codex'), 'codex', valid).map(async ({ dir, id, name }) => {
+      const [info, sessionFiles, archivedFiles] = await Promise.all([
+        quotaService.getCodexInfo(dir),
+        listJsonl(path.join(dir, 'sessions')),
+        listJsonl(path.join(dir, 'archived_sessions')),
+      ]);
+      const defaultModel = info.model || 'Auto';
+      return [...sessionFiles, ...archivedFiles].map((file): FileSource => ({
+        cliId: 'codex',
+        accountId: id,
+        accountName: name,
+        file,
+        fallbackModel: () => defaultModel,
+      }));
+    }),
+  ).then((lists) => lists.flat());
+
   // Antigravity 的登录在系统凭据库，无法按目录区分，统一归默认账号；
   // 紧凑版 transcript.jsonl 完整保留所有顶层 token 字段与模型切换提示，体积远小于 transcript_full.jsonl，缺失时才回退
-  let conversations: fs.Dirent[] = [];
-  try { conversations = await fs.promises.readdir(path.join(AGY_ROOT, 'brain'), { withFileTypes: true }); } catch { /* 未安装 agy */ }
-  const agySources = await Promise.all(conversations.filter((entry) => entry.isDirectory()).map(async (entry): Promise<FileSource> => {
-    const logsDir = path.join(AGY_ROOT, 'brain', entry.name, '.system_generated', 'logs');
-    const compact = path.join(logsDir, 'transcript.jsonl');
-    let file = compact;
-    try { await fs.promises.access(compact); } catch { file = path.join(logsDir, 'transcript_full.jsonl'); }
-    return {
-      cliId: 'agy',
-      accountId: DEFAULT_ACCOUNT.id,
-      accountName: DEFAULT_ACCOUNT.name,
-      file,
-      fallbackModel: () => stripEffort(agyModel),
-    };
-  }));
-  sources.push(...agySources);
+  const agyPromise = (async (): Promise<FileSource[]> => {
+    const [agyInfo, conversations] = await Promise.all([
+      quotaService.getAgyInfo(),
+      fs.promises.readdir(path.join(AGY_ROOT, 'brain'), { withFileTypes: true }).catch((): fs.Dirent[] => []),
+    ]);
+    const agyFallback = stripEffort(agyInfo.model);
+    return Promise.all(conversations.filter((entry) => entry.isDirectory()).map(async (entry): Promise<FileSource> => {
+      const logsDir = path.join(AGY_ROOT, 'brain', entry.name, '.system_generated', 'logs');
+      const compact = path.join(logsDir, 'transcript.jsonl');
+      let file = compact;
+      try { await fs.promises.access(compact); } catch { file = path.join(logsDir, 'transcript_full.jsonl'); }
+      return {
+        cliId: 'agy',
+        accountId: DEFAULT_ACCOUNT.id,
+        accountName: DEFAULT_ACCOUNT.name,
+        file,
+        fallbackModel: () => agyFallback,
+      };
+    }));
+  })();
+
   // Pi 没有多账号，统一归默认账号
-  for (const file of await listJsonl(PI_SESSIONS)) {
-    sources.push({ cliId: 'pi', accountId: DEFAULT_ACCOUNT.id, accountName: DEFAULT_ACCOUNT.name, file, fallbackModel: () => '' });
-  }
-  return sources;
+  const piPromise = listJsonl(PI_SESSIONS).then((files) => files.map((file): FileSource => ({
+    cliId: 'pi',
+    accountId: DEFAULT_ACCOUNT.id,
+    accountName: DEFAULT_ACCOUNT.name,
+    file,
+    fallbackModel: () => '',
+  })));
+
+  const [claudeSources, codexSources, agySources, piSources] = await Promise.all([
+    claudePromise,
+    codexPromise,
+    agyPromise,
+    piPromise,
+  ]);
+  return [...claudeSources, ...codexSources, ...agySources, ...piSources];
 }
 
 async function loadEntries(source: FileSource, rangeStart: number): Promise<{ entries: Entry[]; dirty: boolean }> {
   let stat: fs.Stats;
   try { stat = await fs.promises.stat(source.file); } catch { return { entries: [], dirty: false }; }
-  if (stat.mtimeMs < rangeStart) return { entries: [], dirty: false };
+  if (stat.mtimeMs < rangeStart) {
+    // 超过 26 周统计窗口的旧文件从持久化缓存中剔除，避免 usage-cache-v1.json 只增不减
+    const evicted = fileCache.delete(source.file);
+    return { entries: [], dirty: evicted };
+  }
   const cached = fileCache.get(source.file);
   if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return { entries: cached.entries, dirty: false };
   let entries: Entry[];

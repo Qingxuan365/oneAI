@@ -5,6 +5,7 @@ import crypto from 'node:crypto'
 import electron from 'vite-plugin-electron'
 import renderer from 'vite-plugin-electron-renderer'
 import react from '@vitejs/plugin-react'
+import { THEME_IDS } from './src/shared/types'
 
 function extractPreloadKeys(source: string): string[] {
   const start = source.indexOf('exposeInMainWorld(')
@@ -12,7 +13,20 @@ function extractPreloadKeys(source: string): string[] {
   return [...body.matchAll(/^\s{2}([A-Za-z0-9_]+)\s*:/gm)].map((m) => m[1]).sort()
 }
 
+function verifyThemeWhitelist(rootDir: string) {
+  const htmlFile = path.resolve(rootDir, 'index.html')
+  const html = fs.readFileSync(htmlFile, 'utf-8')
+  const match = html.match(/\[([^\]]+)\]\.indexOf\(theme\)/)
+  if (!match) throw new Error('[theme-sync] Could not locate inline theme whitelist in index.html')
+  const htmlThemes = [...match[1].matchAll(/'([^']+)'/g)].map((m) => m[1]).sort()
+  const sharedThemes = [...THEME_IDS].sort()
+  if (htmlThemes.join(',') !== sharedThemes.join(',')) {
+    throw new Error(`[theme-sync] index.html theme whitelist does not match THEME_IDS: html=[${htmlThemes.join(', ')}], shared=[${sharedThemes.join(', ')}]`)
+  }
+}
+
 function verifyAndCopyPreload(rootDir: string) {
+  verifyThemeWhitelist(rootDir)
   const cjsFile = path.resolve(rootDir, 'src/preload/index.cjs')
   const tsFile = path.resolve(rootDir, 'src/preload/index.ts')
   const cjsKeys = extractPreloadKeys(fs.readFileSync(cjsFile, 'utf-8'))

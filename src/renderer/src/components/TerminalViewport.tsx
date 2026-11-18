@@ -5,15 +5,19 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { SearchAddon } from '@xterm/addon-search';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
-import { TaskSession, ThemeId } from '../types';
+import { RestartSessionOptions, TaskSession, ThemeId } from '../types';
 import { TerminalSearchBar } from './TerminalSearchBar';
 import { t } from '../i18n';
+import { extractPathMatches, PathMatchItem, quoteTerminalPath } from '../../../shared/paths';
+
+export { extractPathMatches };
+export type { PathMatchItem };
 
 export interface TerminalViewportRef {
   openSearch: () => void;
   closeSearch: () => void;
   clearActiveTerminal: () => void;
-  restartActiveTerminal: (taskId?: string | null) => Promise<{ success: boolean; error?: string } | undefined>;
+  restartActiveTerminal: (taskId?: string | null, options?: RestartSessionOptions) => Promise<{ success: boolean; error?: string } | undefined>;
   exportActiveTerminalLog: (mode: 'copy' | 'save') => Promise<{ success: boolean; filePath?: string; canceled?: boolean; error?: string }>;
 }
 
@@ -294,6 +298,11 @@ interface TerminalInstance {
   flush: () => void;
   /** 滚动到底部时记录的 baseY，用来判断上翻期间是否有新输出 */
   bottomMark: number;
+  snapshotLoaded: boolean;
+  lastSeq: number;
+  earlyChunks: Array<{ data: string; seq?: number }>;
+  pendingExitCode?: number;
+  resetStoppedHint: () => void;
 }
 
 const DARK_TERMINAL_THEME = {
@@ -764,7 +773,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
   };
 
   // 重启指定任务的 CLI 进程，未指定时为当前活动任务
-  const restartActiveTerminal = async (taskId: string | null = activeTaskId) => {
+  const restartActiveTerminal = async (taskId: string | null = activeTaskId, options?: RestartSessionOptions) => {
     if (!taskId) return undefined;
     const instance = instancesRef.current.get(taskId);
     if (instance) {
@@ -772,11 +781,17 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
       // 这些模式不重置会带进新进程；同时丢弃旧进程尚未写入的积压输出
       if (instance.flushTimer) { clearTimeout(instance.flushTimer); instance.flushTimer = null; }
       instance.pendingData = '';
+      instance.earlyChunks.length = 0;
+      instance.snapshotLoaded = true;
+      instance.pendingExitCode = undefined;
+      instance.resetStoppedHint();
       instance.term.reset();
       instance.term.write(`\r\n\x1b[33m[OneAI] ${t('正在重启 CLI 会话进程...')}\x1b[0m\r\n`);
     }
     // 终端实例只在任务首次被选中时创建；没有实例时仍要重启底层进程，不能因此失败
-    const result = await window.electronAPI?.restartSession?.(taskId);
+    const result = options !== undefined
+      ? await window.electronAPI?.restartSession?.(taskId, options)
+      : await window.electronAPI?.restartSession?.(taskId);
     if (instance && taskId === activeTaskIdRef.current) instance.term.focus();
     return result || { success: false, error: t('重启接口不可用') };
   };
@@ -991,7 +1006,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
           },
         });
 
-        // 识别任务工作目录内真实存在的文件路径（绝对或相对，可带 :行号），点击在右侧预览面板打开
+        // 识别任务工作目录内真实存在的文件路径（绝对或相对，可带 :行号[:列号] 或 (行号,列号)），点击在右侧预览面板打开
         term.registerLinkProvider({
           provideLinks(bufferLineNumber, callback) {
             const logical = getCachedLogicalLine(bufferLineNumber);
@@ -1000,23 +1015,11 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
               callback(undefined);
               return;
             }
-            const text = logical.text;
-            const pathRegex = /(?:[A-Za-z]:[\\/]|\.{1,2}[\\/]|\b)[\w.\-\u4e00-\u9fa5\\/]*?[\w\-\u4e00-\u9fa5]\.[A-Za-z][A-Za-z0-9]{0,7}(?::\d+)?(?![\w/\\]|\.\w)/g;
+            const candidates = extractPathMatches(logical.text);
             const found: Array<{ raw: string; file: string; line?: number; range: NonNullable<ReturnType<typeof matchToLinkRange>> }> = [];
-            let match: RegExpExecArray | null;
-            while ((match = pathRegex.exec(text)) !== null && found.length < 20) {
-              const raw = match[0];
-              const range = matchToLinkRange(logical, match.index, raw.length, bufferLineNumber);
-              if (!range) continue;
-              const lineMatch = raw.match(/:(\d+)$/);
-              found.push({ raw, range, file: raw.replace(/:\d+$/, ''), line: lineMatch ? Number(lineMatch[1]) : undefined });
-            }
-            // 带引号的绝对路径（拖入含空格的文件时 OneAI 会加引号）：链接范围不含引号
-            const quotedRegex = /"([A-Za-z]:[\\/][^"\r\n]*?\.[A-Za-z][A-Za-z0-9]{0,7})"/g;
-            while ((match = quotedRegex.exec(text)) !== null && found.length < 20) {
-              const raw = match[1];
-              const range = matchToLinkRange(logical, match.index + 1, raw.length, bufferLineNumber);
-              if (range) found.push({ raw, range, file: raw, line: undefined });
+            for (const item of candidates) {
+              const range = matchToLinkRange(logical, item.start, item.length, bufferLineNumber);
+              if (range) found.push({ raw: item.raw, file: item.file, line: item.line, range });
             }
             if (found.length === 0) {
               callback(undefined);
@@ -1031,7 +1034,10 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
               const fresh = hit && (hit.target !== null
                 ? now - hit.at <= PATH_CACHE_TTL_MS
                 : hit.epoch === reqEpoch && now - hit.at <= NEGATIVE_CACHE_TTL_MS);
-              if (!fresh && !seenUncached.has(item.file)) {
+              if (fresh && hit) {
+                resolvedPathCache.delete(item.file);
+                resolvedPathCache.set(item.file, hit);
+              } else if (!seenUncached.has(item.file)) {
                 seenUncached.add(item.file);
                 uncachedFiles.push(item.file);
               }
@@ -1054,8 +1060,13 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
             resolve(task.cwd, uncachedFiles)
               .then((resolved) => {
                 const stamp = performance.now();
-                if (resolvedPathCache.size > 256) resolvedPathCache.clear();
                 uncachedFiles.forEach((file, index) => {
+                  resolvedPathCache.delete(file);
+                  while (resolvedPathCache.size >= 256) {
+                    const oldest = resolvedPathCache.keys().next().value;
+                    if (oldest === undefined) break;
+                    resolvedPathCache.delete(oldest);
+                  }
                   resolvedPathCache.set(file, { at: stamp, epoch: reqEpoch, target: resolved[index] ?? null });
                 });
                 const links = buildLinks();
@@ -1099,13 +1110,6 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
         // 监听终端尺寸变更并同步 PTY
         term.onResize(({ cols, rows }) => {
           window.electronAPI?.resizeSession(task.id, cols, rows);
-        });
-
-        // 立即拉取并回放主进程中的已有缓冲区
-        window.electronAPI?.getSessionBuffer(task.id).then((buf) => {
-          if (buf) {
-            term.write(sanitizeTerminalData(buf));
-          }
         });
 
         // 点击视窗任意位置自动聚焦
@@ -1276,7 +1280,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
           e.stopPropagation();
           const files = e.dataTransfer?.files;
           if (files && files.length > 0) {
-            const paths: string[] = [];
+            const rawPaths: string[] = [];
             for (let i = 0; i < files.length; i++) {
               const file = files[i];
               let p = '';
@@ -1285,18 +1289,16 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
               } catch {
                 p = (file as any).path || '';
               }
-              if (p) {
-                // 统一加引号：空格、& ( ) ' $ 等字符在 PowerShell 里都会被解析；路径内的双引号改成两个
-                paths.push(`"${p.replace(/"/g, '""')}"`);
-              }
+              if (p) rawPaths.push(p);
             }
-            if (paths.length > 0) {
+            if (rawPaths.length > 0) {
+              const quoted = rawPaths.map((p) => quoteTerminalPath(p, true));
               // 拖入的图片允许在预览面板打开，即使不在工作目录内；异步登记前后均清掉路径解析缓存以便立即识别为可点击链接
               resolvedPathCache.clear();
-              void window.electronAPI?.allowDroppedPreview?.(paths.map((p) => p.slice(1, -1).replace(/""/g, '"')))
+              void window.electronAPI?.allowDroppedPreview?.(rawPaths)
                 ?.finally(() => resolvedPathCache.clear());
               // 走 paste 以遵循 CLI 的 bracketed paste；末尾补空格，接着打字不会粘在路径上
-              term.paste(paths.join(' ') + ' ');
+              term.paste(quoted.join(' ') + ' ');
               term.focus();
             }
           }
@@ -1313,6 +1315,11 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
           flushTimer: null,
           lastFlushAt: 0,
           bottomMark: 0,
+          snapshotLoaded: false,
+          lastSeq: 0,
+          earlyChunks: [],
+          pendingExitCode: undefined,
+          resetStoppedHint: () => { stoppedHintShown = false; },
           flush: () => {
             if (instance.flushTimer) {
               clearTimeout(instance.flushTimer);
@@ -1328,6 +1335,54 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
         };
 
         instancesRef.current.set(task.id, instance);
+
+        // 拉取主进程快照（含序列号与存活状态），对加载窗口内到达的实时流按 seq 去重，并为秒退进程补打退出横幅
+        const loadInitial = window.electronAPI?.getSessionSnapshot
+          ? window.electronAPI.getSessionSnapshot(task.id)
+          : window.electronAPI?.getSessionBuffer
+            ? window.electronAPI.getSessionBuffer(task.id).then((buffer) => ({ buffer: buffer || '', seq: 0, alive: true, exitCode: undefined as number | undefined }))
+            : null;
+        if (!loadInitial) {
+          instance.snapshotLoaded = true;
+        } else {
+          loadInitial.then((snap) => {
+            if (instancesRef.current.get(task.id) !== instance) return;
+            instance.snapshotLoaded = true;
+            if (snap) {
+              instance.lastSeq = snap.seq;
+              if (snap.buffer) {
+                term.write(sanitizeTerminalData(snap.buffer));
+              }
+            }
+            const chunks = instance.earlyChunks.splice(0);
+            for (const chunk of chunks) {
+              if (snap && chunk.seq !== undefined && chunk.seq <= snap.seq) continue;
+              if (chunk.seq !== undefined && chunk.seq > instance.lastSeq) instance.lastSeq = chunk.seq;
+              instance.pendingData += chunk.data;
+            }
+            if (instance.pendingData) instance.flush();
+            const earlyExitCode = snap && !snap.alive && snap.exitCode !== undefined ? snap.exitCode : instance.pendingExitCode;
+            instance.pendingExitCode = undefined;
+            if (earlyExitCode !== undefined) {
+              term.write(
+                `\r\n\x1b[90m[OneAI] ${t('终端进程已退出 (退出码: {code})。可点击顶栏的重启按钮重新启动。', { code: earlyExitCode })}\x1b[0m\r\n`
+              );
+            }
+          }).catch(() => {
+            if (instancesRef.current.get(task.id) !== instance) return;
+            instance.snapshotLoaded = true;
+            const chunks = instance.earlyChunks.splice(0);
+            for (const chunk of chunks) instance.pendingData += chunk.data;
+            if (instance.pendingData) instance.flush();
+            if (instance.pendingExitCode !== undefined) {
+              const code = instance.pendingExitCode;
+              instance.pendingExitCode = undefined;
+              term.write(
+                `\r\n\x1b[90m[OneAI] ${t('终端进程已退出 (退出码: {code})。可点击顶栏的重启按钮重新启动。', { code })}\x1b[0m\r\n`
+              );
+            }
+          });
+        }
       }
     });
 
@@ -1433,9 +1488,17 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
 
   // 监听来自 Electron 主进程的 PTY stdout 数据流，通过微帧缓冲合并写入对应终端
   useEffect(() => {
-    const unsubData = window.electronAPI?.onSessionData(({ id, data }) => {
+    const unsubData = window.electronAPI?.onSessionData(({ id, data, seq }) => {
       const instance = instancesRef.current.get(id);
       if (instance) {
+        if (!instance.snapshotLoaded) {
+          instance.earlyChunks.push({ data, seq });
+          return;
+        }
+        if (seq !== undefined) {
+          if (seq <= instance.lastSeq) return;
+          instance.lastSeq = seq;
+        }
         instance.pendingData += data;
 
         // 隐藏的终端不需要逐帧呈现：攒 250ms 再写入，减少后台高输出任务的写入与解析调度；
@@ -1468,11 +1531,15 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
 
     const unsubExit = window.electronAPI?.onSessionExit(({ id, exitCode }) => {
       const instance = instancesRef.current.get(id);
-      if (instance) {
-        instance.term.write(
-          `\r\n\x1b[90m[OneAI] ${t('终端进程已退出 (退出码: {code})。可点击顶栏的重启按钮重新启动。', { code: exitCode })}\x1b[0m\r\n`
-        );
+      if (!instance) return;
+      if (!instance.snapshotLoaded) {
+        instance.pendingExitCode = exitCode;
+        return;
       }
+      if (instance.pendingData) instance.flush();
+      instance.term.write(
+        `\r\n\x1b[90m[OneAI] ${t('终端进程已退出 (退出码: {code})。可点击顶栏的重启按钮重新启动。', { code: exitCode })}\x1b[0m\r\n`
+      );
     });
 
     return () => {
@@ -1525,7 +1592,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
   }, [activeTaskId]);
 
   return (
-    <main className="flex-1 h-full w-full bg-canvas relative overflow-hidden">
+    <main className="flex-1 min-w-0 h-full w-full bg-canvas relative overflow-hidden">
       {/* 终端内悬浮关键字搜索栏 */}
       <TerminalSearchBar
         isOpen={isSearchOpen}

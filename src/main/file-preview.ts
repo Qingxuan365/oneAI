@@ -1,11 +1,15 @@
 import { app, ipcMain } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+import { isPathInside, isSamePath, normalizePathKey } from './fs-utils';
+import type { FilePreviewResult } from '../shared/types';
 import { t } from './i18n';
+
+export type { FilePreviewResult };
 
 const MAX_TEXT_BYTES = 1024 * 1024;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const IMAGE_MIME: Record<string, string> = {
+export const IMAGE_MIME: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -16,21 +20,31 @@ const IMAGE_MIME: Record<string, string> = {
   '.ico': 'image/x-icon',
 };
 
-export type FilePreviewResult =
-  | { kind: 'text'; path: string; size: number; content: string }
-  | { kind: 'image'; path: string; size: number; dataUrl: string }
-  | { kind: 'binary' | 'too-large' | 'error'; path: string; size?: number; message?: string };
+/** 用户亲手拖进或粘贴进终端的图片：本次运行内允许预览（只记图片的真实路径归一化键，不开放其所在目录） */
+const allowedImages = new Set<string>();
 
-/** 用户亲手拖进终端的图片：本次运行内允许预览（只记图片的真实路径，不开放其所在目录） */
-const droppedImages = new Set<string>();
+export function isImageExtension(filePath: string): boolean {
+  return Boolean(IMAGE_MIME[path.extname(filePath).toLowerCase()]);
+}
 
-function isInside(root: string, target: string): boolean {
-  const relative = path.relative(root, target);
-  return !relative.startsWith('..') && !path.isAbsolute(relative);
+export async function allowPreviewFilePaths(paths: unknown): Promise<boolean> {
+  await Promise.all((Array.isArray(paths) ? paths.slice(0, 50) : []).map(async (item) => {
+    try {
+      const real = await fs.promises.realpath(path.resolve(String(item)));
+      if ((await fs.promises.stat(real)).isFile() && isImageExtension(real)) {
+        allowedImages.add(normalizePathKey(real));
+      }
+    } catch { /* 不存在或无权限的路径忽略 */ }
+  }));
+  return true;
 }
 
 async function safeRealpath(target: string): Promise<string | null> {
   try { return await fs.promises.realpath(target); } catch { return null; }
+}
+
+function isInsideOrSame(root: string, target: string): boolean {
+  return isSamePath(root, target) || isPathInside(root, target);
 }
 
 async function resolveWithRoots(
@@ -43,9 +57,9 @@ async function resolveWithRoots(
     const target = await fs.promises.realpath(path.resolve(root, String(candidate || '')));
     const stat = await fs.promises.stat(target);
     if (!stat.isFile()) return null;
-    if (isInside(root, target)) return target;
-    if (droppedImages.has(target)) return target;
-    return pasteDir && isInside(pasteDir, target) && IMAGE_MIME[path.extname(target).toLowerCase()] ? target : null;
+    if (isInsideOrSame(root, target)) return target;
+    if (allowedImages.has(normalizePathKey(target))) return target;
+    return pasteDir && isInsideOrSame(pasteDir, target) && isImageExtension(target) ? target : null;
   } catch {
     return null;
   }
@@ -53,9 +67,9 @@ async function resolveWithRoots(
 
 /**
  * 把候选路径解析为 cwd 内真实存在的文件；越界、不存在或不是文件时返回 null。
- * 例外：OneAI 自己写入的粘贴截图目录（%TEMP%/OneAI_Images）里的图片也允许预览，其他位置一律拒绝。
+ * 例外：OneAI 自己写入的粘贴截图目录（%TEMP%/OneAI_Images）里的图片，或用户拖入 / 粘贴的图片文件也允许预览，其他位置一律拒绝。
  */
-async function resolveInside(cwd: string, candidate: string): Promise<string | null> {
+export async function resolveInside(cwd: string, candidate: string): Promise<string | null> {
   const [root, pasteDir] = await Promise.all([
     safeRealpath(path.resolve(String(cwd || ''))),
     safeRealpath(path.join(app.getPath('temp'), 'OneAI_Images')),
@@ -63,7 +77,7 @@ async function resolveInside(cwd: string, candidate: string): Promise<string | n
   return resolveWithRoots(root, pasteDir, candidate);
 }
 
-async function readPreview(cwd: string, candidate: string): Promise<FilePreviewResult> {
+export async function readPreview(cwd: string, candidate: string): Promise<FilePreviewResult> {
   const target = await resolveInside(cwd, candidate);
   if (!target) return { kind: 'error', path: String(candidate), message: t('文件不存在，或不在当前任务工作目录内') };
   try {
@@ -93,14 +107,6 @@ export function setupFilePreview() {
     ]);
     return Promise.all(list.map((item) => resolveWithRoots(root, pasteDir, String(item))));
   });
-  ipcMain.handle('preview:allow-dropped', async (_event, paths: unknown) => {
-    await Promise.all((Array.isArray(paths) ? paths.slice(0, 50) : []).map(async (item) => {
-      try {
-        const real = await fs.promises.realpath(path.resolve(String(item)));
-        if ((await fs.promises.stat(real)).isFile() && IMAGE_MIME[path.extname(real).toLowerCase()]) droppedImages.add(real);
-      } catch { /* 不存在或无权限的路径忽略 */ }
-    }));
-    return true;
-  });
+  ipcMain.handle('preview:allow-dropped', (_event, paths: unknown) => allowPreviewFilePaths(paths));
   ipcMain.handle('preview:read', (_event, cwd: string, filePath: string) => readPreview(cwd, filePath));
 }

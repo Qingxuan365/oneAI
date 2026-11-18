@@ -1,5 +1,8 @@
 import { BUILTIN_CLIS, defaultWorkspacePath } from './clis';
 import { CliDef, FolderEntry, HistoryEntry, TaskSession } from './types';
+import { folderKey } from '../../shared/paths';
+
+export { folderKey };
 
 /** 渲染进程持有、持久化的全部任务与文件夹状态 */
 export interface AppState {
@@ -16,11 +19,6 @@ export interface RecentFolder {
   updatedAt: number;
   entries: HistoryEntry[];    // 最近的会话，已截断
   total: number;              // 该文件夹的会话总数
-}
-
-/** 文件夹的比较键：忽略大小写、末尾分隔符与正反斜杠差异 */
-export function folderKey(folder: string): string {
-  return folder.replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase();
 }
 
 export function folderName(folder: string): string {
@@ -290,12 +288,6 @@ function writePersistedState(persisted: AppState, persistedJson: string): void {
     }));
   } catch {}
   try { localStorage.setItem(STATE_KEY, persistedJson); } catch {}
-}
-
-/** 同时写入主进程文件（原子替换）与 localStorage；旧的各工作区数据原样透传，不删除 */
-export function saveAppState(state: AppState): void {
-  const persisted = toPersistableState(state);
-  writePersistedState(persisted, JSON.stringify(persisted));
 }
 
 export function flushScheduledAppState(): void {

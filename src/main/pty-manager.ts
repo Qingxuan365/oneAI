@@ -2,15 +2,18 @@ import * as pty from 'node-pty';
 import { BrowserWindow } from 'electron';
 import * as os from 'node:os';
 import fs from 'node:fs';
+import { execFile, execFileSync } from 'node:child_process';
 import { buildAccountEnv, SessionAccount } from './account-env';
+import { setBoundedMap } from './fs-utils';
+import { SessionSnapshot } from '../shared/types';
 import { t } from './i18n';
 
-interface CreateSessionOptions {
+export interface CreateSessionOptions {
   id: string;
   command?: string;
   cwd?: string;
   shell?: boolean; // 自定义 CLI：整条命令交给 PowerShell 解析，兼容 .cmd / .ps1 启动器与带参数的命令
-  account?: SessionAccount; // 多账号：按账号的配置目录注入 CODEX_HOME / CLAUDE_CONFIG_DIR；重启时沿用
+  account?: SessionAccount; // 多账号：按账号的配置目录注入 CODEX_HOME / CLAUDE_CONFIG_DIR / KIMI_CODE_HOME；重启时同步最新配置
   cols?: number;
   rows?: number;
 }
@@ -22,21 +25,53 @@ interface SessionBuffer {
 
 const MAX_SESSION_BUFFER_LENGTH = 2 * 1024 * 1024;
 const TARGET_BUFFER_CHUNK_LENGTH = 8 * 1024;
+const MAX_EXITED_RECORDS = 200;
 
 const BATCH_WINDOW_MS = 8;
 const BACKGROUND_BATCH_WINDOW_MS = 120;
 
 /**
+ * Windows 下终止 PTY 会话及其整棵子进程树：
+ * 1. node-pty 在收到首个输出字节前 _isReady 为 false，直接调用 session.kill() 会被挂入延迟队列而不生效；
+ * 2. useConptyDll（Pi 会话）及 CLI 以 windowsHide 拉起的后台子进程（如 MCP Server）不在控制台进程枚举内；
+ * 因此通过 taskkill /T /F 按根 PID 兜底清理整棵进程树。退出阶段使用同步短超时确保子进程不残留。
+ */
+function killProcessTree(session: pty.IPty, sync = false): void {
+  const pid = session.pid;
+  try {
+    session.kill();
+  } catch {
+    // ignore
+  }
+  if (os.platform() === 'win32' && typeof pid === 'number' && pid > 0) {
+    if (sync) {
+      try {
+        execFileSync('taskkill.exe', ['/T', '/F', '/PID', String(pid)], {
+          windowsHide: true,
+          stdio: 'ignore',
+          timeout: 3000,
+        });
+      } catch {
+        // 进程已自然退出时忽略
+      }
+    } else {
+      execFile('taskkill.exe', ['/T', '/F', '/PID', String(pid)], { windowsHide: true, timeout: 5000 }, () => {});
+    }
+  }
+}
+
+/**
  * 按会话合并 PTY 输出再发 IPC。先发一次再合并：前台活动会话距上次发送已超过合并窗口的数据立即发出，
  * 打字回显不额外等待；后台隐藏会话放宽合并窗口以大幅减少高频刷屏时的跨进程拷贝次数。
+ * 每次发送附带该批次末尾的单调递增序号 seq，供渲染进程与快照缓冲去重对齐。
  */
 export class PtyOutputBatcher {
-  private pending = new Map<string, { chunks: string[]; bytes: number; timer: NodeJS.Timeout }>();
+  private pending = new Map<string, { chunks: string[]; bytes: number; seq: number; timer: NodeJS.Timeout }>();
   private lastSent = new Map<string, number>();
   private activeId: string | null = null;
   private activeKnown = false;
 
-  constructor(private send: (id: string, data: string) => void) {}
+  constructor(private send: (id: string, data: string, seq: number) => void) {}
 
   public setActive(id: string | null): void {
     this.activeKnown = true;
@@ -44,14 +79,14 @@ export class PtyOutputBatcher {
     if (id) this.flush(id);
   }
 
-  public push(id: string, data: string): void {
+  public push(id: string, data: string, baseSeq = 0): void {
     const limit = 256 * 1024;
     const isForeground = !this.activeKnown || this.activeId === id;
     const windowMs = isForeground ? BATCH_WINDOW_MS : BACKGROUND_BATCH_WINDOW_MS;
     const now = Date.now();
     if (isForeground && !this.pending.has(id) && now - (this.lastSent.get(id) ?? 0) >= BATCH_WINDOW_MS && data.length <= 64 * 1024) {
       this.lastSent.set(id, now);
-      this.send(id, data);
+      this.send(id, data, baseSeq + data.length);
       return;
     }
     for (let offset = 0; offset < data.length;) {
@@ -59,6 +94,7 @@ export class PtyOutputBatcher {
       // Keep UTF-16 surrogate pairs intact when splitting a large PTY callback.
       if (end < data.length && /[\uD800-\uDBFF]/.test(data[end - 1])) end--;
       const chunk = data.slice(offset, end);
+      const chunkEndSeq = baseSeq + end;
       offset = end;
       const bytes = Buffer.byteLength(chunk);
       let batch = this.pending.get(id);
@@ -67,11 +103,12 @@ export class PtyOutputBatcher {
         batch = undefined;
       }
       if (!batch) {
-        batch = { chunks: [], bytes: 0, timer: setTimeout(() => this.flush(id), windowMs) };
+        batch = { chunks: [], bytes: 0, seq: chunkEndSeq, timer: setTimeout(() => this.flush(id), windowMs) };
         this.pending.set(id, batch);
       }
       batch.chunks.push(chunk);
       batch.bytes += bytes;
+      batch.seq = chunkEndSeq;
       if (batch.bytes >= limit) this.flush(id);
     }
   }
@@ -82,10 +119,20 @@ export class PtyOutputBatcher {
     clearTimeout(batch.timer);
     this.pending.delete(id);
     this.lastSent.set(id, Date.now());
-    this.send(id, batch.chunks.join(''));
+    this.send(id, batch.chunks.join(''), batch.seq);
   }
 
-  /** 会话结束后丢弃发送时间记录 */
+  /** 丢弃尚未发出的缓冲数据（用于清屏、重启或主动终止会话，避免旧进程残余输出冲掉新终端屏幕） */
+  public discard(id: string): void {
+    const batch = this.pending.get(id);
+    if (batch) {
+      clearTimeout(batch.timer);
+      this.pending.delete(id);
+    }
+    this.lastSent.delete(id);
+  }
+
+  /** 会话自然退出后刷出末尾缓冲并丢弃发送时间记录 */
   public forget(id: string): void {
     this.flush(id);
     this.lastSent.delete(id);
@@ -96,10 +143,12 @@ export class PtyManager {
   private sessions: Map<string, pty.IPty> = new Map();
   private sessionOptions: Map<string, CreateSessionOptions> = new Map();
   private dataBuffers: Map<string, SessionBuffer> = new Map();
+  private sessionSeq: Map<string, number> = new Map();
+  private exitedCodes: Map<string, number> = new Map();
   private mainWindow: BrowserWindow | null = null;
-  private output = new PtyOutputBatcher((id, data) => {
+  private output = new PtyOutputBatcher((id, data, seq) => {
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send('terminal:data', { id, data });
+      this.mainWindow.webContents.send('terminal:data', { id, data, seq });
     }
   });
 
@@ -122,8 +171,19 @@ export class PtyManager {
     return this.dataBuffers.get(id)?.chunks.join('') || '';
   }
 
+  /** 原子读取会话当前缓冲、输出序号及存活/退出状态，消除挂载回放与实时输出竞态 */
+  public getSessionSnapshot(id: string): SessionSnapshot {
+    const alive = this.sessions.has(id);
+    return {
+      buffer: this.getSessionBuffer(id),
+      seq: this.sessionSeq.get(id) ?? 0,
+      alive,
+      exitCode: alive ? undefined : this.exitedCodes.get(id),
+    };
+  }
+
   public clearSessionBuffer(id: string) {
-    this.output.flush(id);
+    this.output.discard(id);
     this.dataBuffers.set(id, { chunks: [], length: 0 });
   }
 
@@ -166,6 +226,7 @@ export class PtyManager {
     const resolvedOptions: CreateSessionOptions = {
       ...remembered,
       ...options,
+      account: 'account' in options ? options.account : remembered?.account,
       cols: options.cols ?? remembered?.cols,
       rows: options.rows ?? remembered?.rows,
     };
@@ -181,7 +242,7 @@ export class PtyManager {
       const isWindows = os.platform() === 'win32';
       const defaultShell = isWindows ? 'powershell.exe' : (process.env.SHELL || '/bin/bash');
       const rawCommand = (command || defaultShell).trim();
-      let workDir = cwd || process.env.USERPROFILE || process.cwd();
+      const workDir = cwd || process.env.USERPROFILE || process.cwd();
       if (!fs.existsSync(workDir) || !fs.statSync(workDir).isDirectory()) {
         return { success: false, error: t('工作目录不存在或不是文件夹：{dir}', { dir: workDir }) };
       }
@@ -193,22 +254,26 @@ export class PtyManager {
         accountEnv = built.env;
       }
 
-      // 正确拆分可执行文件与命令行参数
       let file = defaultShell;
       let args: string[] = [];
 
       if (isWindows) {
-        const runAndExit = (cmd: string) => `$global:LASTEXITCODE = $null; ${cmd}; if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }`;
-        if (rawCommand.toLowerCase() === 'kimi' || rawCommand.toLowerCase() === 'kimi code') {
+        const runAndExit = (cmd: string) => {
+          // 带引号开头的完整路径在 PowerShell -Command 中需前置调用运算符 & 才会被当作可执行文件调用；用换行分隔防止命令末尾 # 注释吞掉退出分支
+          const invoke = /^["']/.test(cmd) ? `& ${cmd}` : cmd;
+          return `$global:LASTEXITCODE = $null\n${invoke}\nif ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE } elseif (-not $?) { exit 1 }`;
+        };
+        const lower = rawCommand.toLowerCase();
+        if (lower === 'kimi' || lower === 'kimi code') {
           file = 'powershell.exe';
           args = ['-ExecutionPolicy', 'Bypass', '-Command', runAndExit('kimi')];
-        } else if (rawCommand.toLowerCase() === 'codex') {
+        } else if (lower === 'codex') {
           file = 'powershell.exe';
           args = ['-ExecutionPolicy', 'Bypass', '-Command', runAndExit('codex')];
-        } else if (rawCommand.toLowerCase() === 'claude') {
+        } else if (lower === 'claude') {
           file = 'powershell.exe';
           args = ['-ExecutionPolicy', 'Bypass', '-Command', runAndExit('claude')];
-        } else if (rawCommand.toLowerCase() === 'opencode') {
+        } else if (lower === 'opencode') {
           file = 'powershell.exe';
           args = [
             '-NoExit',
@@ -217,7 +282,7 @@ export class PtyManager {
             '-Command',
             'if (Get-Command opencode -ErrorAction SilentlyContinue) { $global:LASTEXITCODE = $null; opencode; exit $(if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }) } else { Write-Host "`n' + t('[OneAI 提示]: 本地尚未安装或配置 opencode 环境变量。当前已为您打开交互终端，可随时输入命令。') + '" -ForegroundColor Yellow }',
           ];
-        } else if (rawCommand.toLowerCase() === 'grok') {
+        } else if (lower === 'grok') {
           file = 'powershell.exe';
           args = [
             '-NoExit',
@@ -226,22 +291,20 @@ export class PtyManager {
             '-Command',
             'if (Get-Command grok -ErrorAction SilentlyContinue) { $global:LASTEXITCODE = $null; grok; exit $(if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }) } else { Write-Host "`n' + t('[OneAI 提示]: 本地尚未安装或配置 grok CLI 环境变量。当前已为您打开交互终端，可随时输入命令。') + '" -ForegroundColor Yellow }',
           ];
-        } else if (rawCommand.toLowerCase() === 'powershell' || rawCommand.toLowerCase() === 'powershell.exe') {
+        } else if (lower === 'powershell' || lower === 'powershell.exe') {
           file = 'powershell.exe';
           args = ['-NoExit', '-ExecutionPolicy', 'Bypass'];
-        } else if (rawCommand.toLowerCase() === 'cmd' || rawCommand.toLowerCase() === 'cmd.exe') {
+        } else if (lower === 'pwsh' || lower === 'pwsh.exe') {
+          file = 'pwsh.exe';
+          args = ['-NoExit', '-ExecutionPolicy', 'Bypass'];
+        } else if (lower === 'cmd' || lower === 'cmd.exe') {
           file = 'cmd.exe';
           args = [];
-        } else if (resolvedOptions.shell || /^(kimi|codex|claude)\s/i.test(rawCommand)) {
-          // 自定义 CLI 或恢复历史会话：带参数的 CLI 命令交给 PowerShell 解析，兼容 .cmd/.ps1 启动器；命令退出后结束会话以触发状态更新
-          file = 'powershell.exe';
-          args = ['-ExecutionPolicy', 'Bypass', '-Command', runAndExit(rawCommand)];
-        } else if (rawCommand.includes(' ')) {
-          // 按空格拆分，但保留引号内的空格（如 "C:\Program Files\x\tool.exe" --flag）
-          const parts = (rawCommand.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((part) => part.replace(/^(["'])(.*)\1$/, '$2'));
-          file = parts[0];
-          args = parts.slice(1);
+        } else if (lower === 'wsl' || lower === 'wsl.exe') {
+          file = 'wsl.exe';
+          args = [];
         } else {
+          // 其余带参或无参的 CLI 命令（兼容 .cmd / .ps1 垫片、带引号完整路径与自定义 CLI）统一交由 PowerShell 解析，退出后结束会话
           file = 'powershell.exe';
           args = ['-ExecutionPolicy', 'Bypass', '-Command', runAndExit(rawCommand)];
         }
@@ -268,14 +331,17 @@ export class PtyManager {
         useConptyDll: isWindows && /^pi(\s|$)/i.test(rawCommand),
       });
 
+      this.exitedCodes.delete(id);
       this.clearSessionBuffer(id);
       this.sessions.set(id, ptyProcess);
 
-      // 监听 PTY 输出数据并缓存与实时发送
+      // 监听 PTY 输出数据并缓存与实时发送（seq 在会话生命周期内单调递增，跨重启不回退）
       ptyProcess.onData((data: string) => {
         if (this.sessions.get(id) !== ptyProcess) return;
+        const baseSeq = this.sessionSeq.get(id) ?? 0;
+        this.sessionSeq.set(id, baseSeq + data.length);
         this.appendSessionBuffer(id, data);
-        this.output.push(id, data);
+        this.output.push(id, data, baseSeq);
       });
 
       // 监听进程退出
@@ -284,6 +350,7 @@ export class PtyManager {
         this.output.forget(id);
         console.log(`[PTY] Session ${id} exited with code ${exitCode}`);
         this.sessions.delete(id);
+        setBoundedMap(this.exitedCodes, id, exitCode, MAX_EXITED_RECORDS);
         if (this.mainWindow && !this.mainWindow.isDestroyed()) {
           this.mainWindow.webContents.send('terminal:exit', { id, exitCode });
         }
@@ -321,51 +388,59 @@ export class PtyManager {
   }
 
   public killSession(id: string) {
-    this.output.flush(id);
+    this.output.discard(id);
     const session = this.sessions.get(id);
     this.sessions.delete(id);
     if (session) {
-      try {
-        session.kill();
-      } catch {
-        // ignore
-      }
+      killProcessTree(session, false);
     }
     this.sessionOptions.delete(id);
     this.dataBuffers.delete(id);
+    this.exitedCodes.delete(id);
+    this.sessionSeq.delete(id);
   }
 
-  public restartSession(id: string): { success: boolean; buffer?: string; error?: string } {
-    this.output.flush(id);
-    const options = this.sessionOptions.get(id);
+  public restartSession(id: string, freshOptions?: Partial<CreateSessionOptions>): { success: boolean; buffer?: string; error?: string } {
+    this.output.discard(id);
+    const remembered = this.sessionOptions.get(id);
     const session = this.sessions.get(id);
     this.sessions.delete(id);
     if (session) {
-      try {
-        session.kill();
-      } catch {
-        // ignore
-      }
+      killProcessTree(session, false);
     }
     this.dataBuffers.delete(id);
-    if (options) {
-      return this.createSession(options);
+    this.exitedCodes.delete(id);
+
+    const hasFresh = Boolean(
+      freshOptions
+      && (freshOptions.command !== undefined || freshOptions.cwd !== undefined || 'account' in freshOptions || freshOptions.shell !== undefined),
+    );
+    if (!remembered && !hasFresh) {
+      return { success: false, error: t('未找到该终端会话的启动配置') };
     }
-    return this.createSession({ id });
+
+    const merged: CreateSessionOptions = {
+      ...remembered,
+      ...freshOptions,
+      id,
+      account: freshOptions && 'account' in freshOptions ? freshOptions.account : remembered?.account,
+      cols: freshOptions?.cols ?? remembered?.cols,
+      rows: freshOptions?.rows ?? remembered?.rows,
+    };
+    this.sessionOptions.set(id, merged);
+    return this.createSession(merged);
   }
 
   public destroyAll() {
     for (const [id, session] of this.sessions) {
-      this.output.flush(id);
-      try {
-        session.kill();
-      } catch {
-        // ignore
-      }
+      this.output.discard(id);
+      killProcessTree(session, true);
     }
     this.sessions.clear();
     this.sessionOptions.clear();
     this.dataBuffers.clear();
+    this.exitedCodes.clear();
+    this.sessionSeq.clear();
   }
 }
 

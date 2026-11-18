@@ -22,7 +22,9 @@ await build({
     import { UsageModal } from './src/renderer/src/components/UsageModal';
     import { SettingsModal } from './src/renderer/src/components/SettingsModal';
     import { OnboardingModal } from './src/renderer/src/components/OnboardingModal';
+    import { THEME_IDS } from './src/shared/types';
     import { setLanguage, t } from './src/renderer/src/i18n';
+    window.ALL_THEMES = [...THEME_IDS];
     import { Terminal } from '@xterm/xterm';
     import { installDropGuard } from './src/renderer/src/dropGuard';
     installDropGuard();
@@ -159,10 +161,13 @@ await build({
           onNewTask={(p, cli, acc) => window.events.push('quick:' + p + ':' + cli + (acc ? ':' + acc : ''))} onCustomNewTask={() => {}} onCloseTask={() => {}} />
       </div>));
     };
-    window.drawNewTask = (accounts) => {
+    window.drawNewTask = (accounts, initialAccountId) => {
       const existing = [mkTask('n1', 'codex', 'D:/GitHub/OneAI', { title: 'Task 4' }), mkTask('n2', 'codex', 'D:/other', { title: 'Task 9' })];
-      flushSync(() => root.render(<div className="workbench-ui h-screen"><NewTaskModal isOpen onClose={() => {}} clis={CLIS} initialCliId="codex" folderPath="D:/GitHub/OneAI" tasks={existing} accounts={accounts}
-        onCreate={async (cli, title, command, cwd, accountId) => { window.events.push('create:' + cli + ':' + (accountId || 'default') + ':' + title + ':' + command + ':' + cwd); return { success: true }; }} /></div>));
+      flushSync(() => root.render(<div className="workbench-ui h-screen">
+        <button id="outside-modal-btn" type="button">outside</button>
+        <NewTaskModal isOpen onClose={() => {}} clis={CLIS} initialCliId="codex" initialAccountId={initialAccountId} folderPath="D:/GitHub/OneAI" tasks={existing} accounts={accounts}
+          onCreate={async (cli, title, command, cwd, accountId) => { window.events.push('create:' + cli + ':' + (accountId || 'default') + ':' + title + ':' + command + ':' + cwd); return { success: true }; }} />
+      </div>));
     };
     function SettingsHarness() {
       const [settings, setSettings] = React.useState({ theme: 'dark', voiceReminderEnabled: true, workReminderHours: 1, terminalFontSize: 15, terminalLineHeight: 1.3, uiScale: 'comfortable', terminalCursorStyle: 'bar', terminalCursorBlink: true, previewMinimap: true, musicDirectory: '', musicPlayerVisible: true, musicStreams: [], clockOffsetHours: 0, topbarDateVisible: true, language: 'zh-CN', onboardingDone: true, accounts: [], customClis: [] });
@@ -210,9 +215,10 @@ await build({
         <TerminalViewport ref={window.termRef} theme="dark" tasks={tasks} activeTaskId={id} />
       </div>));
     };
-    window.drawPreview = (line, openedAt, minimap = true) => {
-      flushSync(() => root.render(<div className="workbench-ui flex h-screen">
-        <FilePreviewPanel cwd="D:/x" filePath="a.ts" line={line} openedAt={openedAt} minimap={minimap} width={400} onResize={() => {}} onClose={() => {}} />
+    window.drawPreview = (line, openedAt, minimap = true, width = 400, containerWidth = null) => {
+      flushSync(() => root.render(<div className="workbench-ui flex h-screen" style={containerWidth ? { width: containerWidth + 'px' } : undefined}>
+        {containerWidth && <main id="narrow-term-probe" className="flex-1 min-w-0 h-full" />}
+        <FilePreviewPanel cwd="D:/x" filePath="a.ts" line={line} openedAt={openedAt} minimap={minimap} width={width} onResize={(w) => window.events.push('preview-resize:' + w)} onResetWidth={() => window.events.push('preview-reset')} onClose={() => {}} />
       </div>));
     };
     // 链接定位：返回 text 中 needle 对应的链接范围
@@ -260,24 +266,24 @@ app.whenReady().then(async () => {
       await new Promise(r => setTimeout(r, 250));
       check('close visible when task focused', getComputedStyle(document.querySelector('button[aria-label="关闭 Task 1: UI regression"]')).opacity === '1');
       const colors = [];
-      // 新增编辑器配色：正文、次要文字与点缀色在面板 / 画布上的对比度（WCAG 相对亮度）须达到下限
-      const NEW_THEMES = ['lavender', 'mist', 'forest', 'ink', 'darcula', 'material', 'monokai', 'mariana', 'breakers', 'solarized-dark', 'solarized-light', 'cobalt', 'idea-classic-light', 'idea-light', 'idea-dark', 'idea-contrast', 'kiro-dark', 'kiro-light'];
+      // 全部 24 个主题：正文、次要文字与点缀色在面板 / 画布上的对比度（WCAG 相对亮度）须达到下限
+      const ALL_THEMES = window.ALL_THEMES;
       const rgbOf = name => getComputedStyle(document.documentElement).getPropertyValue('--color-' + name).trim().split(' ').map(Number);
       const lum = ([r, g, b]) => { const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
       const ratio = (a, b) => { const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
-      for (const theme of NEW_THEMES) {
+      for (const theme of ALL_THEMES) {
         document.documentElement.dataset.theme = theme;
         const low = [['fg', 'canvas', 6], ['fg', 'panel', 5.5], ['fg-muted', 'canvas', 4.5], ['fg-subtle', 'panel', 4], ['fg-faint', 'panel', 3.5], ['accent', 'panel', 3.5], ['accent', 'canvas', 3.5], ['success', 'canvas', 3.5], ['danger', 'canvas', 3.5], ['warning', 'canvas', 3.5]]
           .filter(([fg, bg, min]) => ratio(rgbOf(fg), rgbOf(bg)) < min).map(([fg, bg, min]) => fg + ' on ' + bg + ' ' + ratio(rgbOf(fg), rgbOf(bg)).toFixed(2) + ' < ' + min);
         check(theme + ' text and accent colors keep enough contrast' + (low.length ? ' [' + low.join('; ') + ']' : ''), low.length === 0);
       }
-      for (const theme of ['dark', ...NEW_THEMES, 'light']) {
+      for (const theme of ALL_THEMES) {
         document.documentElement.dataset.theme = theme;
         const panel = getComputedStyle(document.querySelector('header')).backgroundColor;
         colors.push(panel);
         check(theme + ' header/sidebar same panel', panel === getComputedStyle(document.querySelector('aside > div')).backgroundColor);
       }
-      check('theme colors change (dark, light, Darcula and Sublime Material all differ)', new Set(colors).size === colors.length);
+      check('all 24 theme panel colors differ', ALL_THEMES.length === 24 && new Set(colors).size === colors.length);
       for (const [status, label] of Object.entries({ starting: '启动中', running: '运行中', idle: '空闲', waiting: '等待输入', stopped: '已停止', error: '启动失败' })) {
         window.draw(status);
         check(status + ' Chinese label', document.querySelector('header').textContent.includes(label));
@@ -1282,7 +1288,7 @@ app.whenReady().then(async () => {
       check('long preview shows a minimap on the right with a canvas', Boolean(mini()) && mini().querySelector('canvas').height > 0 && mini().getBoundingClientRect().right <= document.querySelector('aside[aria-label="文件预览"]').getBoundingClientRect().right + 1);
       check('the minimap slider covers only the visible part of a scrollable file', Boolean(slider()) && slider().getBoundingClientRect().height < mini().querySelector('canvas').getBoundingClientRect().height && slider().getBoundingClientRect().height >= 10);
       // 检查窗口是隐藏的、不渲染帧，浏览器不会自己派发 scroll 事件，所以设置 scrollTop 后手动派发一次
-      const scrollTo = async (top) => { scroller().scrollTop = top; scroller().dispatchEvent(new Event('scroll')); await wait(100); };
+      const scrollTo = async (top) => { scroller().scrollTop = top; scroller().dispatchEvent(new Event('scroll')); await wait(200); };
       await scrollTo(0);
       const atTop = slider().getBoundingClientRect().top;
       await scrollTo(scroller().scrollHeight);
@@ -1306,6 +1312,60 @@ app.whenReady().then(async () => {
       window.electronAPI.readPreviewFile = async () => ({ kind: 'binary', path: 'x.bin', size: 5 });
       window.drawPreview(undefined, 13, true); await wait(200);
       check('no minimap for non-text previews', !mini());
+      // 预览面板分隔条双击重置与窄窗口下终端最小宽度保护
+      window.events = [];
+      const previewSep = document.querySelector('aside[aria-label="文件预览"] [role="separator"]');
+      previewSep.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      check('double-clicking preview separator resets width', window.events.includes('preview-reset'));
+      window.drawPreview(undefined, 14, false, 420, 540); await wait(100);
+      check('narrow window keeps at least 320px for terminal viewport beside preview', document.getElementById('narrow-term-probe').getBoundingClientRect().width >= 320);
+
+      // Modal Tab / Shift+Tab 焦点陷阱 + NewTaskModal 预选账号
+      window.clearRoot();
+      window.drawNewTask(window.accountsFixture, 'acc-alt'); await wait(100);
+      check('NewTaskModal preselects initialAccountId when valid for CLI', document.getElementById('new-task-account')?.value === 'acc-alt');
+      const dlg = document.querySelector('[role="dialog"]');
+      const focusables = [...dlg.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled)')].filter(el => el.getClientRects().length > 0);
+      focusables.at(-1).focus();
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+      const wrappedForward = document.activeElement === focusables[0];
+      focusables[0].focus();
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
+      const wrappedBackward = document.activeElement === focusables.at(-1);
+      check('Modal traps Tab and Shift+Tab focus within dialog', wrappedForward && wrappedBackward && document.activeElement !== document.getElementById('outside-modal-btn'));
+
+      // TerminalViewport 快照 seq 去重与秒退进程退出横幅补打
+      window.clearRoot();
+      let emitSnapData = null;
+      let resolveSnap = null;
+      window.electronAPI.onSessionData = (cb) => { emitSnapData = cb; return () => { emitSnapData = null; }; };
+      window.electronAPI.getSessionSnapshot = () => new Promise((r) => { resolveSnap = r; });
+      window.xtermWrites = [];
+      window.drawTerm('snap-dedup');
+      emitSnapData({ id: 'snap-dedup', data: 'DUP', seq: 10 });
+      emitSnapData({ id: 'snap-dedup', data: '-LIVE', seq: 15 });
+      resolveSnap({ buffer: 'SNAP-10', seq: 10, alive: true });
+      await wait(120);
+      const dedupCombined = window.xtermWrites.map(w => w.data).join('');
+      check('TerminalViewport deduplicates early chunks with seq <= snapshot.seq and replays newer chunks', dedupCombined === 'SNAP-10-LIVE');
+
+      window.clearRoot();
+      window.xtermWrites = [];
+      let emitSnapExit = null;
+      window.electronAPI.onSessionExit = (cb) => { emitSnapExit = cb; return () => { emitSnapExit = null; }; };
+      window.electronAPI.getSessionSnapshot = async () => ({ buffer: 'fatal-err', seq: 9, alive: false, exitCode: 9 });
+      window.drawTerm('snap-fast-exit');
+      await wait(120);
+      const fastExitOut = window.xtermWrites.map(w => w.data).join('');
+      check('TerminalViewport prints exit banner from snapshot when process exited before mount', fastExitOut.includes('fatal-err') && fastExitOut.includes('9'));
+      window.xtermWrites = [];
+      emitSnapExit({ id: 'snap-fast-exit', exitCode: 3 });
+      await wait(60);
+      check('TerminalViewport still prints exit banner on subsequent exit after resume', window.xtermWrites.some(w => w.data.includes('3')));
+      delete window.electronAPI.getSessionSnapshot;
+      window.electronAPI.onSessionData = () => () => {};
+      window.electronAPI.onSessionExit = () => () => {};
+      window.clearRoot();
       return checks;
     })()\`));
     {

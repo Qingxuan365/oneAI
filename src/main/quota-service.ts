@@ -5,28 +5,59 @@ import os from 'node:os';
 import https from 'node:https';
 import { execFile } from 'node:child_process';
 import { isAccountCli, resolveConfigDir, AccountCliId } from './account-env';
+import { isSamePath, normalizePathKey, setBoundedMap } from './fs-utils';
+import type { QuotaData } from '../shared/types';
 import { t } from './i18n';
 import { formatClaudeModel } from './model-format';
+
+export type { QuotaData };
 
 async function exists(file: string): Promise<boolean> {
   try { await fs.promises.access(file); return true; } catch { return false; }
 }
 
-export interface QuotaData {
-  cliId: string;
-  cliName: string;
-  model?: string;
-  effort?: string;              // 推理思考等级: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-  planType?: string;
-  tokens?: number;              // 最近活跃会话累计 token（输入 + 输出 + 缓存读写），无数据时缺省
-  costUsd?: number;             // 最近活跃会话累计费用（美元），仅 Claude Code 提供
-  fiveHourPercent: number;      // 5h remaining pct (0-100)
-  fiveHourResetsIn: string;     // e.g. "2h 45m"
-  sevenDayPercent: number;      // 7d remaining pct (0-100)
-  sevenDayResetsOn: string;     // e.g. "Resets Sun"
-  lastUpdated: number;
-  status: 'normal' | 'warning' | 'critical' | 'offline';
-  message?: string;
+function stripTomlComment(line: string): string {
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '\\' && inDouble) { i++; continue; }
+    if (ch === "'" && !inDouble) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle) inDouble = !inDouble;
+    else if (ch === '#' && !inSingle && !inDouble) return line.slice(0, i);
+  }
+  return line;
+}
+
+/**
+ * 轻量解析 TOML 字符串键值：剥离引号外的 # 注释，并按 [section] 分组（顶层键归入 ""）。
+ * 节名去掉首尾空白与段引号（如 [models."k3"] 归一为 "models.k3"），避免注释行、同后缀键名或子表配置误匹配。
+ */
+export function parseTomlStrings(content: string): Map<string, Map<string, string>> {
+  const sections = new Map<string, Map<string, string>>([['', new Map()]]);
+  let current = '';
+  for (const rawLine of content.split(/\r?\n/)) {
+    const cleaned = stripTomlComment(rawLine).trim();
+    if (!cleaned) continue;
+    const secMatch = cleaned.match(/^\[(?:\[)?([^\[\]]+?)(?:\])?\]$/);
+    if (secMatch) {
+      current = secMatch[1]
+        .split('.')
+        .map((seg) => seg.trim().replace(/^(["'])(.*)\1$/, '$2'))
+        .join('.');
+      if (!sections.has(current)) sections.set(current, new Map());
+      continue;
+    }
+    const kvMatch = cleaned.match(/^([A-Za-z0-9_-]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')\s*$/);
+    if (!kvMatch) continue;
+    const [, key, dq, sq] = kvMatch;
+    let val = sq ?? '';
+    if (dq !== undefined) {
+      try { val = JSON.parse(`"${dq}"`); } catch { val = dq; }
+    }
+    sections.get(current)!.set(key, val);
+  }
+  return sections;
 }
 
 const CODEX_HOME_DEFAULT = path.join(os.homedir(), '.codex');
@@ -60,7 +91,8 @@ function formatResetDay(targetMs: number): string {
   const days = Math.floor(totalMinutes / 1440);
   const hours = String(Math.floor((totalMinutes % 1440) / 60)).padStart(2, '0');
   const minutes = String(totalMinutes % 60).padStart(2, '0');
-  return t(days === 1 ? '1 天 {time}' : '{n} 天 {time}',{ n: days, time: `${hours}:${minutes}` });
+  const time = `${hours}:${minutes}`;
+  return days === 1 ? t('1 天 {time}', { time }) : t('{n} 天 {time}', { n: days, time });
 }
 
 export class QuotaService {
@@ -77,8 +109,8 @@ export class QuotaService {
   private agyMissing = false;
   private activeCliId: string | null = null;
   private pollingActive = false;
-  private baseWatchersStarted = false;
-  private baseWatchers: fs.FSWatcher[] = [];
+  private baseWatchers = new Map<string, fs.FSWatcher>();
+  private piSessionsWatcher: fs.FSWatcher | null = null;
   private accountWatchers = new Map<string, { dir: string; watcher: fs.FSWatcher }>();
   private debounceMap = new Map<string, NodeJS.Timeout>();
   // 多账号：key 为渲染进程里的账号 id，与默认账号（key 为 cliId）并列缓存、轮询和广播
@@ -201,6 +233,22 @@ export class QuotaService {
     };
   }
 
+  private buildTerminalQuota(): QuotaData {
+    return {
+      cliId: 'terminal',
+      cliName: t('系统终端'),
+      model: 'PowerShell / CMD',
+      planType: 'Local Shell',
+      fiveHourPercent: 100,
+      fiveHourResetsIn: '--',
+      sevenDayPercent: 100,
+      sevenDayResetsOn: '--',
+      lastUpdated: Date.now(),
+      status: 'normal',
+      message: 'PowerShell Ready',
+    };
+  }
+
   private scheduleWatchedRefresh(key: string, delayMs = 300): void {
     const prev = this.debounceMap.get(key);
     if (prev) clearTimeout(prev);
@@ -210,9 +258,8 @@ export class QuotaService {
     }, delayMs));
   }
 
+  /** 按需为已存在的配置目录挂载热监听；运行期新装 CLI 或首次生成目录后会在下次轮询时自动补挂 */
   private async ensureBaseWatchers(): Promise<void> {
-    if (this.baseWatchersStarted) return;
-    this.baseWatchersStarted = true;
     // 不在此处监听 ~/.claude.json：其父目录是整个用户主目录，任何主目录文件变动都会唤醒回调，且实时模型切换已由 CLAUDE_STATUS_FILE 与 settings.json 覆盖
     const watchList: Array<{ filePath: string; cliId: string }> = [
       { filePath: path.join(os.homedir(), '.kimi-code', 'config.toml'), cliId: 'kimi' },
@@ -236,6 +283,8 @@ export class QuotaService {
       directories.set(dir, items);
     }
     for (const [dir, items] of directories) {
+      const dirKey = normalizePathKey(dir);
+      if (this.baseWatchers.has(dirKey)) continue;
       try {
         const watcher = fs.watch(dir, (_event, filename) => {
           const name = filename?.toString().toLowerCase();
@@ -244,22 +293,32 @@ export class QuotaService {
             this.scheduleWatchedRefresh(item.cliId, 300);
           }
         });
-        this.baseWatchers.push(watcher);
+        watcher.on('error', () => {
+          try { watcher.close(); } catch {}
+          if (this.baseWatchers.get(dirKey) === watcher) this.baseWatchers.delete(dirKey);
+        });
+        this.baseWatchers.set(dirKey, watcher);
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== 'ENOENT') console.warn('[QuotaService] Failed to watch directory:', dir, err);
       }
     }
 
     // pi 切换模型只追加会话 jsonl，监听会话目录以便即时刷新
-    try {
-      if (await exists(PI_SESSIONS_DIR)) {
-        const watcher = fs.watch(PI_SESSIONS_DIR, { recursive: true }, () => {
-          this.scheduleWatchedRefresh('pi', 500);
-        });
-        this.baseWatchers.push(watcher);
+    if (!this.piSessionsWatcher) {
+      try {
+        if (await exists(PI_SESSIONS_DIR)) {
+          const watcher = fs.watch(PI_SESSIONS_DIR, { recursive: true }, () => {
+            this.scheduleWatchedRefresh('pi', 500);
+          });
+          watcher.on('error', () => {
+            try { watcher.close(); } catch {}
+            if (this.piSessionsWatcher === watcher) this.piSessionsWatcher = null;
+          });
+          this.piSessionsWatcher = watcher;
+        }
+      } catch (err) {
+        console.warn('[QuotaService] Failed to watch pi sessions:', err);
       }
-    } catch (err) {
-      console.warn('[QuotaService] Failed to watch pi sessions:', err);
     }
   }
 
@@ -271,7 +330,7 @@ export class QuotaService {
     };
     for (const [key, entry] of this.accountWatchers) {
       const current = this.accounts.get(key);
-      if (!current || current.dir !== entry.dir) {
+      if (!current || !isSamePath(current.dir, entry.dir)) {
         try { entry.watcher.close(); } catch {}
         this.accountWatchers.delete(key);
       }
@@ -285,9 +344,13 @@ export class QuotaService {
           if (name != null && name !== expected) return;
           this.scheduleWatchedRefresh(key, 300);
         });
+        watcher.on('error', () => {
+          try { watcher.close(); } catch {}
+          if (this.accountWatchers.get(key)?.watcher === watcher) this.accountWatchers.delete(key);
+        });
         this.accountWatchers.set(key, { dir, watcher });
       } catch {
-        // 账号配置目录尚未生成时跳过监听，后续仍由轮询兜底
+        // 账号配置目录尚未生成时跳过监听，后续登录后在轮询周期自动补挂
       }
     }
   }
@@ -340,11 +403,14 @@ export class QuotaService {
       try { watcher.close(); } catch {}
     }
     this.accountWatchers.clear();
-    for (const watcher of this.baseWatchers) {
+    for (const watcher of this.baseWatchers.values()) {
       try { watcher.close(); } catch {}
     }
-    this.baseWatchers = [];
-    this.baseWatchersStarted = false;
+    this.baseWatchers.clear();
+    if (this.piSessionsWatcher) {
+      try { this.piSessionsWatcher.close(); } catch {}
+      this.piSessionsWatcher = null;
+    }
   }
 
   public getQuota(cliId: string = 'kimi'): QuotaData {
@@ -397,7 +463,11 @@ export class QuotaService {
   }
 
   public async refreshAllQuotas(): Promise<Record<string, QuotaData>> {
-    const cliIds = ['kimi', 'codex', 'claude', 'opencode', 'agy', 'pi', 'grok', ...this.accounts.keys()];
+    if (this.pollingActive) {
+      void this.ensureBaseWatchers();
+      this.syncAccountWatchers();
+    }
+    const cliIds = ['kimi', 'codex', 'claude', 'opencode', 'agy', 'pi', 'grok', 'terminal', ...this.accounts.keys()];
     await Promise.allSettled(cliIds.map((id) => this.fetchQuotaForCli(id)));
     this.broadcast();
     return this.quotasCache;
@@ -405,7 +475,7 @@ export class QuotaService {
 
   private async fetchQuotaForCli(cliId: string, forceUsage = false): Promise<void> {
     const now = Date.now();
-    if (!forceUsage && this.cacheExpiry[cliId] && now < this.cacheExpiry[cliId]) {
+    if (cliId !== 'terminal' && !forceUsage && this.cacheExpiry[cliId] && now < this.cacheExpiry[cliId]) {
       return;
     }
 
@@ -434,6 +504,9 @@ export class QuotaService {
         case 'grok':
           data = await this.fetchGrokQuota();
           break;
+        case 'terminal':
+          data = this.buildTerminalQuota();
+          break;
       }
 
       if (data) {
@@ -456,22 +529,17 @@ export class QuotaService {
 
     try {
       const content = await fs.promises.readFile(configPath, 'utf8');
-      const defaultModelMatch = content.match(/default_model\s*=\s*["']([^"']+)["']/);
-      const defaultModelKey = defaultModelMatch ? defaultModelMatch[1] : '';
+      const sections = parseTomlStrings(content);
+      const top = sections.get('') ?? new Map<string, string>();
+      const defaultModelKey = top.get('default_model') ?? '';
 
       if (defaultModelKey) {
-        const escapedKey = defaultModelKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const sectionRegex = new RegExp(`\\[models\\."?${escapedKey}"?\\]([\\s\\S]*?)(?=\\n\\[|$)`);
-        const sectionMatch = content.match(sectionRegex);
-        if (sectionMatch) {
-          const displayMatch = sectionMatch[1].match(/display_name\s*=\s*["']([^"']+)["']/);
-          if (displayMatch && displayMatch[1]) {
-            model = displayMatch[1];
-          }
-          const modelEffortMatch = sectionMatch[1].match(/default_effort\s*=\s*["']([^"']+)["']/);
-          if (modelEffortMatch && modelEffortMatch[1]) {
-            effort = modelEffortMatch[1];
-          }
+        const modelSection = sections.get(`models.${defaultModelKey}`);
+        if (modelSection) {
+          const displayName = modelSection.get('display_name');
+          if (displayName) model = displayName;
+          const modelEffort = modelSection.get('default_effort');
+          if (modelEffort) effort = modelEffort;
         }
 
         if (model === 'K3') {
@@ -483,13 +551,8 @@ export class QuotaService {
       }
 
       // 优先从 [thinking] 块中提取全局设置的 effort（如 effort = "high"）
-      const thinkingBlock = content.match(/\[thinking\]([\s\S]*?)(?=\n\[|$)/);
-      if (thinkingBlock) {
-        const ef = thinkingBlock[1].match(/effort\s*=\s*["']([^"']+)["']/);
-        if (ef && ef[1]) {
-          effort = ef[1];
-        }
-      }
+      const thinkingEffort = sections.get('thinking')?.get('effort');
+      if (thinkingEffort) effort = thinkingEffort;
     } catch (e) {
       console.warn('[QuotaService] Error parsing Kimi config:', e);
     }
@@ -506,10 +569,11 @@ export class QuotaService {
     if (await exists(configPath)) {
       try {
         const content = await fs.promises.readFile(configPath, 'utf8');
-        const mm = content.match(/model\s*=\s*["']([^"']+)["']/);
-        if (mm && mm[1]) model = mm[1];
-        const me = content.match(/model_reasoning_effort\s*=\s*["']([^"']+)["']/);
-        if (me && me[1]) effort = me[1];
+        const top = parseTomlStrings(content).get('') ?? new Map<string, string>();
+        const parsedModel = top.get('model');
+        if (parsedModel) model = parsedModel;
+        const parsedEffort = top.get('model_reasoning_effort');
+        if (parsedEffort) effort = parsedEffort;
       } catch (e) {
         console.warn('[QuotaService] Error reading Codex config:', e);
       }
@@ -579,11 +643,16 @@ export class QuotaService {
     let configDefaultModel: string | undefined = undefined;
     if (await exists(grokConfig)) {
       try {
-        const content = await fs.promises.readFile(grokConfig, 'utf8');
-        const mm = content.match(/default\s*=\s*["']([^"']+)["']/);
-        if (mm && mm[1]) configDefaultModel = mm[1];
-        const me = content.match(/(?:default_)?reasoning_effort\s*=\s*["']([^"']+)["']/);
-        if (me && me[1]) effort = me[1];
+        const sections = parseTomlStrings(await fs.promises.readFile(grokConfig, 'utf8'));
+        const top = sections.get('');
+        const modelSec = sections.get('model') ?? sections.get('models');
+        configDefaultModel = top?.get('default') ?? top?.get('default_model') ?? modelSec?.get('default') ?? modelSec?.get('default_model');
+        const parsedEffort = top?.get('default_reasoning_effort')
+          ?? top?.get('reasoning_effort')
+          ?? modelSec?.get('default_reasoning_effort')
+          ?? modelSec?.get('reasoning_effort')
+          ?? sections.get('thinking')?.get('effort');
+        if (parsedEffort) effort = parsedEffort;
       } catch {}
     }
 
@@ -750,29 +819,9 @@ export class QuotaService {
     return { model, effort };
   }
 
-  private async getKimiCurrentModel(): Promise<string> {
-    return (await this.getKimiInfo()).model;
-  }
-
-  private async getCodexCurrentModel(): Promise<string> {
-    return (await this.getCodexInfo()).model;
-  }
-
-  private async getClaudeCurrentModel(): Promise<string> {
-    return (await this.getClaudeInfo()).model;
-  }
-
-  private async getGrokCurrentModel(): Promise<string> {
-    return (await this.getGrokInfo()).model;
-  }
-
-  private async getOpenCodeCurrentModel(): Promise<string> {
-    return (await this.getOpenCodeInfo()).model;
-  }
-
   /** key 为缓存键（默认账号是 'kimi'），home 为该账号的 KIMI_CODE_HOME；账号读取失败时额度记为未知，不借用默认账号的缓存 */
   private async fetchKimiQuota(key: string = 'kimi', home: string = KIMI_HOME_DEFAULT): Promise<QuotaData> {
-    const isAccount = home !== KIMI_HOME_DEFAULT;
+    const isAccount = !isSamePath(home, KIMI_HOME_DEFAULT);
     const credPath = path.join(home, 'credentials', 'kimi-code.json');
     const kimiInfo = await this.getKimiInfo(home);
     const currentModel = kimiInfo.model;
@@ -892,7 +941,7 @@ export class QuotaService {
 
   /** key 为缓存键（默认账号是 'codex'），home 为该账号的 CODEX_HOME；账号没有会话记录时额度记为未知而不是 100% */
   private async fetchCodexQuota(key: string = 'codex', home: string = CODEX_HOME_DEFAULT): Promise<QuotaData> {
-    const isAccount = home !== CODEX_HOME_DEFAULT;
+    const isAccount = !isSamePath(home, CODEX_HOME_DEFAULT);
     const unknownPct = isAccount ? -1 : 100;
     const codexInfo = await this.getCodexInfo(home);
     const currentModel = codexInfo.model;
@@ -1082,9 +1131,7 @@ export class QuotaService {
         if (result.tokens === undefined && typeof tokens === 'number') result.tokens = tokens;
       } catch {}
     }
-    this.codexTailCache.delete(file);
-    this.codexTailCache.set(file, result);
-    while (this.codexTailCache.size > 50) this.codexTailCache.delete(this.codexTailCache.keys().next().value!);
+    setBoundedMap(this.codexTailCache, file, result, 50);
     return result;
   }
 

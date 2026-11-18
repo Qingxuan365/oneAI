@@ -2,8 +2,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { t } from './i18n';
+import type { AccountCliId, SessionAccount } from '../shared/types';
 
-export type AccountCliId = 'codex' | 'claude' | 'kimi';
+export type { AccountCliId, SessionAccount };
 
 /** 各 CLI 用来指定「配置目录」（登录凭据、会话记录都在其中）的环境变量；换一个目录就是换一个账号 */
 export const ACCOUNT_ENV_VARS: Record<AccountCliId, string> = {
@@ -11,12 +12,6 @@ export const ACCOUNT_ENV_VARS: Record<AccountCliId, string> = {
   claude: 'CLAUDE_CONFIG_DIR',
   kimi: 'KIMI_CODE_HOME',
 };
-
-export interface SessionAccount {
-  cliId: AccountCliId;
-  configDir: string;
-  env?: Record<string, string>;
-}
 
 export function isAccountCli(id: unknown): id is AccountCliId {
   return id === 'codex' || id === 'claude' || id === 'kimi';

@@ -2,12 +2,10 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildAccountEnv, SessionAccount } from './account-env';
+import type { LoginStatus } from '../shared/types';
 import { t } from './i18n';
 
-export interface LoginStatus {
-  loggedIn: boolean | null; // null：命令输出无法识别
-  detail?: string;          // 可显示的补充信息，如 Claude 返回的邮箱；无则缺省
-}
+export type { LoginStatus };
 
 // 用各 CLI 自带的状态命令判断登录状态，不读取任何凭据文件；Kimi Code 没有状态命令，只检查凭据文件是否存在
 const STATUS_COMMANDS: Partial<Record<SessionAccount['cliId'], string>> = {

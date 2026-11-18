@@ -51,10 +51,25 @@ const DEFAULT_SETTINGS: AppSettings = {
 const workReminderText = (hours: number) => t('您已经工作 {n} 小时了，该休息一下了。', { n: hours });
 const appOpenedAt = Date.now();
 const IDLE_AFTER_MS = 10_000;
+const DEFAULT_PREVIEW_WIDTH = 420;
 
 // 启动结果转为任务状态，失败时保留原因供侧栏与终端区显示
 function startOutcome(result?: { success: boolean; error?: string }): Pick<TaskSession, 'status' | 'errorMessage'> {
   return result?.success ? { status: 'running', errorMessage: undefined } : { status: 'error', errorMessage: result?.error || t('终端启动失败') };
+}
+
+function sameHistoryEntries(a: HistoryEntry[], b: HistoryEntry[]): boolean {
+  return a.length === b.length && a.every((item, i) => {
+    const other = b[i];
+    return item.id === other.id
+      && item.cliId === other.cliId
+      && item.updatedAt === other.updatedAt
+      && item.title === other.title
+      && item.cwd === other.cwd
+      && item.command === other.command
+      && item.accountId === other.accountId
+      && item.accountName === other.accountName;
+  });
 }
 
 function loadSavedSettings(): AppSettings {
@@ -159,19 +174,36 @@ export const App: React.FC = () => {
   // 任务启动：按任务绑定的账号注入配置目录；账号配置已被删除时拒绝启动，避免悄悄回落到默认账号
   const accountsRef = useRef(settings.accounts);
   accountsRef.current = settings.accounts;
-  const startSession = useCallback((task: TaskSession, cli: Pick<CliDef, 'defaultCommand' | 'custom'>) => {
+  const earlyExitedIdsRef = useRef<Map<string, number>>(new Map());
+  const lastOutputRef = useRef<Map<string, number>>(new Map());
+  const resolveTaskLaunch = useCallback((task: TaskSession, cli?: Pick<CliDef, 'defaultCommand' | 'custom'> | null) => {
     const account = task.accountId ? accountsRef.current.find((item) => item.id === task.accountId) : undefined;
     if (task.accountId && !account) {
-      return Promise.resolve({ success: false, error: t('该任务使用的账号配置已被删除。请关闭任务后重新新建，或在「设置 → 账号」中重新添加该账号。') });
+      return {
+        ok: false as const,
+        error: t('该任务使用的账号配置已被删除。请关闭任务后重新新建，或在「设置 → 账号」中重新添加该账号。'),
+      };
+    }
+    return {
+      ok: true as const,
+      options: {
+        command: task.command || cli?.defaultCommand,
+        cwd: task.cwd,
+        shell: cli?.custom,
+        account: account && toSessionAccount(account),
+      },
+    };
+  }, []);
+  const startSession = useCallback((task: TaskSession, cli: Pick<CliDef, 'defaultCommand' | 'custom'>) => {
+    const resolved = resolveTaskLaunch(task, cli);
+    if (!resolved.ok) {
+      return Promise.resolve({ success: false, error: resolved.error });
     }
     return window.electronAPI.createSession({
       id: task.id,
-      command: task.command || cli.defaultCommand,
-      cwd: task.cwd,
-      shell: cli.custom,
-      account: account && toSessionAccount(account),
+      ...resolved.options,
     });
-  }, []);
+  }, [resolveTaskLaunch]);
   useEffect(() => {
     void window.electronAPI?.setQuotaAccounts?.(settings.accounts.map((a) => ({ key: a.id, cliId: a.cliId, configDir: a.configDir })));
   }, [settings.accounts]);
@@ -230,7 +262,12 @@ export const App: React.FC = () => {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isUsageOpen, setIsUsageOpen] = useState(false);
   const [filePreview, setFilePreview] = useState<{ cwd: string; path: string; line?: number; openedAt: number } | null>(null);
-  const [previewWidth, setPreviewWidth] = useState(420);
+  const [previewWidth, setPreviewWidth] = useState<number>(() => {
+    try {
+      const saved = Number(localStorage.getItem('oneai_preview_width'));
+      return Number.isFinite(saved) && saved >= 280 && saved <= 2400 ? saved : DEFAULT_PREVIEW_WIDTH;
+    } catch { return DEFAULT_PREVIEW_WIDTH; }
+  });
   // null 表示尚未检测完成（或非 Electron 预览），此时显示全部分组
   const [installed, setInstalled] = useState<Record<string, boolean> | null>(null);
   const customClis = settings.customClis;
@@ -255,7 +292,7 @@ export const App: React.FC = () => {
   });
 
   // 弹窗状态
-  const [newTaskContext, setNewTaskContext] = useState<{ folderPath: string; cliId?: string } | null>(null);
+  const [newTaskContext, setNewTaskContext] = useState<{ folderPath: string; cliId?: string; accountId?: string } | null>(null);
   const isNewTaskOpen = newTaskContext !== null;
 
   // 动态应用全局 UI 界面缩放比例
@@ -286,6 +323,10 @@ export const App: React.FC = () => {
       else localStorage.setItem('oneai_sidebar_width', String(sidebarWidth));
     } catch {}
   }, [sidebarWidth]);
+
+  useEffect(() => {
+    try { localStorage.setItem('oneai_preview_width', String(previewWidth)); } catch {}
+  }, [previewWidth]);
 
   // 全局快捷键缩放终端字体（Ctrl + / Ctrl - / Ctrl 0）。在捕获阶段处理并阻止继续传播：
   // 冒泡阶段时 xterm 已把 Ctrl+- 转成 \x1f（Ctrl+_，多数 CLI 的「撤销」）发给 CLI。排除 Alt，避免 AltGr 组合被误判
@@ -442,9 +483,17 @@ export const App: React.FC = () => {
         );
         if (initialTask && initialCli) {
           if (initialTask.id !== activeTaskId) setActiveTaskId(initialTask.id);
-          setTasks((prev) => prev.map((t) => t.id === initialTask.id ? { ...t, status: 'starting' } : t));
+          earlyExitedIdsRef.current.delete(initialTask.id);
+          lastOutputRef.current.set(initialTask.id, Date.now());
+          setTasks((prev) => prev.map((t) => t.id === initialTask.id ? { ...t, status: 'starting', errorMessage: undefined } : t));
           startSession(initialTask, initialCli).then((result) => {
-            setTasks((prev) => prev.map((t) => t.id === initialTask.id ? { ...t, ...startOutcome(result) } : t));
+            const exitedEarly = earlyExitedIdsRef.current.has(initialTask.id);
+            earlyExitedIdsRef.current.delete(initialTask.id);
+            setTasks((prev) => prev.map((t) => {
+              if (t.id !== initialTask.id) return t;
+              if (result?.success && (exitedEarly || t.status === 'stopped')) return { ...t, status: 'stopped', errorMessage: undefined };
+              return { ...t, ...startOutcome(result) };
+            }));
           }).catch(() => setTasks((prev) => prev.map((t) => t.id === initialTask.id ? { ...t, status: 'error' } : t)));
         } else {
           setActiveTaskId(null);
@@ -452,8 +501,15 @@ export const App: React.FC = () => {
       });
 
       // 监听终端进程退出事件，将对应任务状态翻转为 'stopped'
-      const unsub = window.electronAPI.onSessionExit(({ id }) => {
+      const unsub = window.electronAPI.onSessionExit(({ id, exitCode }) => {
         const exited = tasksRef.current.find((t) => t.id === id);
+        if (!exited) {
+          if (earlyExitedIdsRef.current.size >= 64) {
+            const oldest = earlyExitedIdsRef.current.keys().next().value;
+            if (oldest !== undefined) earlyExitedIdsRef.current.delete(oldest);
+          }
+          earlyExitedIdsRef.current.set(id, exitCode);
+        }
         if (exited && isTaskAlive(exited.status)) markUnread([id]);
         setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, status: 'stopped' } : t)));
       });
@@ -473,7 +529,11 @@ export const App: React.FC = () => {
     const refresh = (force = false) => {
       if (!force && document.hidden) return;
       lastAt = Date.now();
-      void list(accountsRef.current).then((entries) => { if (!disposed && Array.isArray(entries)) setHistory(entries); }).catch(() => {});
+      void list(accountsRef.current).then((entries) => {
+        if (!disposed && Array.isArray(entries)) {
+          setHistory((prev) => (sameHistoryEntries(prev, entries) ? prev : entries));
+        }
+      }).catch(() => {});
     };
     const onVisible = () => {
       if (!document.hidden && Date.now() - lastAt >= 120_000) refresh(true);
@@ -494,7 +554,11 @@ export const App: React.FC = () => {
     const list = window.electronAPI?.listSessionHistory;
     if (!list) return;
     let disposed = false;
-    void list(settings.accounts).then((entries) => { if (!disposed && Array.isArray(entries)) setHistory(entries); }).catch(() => {});
+    void list(settings.accounts).then((entries) => {
+      if (!disposed && Array.isArray(entries)) {
+        setHistory((prev) => (sameHistoryEntries(prev, entries) ? prev : entries));
+      }
+    }).catch(() => {});
     return () => { disposed = true; };
   }, [historyAccountsKey, settings.accounts]);
   const recentFolders = useMemo(() => {
@@ -615,7 +679,7 @@ export const App: React.FC = () => {
   // 只能判断输出静默，无法区分「已完成」与「在等待确认」。
   useEffect(() => {
     if (!window.electronAPI?.onSessionData) return;
-    const lastOutput = new Map<string, number>();
+    const lastOutput = lastOutputRef.current;
     const setStatus = (ids: string[], from: TaskSession['status'], to: TaskSession['status']) => {
       if (ids.length === 0) return;
       setTasks((prev) => prev.map((t) => ids.includes(t.id) && t.status === from ? { ...t, status: to } : t));
@@ -627,6 +691,10 @@ export const App: React.FC = () => {
     });
     const timer = window.setInterval(() => {
       const now = Date.now();
+      const currentIds = new Set(tasksRef.current.map((t) => t.id));
+      for (const id of [...lastOutput.keys()]) {
+        if (!currentIds.has(id)) lastOutput.delete(id);
+      }
       const idleIds = tasksRef.current
         .filter((t) => t.status === 'running' && now - (lastOutput.get(t.id) ?? now) > IDLE_AFTER_MS)
         .map((t) => t.id);
@@ -636,7 +704,7 @@ export const App: React.FC = () => {
       markUnread(idleIds);
     }, 2000);
     return () => { unsub?.(); window.clearInterval(timer); };
-  }, []);
+  }, [markUnread]);
 
   const foldersRef = useRef(folders);
   foldersRef.current = folders;
@@ -650,6 +718,7 @@ export const App: React.FC = () => {
   workspacePathRef.current = workspacePath;
 
   const handleResetSidebarWidth = useCallback(() => setSidebarWidth(null), []);
+  const handleResetPreviewWidth = useCallback(() => setPreviewWidth(DEFAULT_PREVIEW_WIDTH), []);
   const handleToggleSidebar = useCallback(() => setIsSidebarCollapsed((collapsed) => !collapsed), []);
   const handleOpenSettings = useCallback(() => setIsSettingsOpen(true), []);
   const handleOpenHistory = useCallback(() => setIsHistoryOpen(true), []);
@@ -695,11 +764,21 @@ export const App: React.FC = () => {
     // createSession 对已存在的 PTY 是幂等操作。每次选择都校验一次，避免界面状态
     // 与主进程真实会话脱节后，键盘输入被 writeSession 静默丢弃。
     if (window.electronAPI && task && cli && (startIfStopped || isTaskAlive(task.status))) {
-      if (!isTaskAlive(task.status) || task.status === 'starting') {
-        setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, status: 'starting' } : t));
+      const restarting = !isTaskAlive(task.status) || task.status === 'starting';
+      if (restarting) {
+        earlyExitedIdsRef.current.delete(taskId);
+        lastOutputRef.current.set(taskId, Date.now());
+        setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, status: 'starting', errorMessage: undefined } : t));
       }
       startSession(task, cli).then((result) => {
-        setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, ...startOutcome(result) } : t));
+        const exitedEarly = earlyExitedIdsRef.current.has(taskId);
+        earlyExitedIdsRef.current.delete(taskId);
+        setTasks((prev) => prev.map((t) => {
+          if (t.id !== taskId) return t;
+          if (result?.success && (exitedEarly || t.status === 'stopped')) return { ...t, status: 'stopped', errorMessage: undefined };
+          if (result?.success && (t.status === 'idle' || t.status === 'waiting')) return { ...t, errorMessage: undefined };
+          return { ...t, ...startOutcome(result) };
+        }));
       }).catch(() => setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, status: 'error' } : t)));
     }
   }, [startSession]);
@@ -734,9 +813,9 @@ export const App: React.FC = () => {
     setSettings((prev) => ({ ...prev, customClis: next }));
   }, []);
 
-  // 触发新建任务弹窗：在哪个文件夹里、预选哪个 CLI
-  const handleOpenNewTask = useCallback((folderPath: string, cliId?: string) => {
-    setNewTaskContext({ folderPath, cliId });
+  // 触发新建任务弹窗：在哪个文件夹里、预选哪个 CLI 与账号
+  const handleOpenNewTask = useCallback((folderPath: string, cliId?: string, accountId?: string) => {
+    setNewTaskContext({ folderPath, cliId, accountId });
   }, []);
 
   // 添加文件夹：只把文件夹加入侧栏，不结束任何已在运行的终端
@@ -779,9 +858,17 @@ export const App: React.FC = () => {
     if (accountId && !account) return { success: false, error: t('所选账号配置不存在，请在「设置 → 账号」中检查。') };
     const isCustomCli = Boolean(allClisRef.current.find((item) => item.id === groupId)?.custom);
     if (window.electronAPI) {
+      earlyExitedIdsRef.current.delete(newTaskId);
       const result = await window.electronAPI.createSession({ id: newTaskId, command: command || 'powershell.exe', cwd: resolvedCwd, shell: isCustomCli, account: account && toSessionAccount(account) });
-      if (!result.success) return { success: false, error: result.error || t('终端启动失败') };
+      if (!result.success) {
+        earlyExitedIdsRef.current.delete(newTaskId);
+        return { success: false, error: result.error || t('终端启动失败') };
+      }
     }
+    const exitedEarly = earlyExitedIdsRef.current.has(newTaskId);
+    earlyExitedIdsRef.current.delete(newTaskId);
+    const now = Date.now();
+    if (!exitedEarly) lastOutputRef.current.set(newTaskId, now);
     const newTask: TaskSession = {
       id: newTaskId,
       groupId,
@@ -789,9 +876,9 @@ export const App: React.FC = () => {
       command: command || 'powershell.exe',
       historyId,
       accountId,
-      status: 'running',
+      status: exitedEarly ? 'stopped' : 'running',
       cwd: resolvedCwd,
-      createdAt: Date.now(),
+      createdAt: now,
     };
 
     setTasks((prev) => [...prev, newTask]);
@@ -805,14 +892,14 @@ export const App: React.FC = () => {
   const quickCreatingRef = useRef(new Set<string>());
   const handleQuickNewTask = useCallback(async (folderPath: string, cliId: string, accountId?: string) => {
     const cli = allClisRef.current.find((item) => item.id === cliId);
-    const lockKey = `${folderKey(folderPath)}:${cliId}`;
+    const lockKey = `${folderKey(folderPath)}:${cliId}:${accountId ?? ''}`;
     if (!cli || quickCreatingRef.current.has(lockKey)) return;
     quickCreatingRef.current.add(lockKey);
     try {
       const result = await handleCreateTask(cliId, nextTaskTitle(tasksInFolder(tasksRef.current, folderPath)), cli.defaultCommand, folderPath, undefined, accountId);
       if (!result.success) {
         await notify(t('任务启动失败'), t('{reason}。可以在接下来的窗口中修改启动命令或工作目录。', { reason: result.error || t('终端启动失败') }));
-        handleOpenNewTask(folderPath, cliId);
+        handleOpenNewTask(folderPath, cliId, accountId);
       }
     } finally {
       quickCreatingRef.current.delete(lockKey);
@@ -893,10 +980,25 @@ export const App: React.FC = () => {
       confirmLabel: t('重启'),
       danger: true,
     })) return;
-    setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, status: 'starting' } : t));
-    const result = await terminalViewportRef.current?.restartActiveTerminal(taskId);
-    setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, ...startOutcome(result) } : t));
-  }, [askConfirm]);
+    const cli = allClisRef.current.find((item) => item.id === task.groupId);
+    const resolved = resolveTaskLaunch(task, cli);
+    if (!resolved.ok) {
+      void window.electronAPI?.killSession(taskId);
+      setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, status: 'error', errorMessage: resolved.error } : t));
+      return;
+    }
+    earlyExitedIdsRef.current.delete(taskId);
+    lastOutputRef.current.set(taskId, Date.now());
+    setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, status: 'starting', errorMessage: undefined } : t));
+    const result = await terminalViewportRef.current?.restartActiveTerminal(taskId, resolved.options);
+    const exitedEarly = earlyExitedIdsRef.current.has(taskId);
+    earlyExitedIdsRef.current.delete(taskId);
+    setTasks((prev) => prev.map((t) => {
+      if (t.id !== taskId) return t;
+      if (result?.success && (exitedEarly || t.status === 'stopped')) return { ...t, status: 'stopped', errorMessage: undefined };
+      return { ...t, ...startOutcome(result) };
+    }));
+  }, [askConfirm, resolveTaskLaunch]);
 
   // 侧栏右键「重启」：已停止的任务切过去并启动，存活的任务原地重启
   const handleRestartTask = useCallback((taskId: string) => {
@@ -969,11 +1071,14 @@ export const App: React.FC = () => {
     if (!e.shiftKey && key === ',') { setIsSettingsOpen(true); return true; }
     if (!e.shiftKey) return false;
     if (key === 't' || key === 'n') {
-      // 沿用当前任务的 CLI，在当前文件夹新建
+      // 沿用当前任务的 CLI（以及仍有效的账号），在当前文件夹新建
       const cli = currentGroup && visibleClis.some((item) => item.id === currentGroup.id) ? currentGroup : visibleClis[0];
       if (cli) {
-        if (key === 't') void handleQuickNewTask(workspacePath, cli.id);
-        else handleOpenNewTask(workspacePath, cli.id);
+        const inheritedAccountId = activeTask && cli.id === activeTask.groupId && activeTask.accountId && settings.accounts.some((a) => a.id === activeTask.accountId && a.cliId === cli.id)
+          ? activeTask.accountId
+          : undefined;
+        if (key === 't') void handleQuickNewTask(workspacePath, cli.id, inheritedAccountId);
+        else handleOpenNewTask(workspacePath, cli.id, inheritedAccountId);
       }
       return true;
     }
@@ -1181,6 +1286,7 @@ ${entry.cwd}`}
                 minimap={settings.previewMinimap}
                 width={previewWidth}
                 onResize={setPreviewWidth}
+                onResetWidth={handleResetPreviewWidth}
                 onClose={handleClosePreview}
                 language={settings.language}
               />
@@ -1197,6 +1303,7 @@ ${entry.cwd}`}
             onClose={() => setNewTaskContext(null)}
             clis={visibleClis}
             initialCliId={newTaskContext?.cliId}
+            initialAccountId={newTaskContext?.accountId}
             folderPath={newTaskContext?.folderPath ?? workspacePath}
             tasks={tasks}
             accounts={settings.accounts}
