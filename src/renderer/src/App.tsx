@@ -223,6 +223,14 @@ export const App: React.FC = () => {
   customClisRef.current = settings.customClis;
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+  // 任务完成提示音：开关打开且至少有一个任务不在当前视窗（或窗口失焦）时响一声
+  const notifyDoneSound = useCallback((ids: string[]) => {
+    const sound = settingsRef.current;
+    if (ids.length === 0 || sound.taskDoneSoundEnabled !== true) return;
+    const viewing = document.hasFocus() ? activeTaskIdRef.current : null;
+    const audible = sound.taskDoneSoundBackgroundOnly === false ? ids : ids.filter((id) => id !== viewing);
+    if (audible.length > 0) playTaskDoneSound(sound.taskDoneSoundVolume);
+  }, []);
   const voiceReminderEnabledRef = useRef(settings.voiceReminderEnabled);
   voiceReminderEnabledRef.current = settings.voiceReminderEnabled;
 
@@ -522,6 +530,8 @@ export const App: React.FC = () => {
           earlyExitedIdsRef.current.set(id, exitCode);
         }
         if (exited && isTaskAlive(exited.status)) markUnread([id]);
+        // 启动中的退出（重启时旧进程退出、启动即失败）不响
+        if (exited && (exited.status === 'running' || exited.status === 'idle')) notifyDoneSound([id]);
         setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, status: 'stopped' } : t)));
       });
       return () => { disposed = true; unsub(); };
@@ -687,7 +697,7 @@ export const App: React.FC = () => {
   }, [summaryKey]);
 
   // 空闲检测：任务启动后默认「空闲」，有持续输出时为「运行中」，连续 IDLE_AFTER_MS 没有输出回到「空闲」；
-  // 静默满 DONE_NOTIFY_AFTER_MS 才标记未读并播放提示音（期间恢复输出则继续等待）。
+  // 提示音在转空闲的那一刻响；静默满 DONE_NOTIFY_AFTER_MS 才标记未读（期间恢复输出则继续等待）。
   // 只能判断输出静默，无法区分「已完成」与「在等待确认」。
   useEffect(() => {
     if (!window.electronAPI?.onSessionData) return;
@@ -724,15 +734,11 @@ export const App: React.FC = () => {
       setStatus(idleIds, 'running', 'idle');
       doneIds.forEach((id) => pendingDone.delete(id));
       markUnread(doneIds);
-      const sound = settingsRef.current;
-      if (doneIds.length > 0 && sound.taskDoneSoundEnabled === true) {
-        const viewing = document.hasFocus() ? activeTaskIdRef.current : null;
-        const audible = sound.taskDoneSoundBackgroundOnly === false ? doneIds : doneIds.filter((id) => id !== viewing);
-        if (audible.length > 0) playTaskDoneSound(sound.taskDoneSoundVolume);
-      }
+      // 提示音与状态点同步：运行中转空闲的那一刻响
+      notifyDoneSound(idleIds);
     }, 1000);
     return () => { unsub?.(); window.clearInterval(timer); };
-  }, [markUnread]);
+  }, [markUnread, notifyDoneSound]);
 
   const foldersRef = useRef(folders);
   foldersRef.current = folders;

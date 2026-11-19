@@ -502,7 +502,7 @@ export const EN: Record<string, string> = {
   '小时': 'hours',
   '任务完成提示音': 'Task finished sound',
   '任务停止输出时播放提示音': 'Play a sound when a task stops producing output',
-  '任务由「运行中」转为「空闲」时响一声；无法区分已完成与等待确认': 'Chimes once when a task goes from Running to Idle; it cannot tell finished from waiting for confirmation',
+  '任务由「运行中」转为「空闲」或进程退出时响一声；无法区分已完成与等待确认': 'Chimes once when a task goes from Running to Idle or its process exits; it cannot tell finished from waiting for confirmation',
   '仅在后台任务时响': 'Only for background tasks',
   '正在查看的任务不响；窗口失焦时所有任务都会响': 'Silent for the task you are viewing; every task chimes when the window is unfocused',
   '提示音音量': 'Sound volume',

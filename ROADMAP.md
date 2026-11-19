@@ -8,6 +8,7 @@
 ## 2. 进度看板
 
 ### 已完成
+- [x] 2026-11-19 09:44 完成提示音与状态点同步：运行中转空闲的那一刻响（不再等静默 10 秒，未读标记仍等 10 秒）；运行中或空闲的任务进程退出时也响，启动中退出（重启旧进程、启动即失败）不响；抽出 `notifyDoneSound` 共用「仅后台任务响」判断；同步设置页提示、英文译文与 `docs/features*.md`。
 - [x] 2026-11-19 09:34 任务状态分档判定：状态点静默 4 秒回到空闲（`IDLE_AFTER_MS`），未读标记与完成提示音仍等静默 10 秒（`DONE_NOTIFY_AFTER_MS`，期间恢复输出则继续等待）；轮询间隔 2 秒改 1 秒；同步 `docs/features*.md`。
 - [x] 2026-11-19 09:22 任务状态简化：启动后默认「空闲」，仅在持续有输出时显示「运行中」，输出静默 10 秒回到空闲；启动 / 重启后 5 秒内的输出不计入运行中（`STARTUP_GRACE_MS`）；删除从未使用的 `waiting`（等待输入）状态及其文案、译文与检查项。
 - [x] 2026-11-19 09:15 版本号升到 2.2.2 并生成安装包 `OneAI-Setup-2.2.2.exe`（85319058 字节），随 GitHub Release `v2.2.2` 发布；包含运行中转圈、任务完成提示音、休息提醒称呼与输出静默判断修复。
@@ -126,6 +127,7 @@
 
 ## 4. 最近验证
 
+- **2026-11-19 09:44**：提示音同步与退出提示音改动：`npx tsc --noEmit`、`npm run check:main`、`npm run check:i18n`（552 条 0 缺失）、`npm run check:ui`（391 项通过，无失败）通过，`npm run build:win` 生成 `release/OneAI-Setup-2.2.2.exe`（85324248 字节）。未验证：提示音真实听感、思考间隙是否误响（需桌面实测）。
 - **2026-11-19 09:34**：任务状态分档阈值改动：`npx tsc --noEmit`、`npm run check:main`（6/6）、`npm run check:i18n`（0 缺失）通过，`npm run build:win` 生成 `release/OneAI-Setup-2.2.2.exe`（85324274 字节）。未验证：真实 CLI 长时间思考时状态点来回跳动与提示音是否误报（需桌面实测）。
 - **2026-11-18 20:54**：版本 `2.2.1` 打包核对：`npx tsc --noEmit` 通过、`npm run check:main` 6/6 通过，`npm run build:win` 生成 `release/OneAI-Setup-2.2.1.exe`（85,322,423 字节）；启动白块、引导重复弹出与看门狗日志尚待实机确认。
 - **2026-11-18 20:09**：版本 `2.2.0` GitHub Release 发布核对：提交 `164ad5c` 已推送至 `origin/main`；GitHub Release `v2.2.0`（Latest，远端标签 `v2.2.0` 指向 `164ad5c`）线上附件 `OneAI-Setup-2.2.0.exe` 85320418 字节、SHA-256 `03895ba0…21cb` 与本地一致，`gh release view v2.2.0` 确认 `asset: OneAI-Setup-2.2.0.exe` 存在。未验证：重新安装运行 `OneAI-Setup-2.2.0.exe` 后在真实桌面窗口里的实际交互观感。
