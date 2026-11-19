@@ -56,7 +56,6 @@ export const EN: Record<string, string> = {
   '终端运行中': 'Terminal running',
   '空闲': 'Idle',
   '终端空闲': 'Terminal idle',
-  '等待输入': 'Waiting for input',
   '已停止': 'Stopped',
   '终端已停止': 'Terminal stopped',
   '启动失败': 'Failed to start',

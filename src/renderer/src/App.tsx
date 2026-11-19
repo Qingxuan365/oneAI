@@ -55,11 +55,12 @@ const DEFAULT_SETTINGS: AppSettings = {
 const workReminderText = (hours: number) => t('主人，您已经工作 {n} 小时了，该休息一下了。', { n: hours });
 const appOpenedAt = Date.now();
 const IDLE_AFTER_MS = 10_000;
+const STARTUP_GRACE_MS = 5_000;
 const DEFAULT_PREVIEW_WIDTH = 420;
 
 // 启动结果转为任务状态，失败时保留原因供侧栏与终端区显示
 function startOutcome(result?: { success: boolean; error?: string }): Pick<TaskSession, 'status' | 'errorMessage'> {
-  return result?.success ? { status: 'running', errorMessage: undefined } : { status: 'error', errorMessage: result?.error || t('终端启动失败') };
+  return result?.success ? { status: 'idle', errorMessage: undefined } : { status: 'error', errorMessage: result?.error || t('终端启动失败') };
 }
 
 function sameHistoryEntries(a: HistoryEntry[], b: HistoryEntry[]): boolean {
@@ -180,6 +181,7 @@ export const App: React.FC = () => {
   accountsRef.current = settings.accounts;
   const earlyExitedIdsRef = useRef<Map<string, number>>(new Map());
   const lastOutputRef = useRef<Map<string, number>>(new Map());
+  const startedAtRef = useRef<Map<string, number>>(new Map());
   const resolveTaskLaunch = useCallback((task: TaskSession, cli?: Pick<CliDef, 'defaultCommand' | 'custom'> | null) => {
     const account = task.accountId ? accountsRef.current.find((item) => item.id === task.accountId) : undefined;
     if (task.accountId && !account) {
@@ -491,6 +493,7 @@ export const App: React.FC = () => {
           if (initialTask.id !== activeTaskId) setActiveTaskId(initialTask.id);
           earlyExitedIdsRef.current.delete(initialTask.id);
           lastOutputRef.current.set(initialTask.id, Date.now());
+          startedAtRef.current.set(initialTask.id, Date.now());
           setTasks((prev) => prev.map((t) => t.id === initialTask.id ? { ...t, status: 'starting', errorMessage: undefined } : t));
           startSession(initialTask, initialCli).then((result) => {
             const exitedEarly = earlyExitedIdsRef.current.has(initialTask.id);
@@ -681,7 +684,7 @@ export const App: React.FC = () => {
     };
   }, [summaryKey]);
 
-  // 空闲检测：运行中的任务连续 IDLE_AFTER_MS 没有输出标为「空闲」，再有输出立即回到「运行中」。
+  // 空闲检测：任务启动后默认「空闲」，有持续输出时为「运行中」，连续 IDLE_AFTER_MS 没有输出回到「空闲」。
   // 只能判断输出静默，无法区分「已完成」与「在等待确认」。
   useEffect(() => {
     if (!window.electronAPI?.onSessionData) return;
@@ -692,7 +695,10 @@ export const App: React.FC = () => {
     };
     const unsub = window.electronAPI.onSessionData(({ id, data }) => {
       if (!hasVisibleOutput(data)) return;
-      lastOutput.set(id, Date.now());
+      const now = Date.now();
+      lastOutput.set(id, now);
+      // 启动阶段（欢迎横幅、会话恢复等）的输出不算运行中
+      if (now - (startedAtRef.current.get(id) ?? 0) < STARTUP_GRACE_MS) return;
       const task = tasksRef.current.find((t) => t.id === id);
       if (task?.status === 'idle') setStatus([id], 'idle', 'running');
     });
@@ -700,7 +706,7 @@ export const App: React.FC = () => {
       const now = Date.now();
       const currentIds = new Set(tasksRef.current.map((t) => t.id));
       for (const id of [...lastOutput.keys()]) {
-        if (!currentIds.has(id)) lastOutput.delete(id);
+        if (!currentIds.has(id)) { lastOutput.delete(id); startedAtRef.current.delete(id); }
       }
       const idleIds = tasksRef.current
         .filter((t) => t.status === 'running' && now - (lastOutput.get(t.id) ?? now) > IDLE_AFTER_MS)
@@ -781,6 +787,7 @@ export const App: React.FC = () => {
       if (restarting) {
         earlyExitedIdsRef.current.delete(taskId);
         lastOutputRef.current.set(taskId, Date.now());
+        startedAtRef.current.set(taskId, Date.now());
         setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, status: 'starting', errorMessage: undefined } : t));
       }
       startSession(task, cli).then((result) => {
@@ -789,7 +796,7 @@ export const App: React.FC = () => {
         setTasks((prev) => prev.map((t) => {
           if (t.id !== taskId) return t;
           if (result?.success && (exitedEarly || t.status === 'stopped')) return { ...t, status: 'stopped', errorMessage: undefined };
-          if (result?.success && (t.status === 'idle' || t.status === 'waiting')) return { ...t, errorMessage: undefined };
+          if (result?.success && t.status === 'idle') return { ...t, errorMessage: undefined };
           return { ...t, ...startOutcome(result) };
         }));
       }).catch(() => setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, status: 'error' } : t)));
@@ -881,7 +888,10 @@ export const App: React.FC = () => {
     const exitedEarly = earlyExitedIdsRef.current.has(newTaskId);
     earlyExitedIdsRef.current.delete(newTaskId);
     const now = Date.now();
-    if (!exitedEarly) lastOutputRef.current.set(newTaskId, now);
+    if (!exitedEarly) {
+      lastOutputRef.current.set(newTaskId, now);
+      startedAtRef.current.set(newTaskId, now);
+    }
     const newTask: TaskSession = {
       id: newTaskId,
       groupId,
@@ -889,7 +899,7 @@ export const App: React.FC = () => {
       command: command || 'powershell.exe',
       historyId,
       accountId,
-      status: exitedEarly ? 'stopped' : 'running',
+      status: exitedEarly ? 'stopped' : 'idle',
       cwd: resolvedCwd,
       createdAt: now,
     };
@@ -1002,6 +1012,7 @@ export const App: React.FC = () => {
     }
     earlyExitedIdsRef.current.delete(taskId);
     lastOutputRef.current.set(taskId, Date.now());
+    startedAtRef.current.set(taskId, Date.now());
     setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, status: 'starting', errorMessage: undefined } : t));
     const result = await terminalViewportRef.current?.restartActiveTerminal(taskId, resolved.options);
     const exitedEarly = earlyExitedIdsRef.current.has(taskId);

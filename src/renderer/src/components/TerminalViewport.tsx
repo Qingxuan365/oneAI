@@ -1393,7 +1393,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
       const activeInstance = instancesRef.current.get(activeTaskId);
       if (activeInstance) {
         const rawStatus = tasks.find((task) => task.id === activeTaskId)?.status;
-        const syncBucket = rawStatus === 'idle' || rawStatus === 'waiting' ? 'running' : rawStatus;
+        const syncBucket = rawStatus === 'idle' ? 'running' : rawStatus;
         const preKey = `${activeTaskId}:${syncBucket}`;
         if (!lastSizeSyncRef.current.startsWith(`${preKey}:`)) {
           requestAnimationFrame(() => {

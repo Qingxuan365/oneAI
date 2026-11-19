@@ -68,7 +68,7 @@ d:/GitHub/OneAI/
 │           ├── App.tsx                   # 全局状态、工作区持久化与会话调度
 │           ├── index.css                 # 语义颜色 token、各主题配色变量、通用控件类（icon-btn / btn-* / input / option）与顶栏容器查询断点
 │           ├── themes.ts                 # 主题明暗基调与设置页主题选项（浅 / 深、护眼、编辑器三组）；新增主题须同步 shared/types.ts、index.css、index.html 与 TerminalViewport
-│           ├── taskStatus.ts             # 任务存活态（starting / running / idle / waiting）判断
+│           ├── taskStatus.ts             # 任务存活态（starting / running / idle）判断
 │           ├── taskSummary.ts            # 任务行第二行支持的 CLI 与「新会话 · 时间」的格式化
 │           ├── clis.ts                   # 内置 CLI 定义（CliDef）与默认文件夹（本机用户主目录，由主进程提供）；全新安装不再预置示例任务
 │           ├── i18n.ts                   # 渲染进程多语言：t() / T() / setLanguage，文案以中文原文为键
@@ -124,7 +124,7 @@ interface TaskSession {
   id: string;             // 任务唯一标识（对应底层 ptyId）
   groupId: string;        // 所属 CLI 的 id（对应 CliDef.id）
   title: string;          // 任务标题，如 "Task 1: Auth Refactor"
-  status: 'starting' | 'running' | 'idle' | 'waiting' | 'stopped' | 'error';
+  status: 'starting' | 'running' | 'idle' | 'stopped' | 'error';
   cwd: string;            // 工作目录
   command?: string;       // 任务自定义启动命令
   accountId?: string;     // 使用的账号配置 id，缺省为该 CLI 的默认账号

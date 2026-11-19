@@ -284,7 +284,7 @@ app.whenReady().then(async () => {
         check(theme + ' header/sidebar same panel', panel === getComputedStyle(document.querySelector('aside > div')).backgroundColor);
       }
       check('all 24 theme panel colors differ', ALL_THEMES.length === 24 && new Set(colors).size === colors.length);
-      for (const [status, label] of Object.entries({ starting: '启动中', running: '运行中', idle: '空闲', waiting: '等待输入', stopped: '已停止', error: '启动失败' })) {
+      for (const [status, label] of Object.entries({ starting: '启动中', running: '运行中', idle: '空闲', stopped: '已停止', error: '启动失败' })) {
         window.draw(status);
         check(status + ' Chinese label', document.querySelector('header').textContent.includes(label));
         check(status + ' accessible task button', task().tagName === 'BUTTON');
