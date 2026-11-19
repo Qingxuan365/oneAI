@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Clock, Keyboard, LucideIcon, Minus, Monitor, Moon, Palette, Plus, RotateCcw, Settings, SlidersHorizontal, SquareTerminal, Sun, TerminalSquare, Users } from 'lucide-react';
 import { Account, AppSettings, CustomCli } from '../types';
 import { THEME_OPTIONS } from '../themes';
+import { playTaskDoneSound } from '../taskDoneSound';
 import { Modal } from './Modal';
 import { LANGUAGES, T, dateLocale, t } from '../i18n';
 import { AccountsSettings } from './AccountsSettings';
@@ -454,6 +455,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </span>
                   <Switch label={t('到时语音播报')} checked={settings.voiceReminderEnabled} onChange={(checked) => update({ voiceReminderEnabled: checked })} />
                 </div>
+              </Section>
+
+              <Section title={t('任务完成提示音')}>
+                <div className={row}>
+                  <span>
+                    <span className="block">{t('任务停止输出时播放提示音')}</span>
+                    <span className="block text-xs text-fg-faint">{t('任务由「运行中」转为「空闲」时响一声；无法区分已完成与等待确认')}</span>
+                  </span>
+                  <Switch
+                    label={t('任务停止输出时播放提示音')}
+                    checked={settings.taskDoneSoundEnabled === true}
+                    onChange={(checked) => { update({ taskDoneSoundEnabled: checked }); if (checked) playTaskDoneSound(settings.taskDoneSoundVolume); }}
+                  />
+                </div>
+                {settings.taskDoneSoundEnabled === true && (
+                  <>
+                    <div className={row}>
+                      <span>
+                        <span className="block">{t('仅在后台任务时响')}</span>
+                        <span className="block text-xs text-fg-faint">{t('正在查看的任务不响；窗口失焦时所有任务都会响')}</span>
+                      </span>
+                      <Switch label={t('仅在后台任务时响')} checked={settings.taskDoneSoundBackgroundOnly !== false} onChange={(checked) => update({ taskDoneSoundBackgroundOnly: checked })} />
+                    </div>
+                    <div className={row}>
+                      <span className="block">{t('音量')}</span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        <input
+                          type="range"
+                          min="0"
+                          max="100"
+                          step="5"
+                          aria-label={t('提示音音量')}
+                          value={settings.taskDoneSoundVolume}
+                          onChange={(e) => update({ taskDoneSoundVolume: parseInt(e.target.value, 10) })}
+                          onPointerUp={() => playTaskDoneSound(settings.taskDoneSoundVolume)}
+                          className="slim w-36"
+                        />
+                        <span className="w-9 text-right font-mono text-xs text-fg-faint">{settings.taskDoneSoundVolume}%</span>
+                      </span>
+                    </div>
+                  </>
+                )}
               </Section>
 
               <Section title={t('音乐播放器')}>

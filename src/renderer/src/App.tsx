@@ -15,7 +15,8 @@ import { sanitizeCustomClis, toCliDef } from './customClis';
 import { sanitizeMusicStreams } from './musicStreams';
 import { getLanguage, isLanguage, setLanguage, systemLanguage, t } from './i18n';
 import { THEME_MODE } from './themes';
-import { isTaskAlive } from './taskStatus';
+import { hasVisibleOutput, isTaskAlive } from './taskStatus';
+import { playTaskDoneSound } from './taskDoneSound';
 
 // 低频弹窗与代码预览面板（含 highlight.js 词法表）按需异步分包加载，大幅减小首屏主包解析开销
 const NewTaskModal = lazy(() => import('./components/NewTaskModal').then((m) => ({ default: m.NewTaskModal })));
@@ -30,6 +31,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   onboardingDone: false,
   theme: 'system',
   voiceReminderEnabled: true,
+  taskDoneSoundEnabled: false,
+  taskDoneSoundVolume: 60,
+  taskDoneSoundBackgroundOnly: true,
   workReminderHours: 1,
   terminalFontSize: 15,
   terminalLineHeight: 1.3,
@@ -48,7 +52,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   customClis: [],
 };
 
-const workReminderText = (hours: number) => t('您已经工作 {n} 小时了，该休息一下了。', { n: hours });
+const workReminderText = (hours: number) => t('主人，您已经工作 {n} 小时了，该休息一下了。', { n: hours });
 const appOpenedAt = Date.now();
 const IDLE_AFTER_MS = 10_000;
 const DEFAULT_PREVIEW_WIDTH = 420;
@@ -213,6 +217,8 @@ export const App: React.FC = () => {
   extraClisRef.current = extraClis;
   const customClisRef = useRef(settings.customClis);
   customClisRef.current = settings.customClis;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
   const voiceReminderEnabledRef = useRef(settings.voiceReminderEnabled);
   voiceReminderEnabledRef.current = settings.voiceReminderEnabled;
 
@@ -684,7 +690,8 @@ export const App: React.FC = () => {
       if (ids.length === 0) return;
       setTasks((prev) => prev.map((t) => ids.includes(t.id) && t.status === from ? { ...t, status: to } : t));
     };
-    const unsub = window.electronAPI.onSessionData(({ id }) => {
+    const unsub = window.electronAPI.onSessionData(({ id, data }) => {
+      if (!hasVisibleOutput(data)) return;
       lastOutput.set(id, Date.now());
       const task = tasksRef.current.find((t) => t.id === id);
       if (task?.status === 'idle') setStatus([id], 'idle', 'running');
@@ -702,6 +709,12 @@ export const App: React.FC = () => {
       tasksRef.current.forEach((t) => { if (!lastOutput.has(t.id)) lastOutput.set(t.id, now); });
       setStatus(idleIds, 'running', 'idle');
       markUnread(idleIds);
+      const sound = settingsRef.current;
+      if (idleIds.length > 0 && sound.taskDoneSoundEnabled === true) {
+        const viewing = document.hasFocus() ? activeTaskIdRef.current : null;
+        const audible = sound.taskDoneSoundBackgroundOnly === false ? idleIds : idleIds.filter((id) => id !== viewing);
+        if (audible.length > 0) playTaskDoneSound(sound.taskDoneSoundVolume);
+      }
     }, 2000);
     return () => { unsub?.(); window.clearInterval(timer); };
   }, [markUnread]);

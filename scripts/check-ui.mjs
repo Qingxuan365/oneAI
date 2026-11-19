@@ -289,7 +289,7 @@ app.whenReady().then(async () => {
         check(status + ' Chinese label', document.querySelector('header').textContent.includes(label));
         check(status + ' accessible task button', task().tagName === 'BUTTON');
         check(status + ' restart disabled', [...document.querySelectorAll('header button')].find(b => b.title.includes('当前终端') || b.title.includes('正在启动')).disabled === (status === 'starting'));
-        if (status === 'running') check('running dot static', getComputedStyle(task().querySelector('span')).animationName === 'none');
+        if (status === 'running') check('running dot spins', getComputedStyle(task().querySelector('span')).animationName === 'spin');
         if (status === 'starting') {
           const restart = byTitle('正在启动');
           check('starting restart visibly disabled', restart.disabled && Number(getComputedStyle(restart).opacity) < 1);

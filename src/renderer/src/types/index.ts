@@ -96,6 +96,9 @@ export interface AppSettings {
   onboardingDone: boolean; // 首次引导（选择语言、认识各入口）是否已完成；完成后不再弹出
   theme: 'system' | ThemeId; // 应用主题，默认跟随系统（仅在 light / dark 间切换）
   voiceReminderEnabled: boolean; // 工作满提醒时长时是否语音播报
+  taskDoneSoundEnabled: boolean; // 任务由运行转为空闲（输出停止）时播放提示音，默认 false
+  taskDoneSoundVolume: number; // 提示音音量 (0 ~ 100, 默认 60)
+  taskDoneSoundBackgroundOnly: boolean; // 仅当该任务不在当前视窗（非当前任务或窗口失焦）时才响，默认 true
   workReminderHours: number; // 工作时长提醒的间隔小时数，默认 1（1 ~ 12 的整数）
   terminalFontSize: number;   // 终端代码字体大小 (12 ~ 24, 默认 15)
   terminalLineHeight: number; // 终端行高 (1.2 ~ 1.6, 默认 1.3)
