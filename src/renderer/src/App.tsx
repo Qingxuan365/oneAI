@@ -54,7 +54,9 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 const workReminderText = (hours: number) => t('主人，您已经工作 {n} 小时了，该休息一下了。', { n: hours });
 const appOpenedAt = Date.now();
-const IDLE_AFTER_MS = 10_000;
+// 状态点较快回到「空闲」；未读标记与提示音用更长的静默时间确认，避免长推理、工具调用间隙误报
+const IDLE_AFTER_MS = 4_000;
+const DONE_NOTIFY_AFTER_MS = 10_000;
 const STARTUP_GRACE_MS = 5_000;
 const DEFAULT_PREVIEW_WIDTH = 420;
 
@@ -684,11 +686,13 @@ export const App: React.FC = () => {
     };
   }, [summaryKey]);
 
-  // 空闲检测：任务启动后默认「空闲」，有持续输出时为「运行中」，连续 IDLE_AFTER_MS 没有输出回到「空闲」。
+  // 空闲检测：任务启动后默认「空闲」，有持续输出时为「运行中」，连续 IDLE_AFTER_MS 没有输出回到「空闲」；
+  // 静默满 DONE_NOTIFY_AFTER_MS 才标记未读并播放提示音（期间恢复输出则继续等待）。
   // 只能判断输出静默，无法区分「已完成」与「在等待确认」。
   useEffect(() => {
     if (!window.electronAPI?.onSessionData) return;
     const lastOutput = lastOutputRef.current;
+    const pendingDone = new Set<string>();
     const setStatus = (ids: string[], from: TaskSession['status'], to: TaskSession['status']) => {
       if (ids.length === 0) return;
       setTasks((prev) => prev.map((t) => ids.includes(t.id) && t.status === from ? { ...t, status: to } : t));
@@ -701,6 +705,7 @@ export const App: React.FC = () => {
       if (now - (startedAtRef.current.get(id) ?? 0) < STARTUP_GRACE_MS) return;
       const task = tasksRef.current.find((t) => t.id === id);
       if (task?.status === 'idle') setStatus([id], 'idle', 'running');
+      if (task && (task.status === 'idle' || task.status === 'running')) pendingDone.add(id);
     });
     const timer = window.setInterval(() => {
       const now = Date.now();
@@ -708,20 +713,24 @@ export const App: React.FC = () => {
       for (const id of [...lastOutput.keys()]) {
         if (!currentIds.has(id)) { lastOutput.delete(id); startedAtRef.current.delete(id); }
       }
+      for (const id of [...pendingDone]) if (!currentIds.has(id)) pendingDone.delete(id);
+      const quietFor = (id: string) => now - (lastOutput.get(id) ?? now);
       const idleIds = tasksRef.current
-        .filter((t) => t.status === 'running' && now - (lastOutput.get(t.id) ?? now) > IDLE_AFTER_MS)
+        .filter((t) => t.status === 'running' && quietFor(t.id) > IDLE_AFTER_MS)
         .map((t) => t.id);
+      const doneIds = [...pendingDone].filter((id) => quietFor(id) > DONE_NOTIFY_AFTER_MS);
       // 尚无输出记录的任务从现在开始计时
       tasksRef.current.forEach((t) => { if (!lastOutput.has(t.id)) lastOutput.set(t.id, now); });
       setStatus(idleIds, 'running', 'idle');
-      markUnread(idleIds);
+      doneIds.forEach((id) => pendingDone.delete(id));
+      markUnread(doneIds);
       const sound = settingsRef.current;
-      if (idleIds.length > 0 && sound.taskDoneSoundEnabled === true) {
+      if (doneIds.length > 0 && sound.taskDoneSoundEnabled === true) {
         const viewing = document.hasFocus() ? activeTaskIdRef.current : null;
-        const audible = sound.taskDoneSoundBackgroundOnly === false ? idleIds : idleIds.filter((id) => id !== viewing);
+        const audible = sound.taskDoneSoundBackgroundOnly === false ? doneIds : doneIds.filter((id) => id !== viewing);
         if (audible.length > 0) playTaskDoneSound(sound.taskDoneSoundVolume);
       }
-    }, 2000);
+    }, 1000);
     return () => { unsub?.(); window.clearInterval(timer); };
   }, [markUnread]);
 
