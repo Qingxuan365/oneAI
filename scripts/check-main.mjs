@@ -69,10 +69,13 @@ try {
         fs.mkdirSync(path.join(fixtureRoot, 'userData'), { recursive: true });
 
         import { PtyManager, PtyOutputBatcher } from './src/main/pty-manager';
-        import { parseTomlStrings } from './src/main/quota-service';
+        import { computeSessionUsage, parseAgyUsage, parseAgyUsageGroups, parseTomlStrings } from './src/main/quota-service';
+        import { estimateModelCostUsd } from './src/main/model-pricing';
+        import { buildDashboardStats } from './src/main/usage-stats';
         import { isLocalOrLinkLocalHost, listTracks, parsePlaylist, readBodyTextCapped, resolveAllowedTrack, serveMusicTrack } from './src/main/music-library';
         import { readTaskSummaries } from './src/main/task-summary';
         import { allowPreviewFilePaths, readPreview, resolveInside } from './src/main/file-preview';
+        import { listProjectDirectory } from './src/main/project-tree';
         import { setBoundedMap } from './src/main/fs-utils';
         import { folderKey, quoteTerminalPath, extractPathMatches } from './src/shared/paths';
 
@@ -400,6 +403,226 @@ try {
               { file: 'D:\\\\My Dir\\\\a.ts', line: 99 },
             ],
           );
+        });
+
+        test('project-tree lazily lists directories with natural sort, dimmed flags, symlink containment and truncation', async () => {
+          const projRoot = path.join(fixtureRoot, 'tree-proj');
+          const outsideDir = path.join(fixtureRoot, 'tree-outside');
+          await fsp.mkdir(path.join(projRoot, '.git'), { recursive: true });
+          await fsp.mkdir(path.join(projRoot, 'node_modules', 'pkg'), { recursive: true });
+          await fsp.mkdir(path.join(projRoot, 'src', 'nested'), { recursive: true });
+          await fsp.mkdir(path.join(projRoot, 'docs'), { recursive: true });
+          await fsp.mkdir(outsideDir, { recursive: true });
+
+          await fsp.writeFile(path.join(projRoot, '.env'), 'KEY=1');
+          await fsp.writeFile(path.join(projRoot, 'item10.txt'), '10');
+          await fsp.writeFile(path.join(projRoot, 'item2.txt'), '2');
+          await fsp.writeFile(path.join(projRoot, 'README.md'), '# hi');
+          await fsp.writeFile(path.join(projRoot, 'src', 'App.tsx'), 'export {}');
+          await fsp.writeFile(path.join(projRoot, 'src', 'nested', 'index.ts'), 'export {}');
+          await fsp.writeFile(path.join(outsideDir, 'leak.txt'), 'nope');
+
+          let hasExtLink = false;
+          let hasLoopLink = false;
+          try {
+            await fsp.symlink(outsideDir, path.join(projRoot, 'ext-link'), 'junction');
+            hasExtLink = true;
+          } catch {}
+          try {
+            await fsp.symlink(path.join(projRoot, 'src'), path.join(projRoot, 'src', 'nested', 'loop-up'), 'junction');
+            hasLoopLink = true;
+          } catch {}
+
+          const rootRes = await listProjectDirectory(projRoot, '');
+          assert.equal(rootRes.ok, true);
+          assert.deepEqual(
+            rootRes.entries.map((e) => ({ name: e.name, isDir: e.isDir, dimmed: Boolean(e.dimmed), relPath: e.relPath })),
+            [
+              { name: '.git', isDir: true, dimmed: true, relPath: '.git' },
+              { name: 'docs', isDir: true, dimmed: false, relPath: 'docs' },
+              { name: 'node_modules', isDir: true, dimmed: true, relPath: 'node_modules' },
+              { name: 'src', isDir: true, dimmed: false, relPath: 'src' },
+              { name: '.env', isDir: false, dimmed: true, relPath: '.env' },
+              { name: 'item2.txt', isDir: false, dimmed: false, relPath: 'item2.txt' },
+              { name: 'item10.txt', isDir: false, dimmed: false, relPath: 'item10.txt' },
+              { name: 'README.md', isDir: false, dimmed: false, relPath: 'README.md' },
+            ],
+          );
+
+          const nestedRes = await listProjectDirectory(projRoot, 'src/nested');
+          assert.equal(nestedRes.ok, true);
+          assert.deepEqual(
+            nestedRes.entries.map((e) => e.relPath),
+            ['src/nested/index.ts'],
+          );
+          if (hasLoopLink) {
+            assert.ok(!nestedRes.entries.some((e) => e.name === 'loop-up'));
+          }
+
+          const traversal = await listProjectDirectory(projRoot, '../tree-outside');
+          assert.equal(traversal.ok, false);
+          assert.equal(traversal.entries.length, 0);
+
+          if (hasExtLink) {
+            const extTraversal = await listProjectDirectory(projRoot, 'ext-link');
+            assert.equal(extTraversal.ok, false);
+            assert.equal(extTraversal.entries.length, 0);
+          }
+
+          const capped = await listProjectDirectory(projRoot, '', 3);
+          assert.equal(capped.ok, true);
+          assert.equal(capped.truncated, true);
+          assert.equal(capped.totalCount, 8);
+          assert.deepEqual(capped.entries.map((e) => e.name), ['.git', 'docs', 'node_modules']);
+        });
+
+        test('quota-service parses Antigravity usage groups and computes universal session metrics', () => {
+          const now = Date.parse('2026-11-21T14:00:00Z');
+          const raw = [
+            'Gemini Models\\tWeekly Limit Remaining\\t75%\\t2026-11-28T10:03:45Z',
+            'Gemini Models\\tFive Hour Limit Remaining\\t12%\\t2026-11-21T15:03:45Z',
+            'Claude and GPT models\\tWeekly Limit Remaining\\t48%\\t2026-11-25T12:14:20Z',
+            'Claude and GPT models\\tFive Hour Limit Remaining\\t100%\\t2026-11-21T18:58:52Z',
+            'Gemini 4 Argon\\tGemini 4 Argon Weekly Limit\\t100%\\t2026-11-28T13:58:52Z',
+          ].join('\\n');
+
+          const neonOrch = parseAgyUsage(raw, 'Orchestrator (Neon)', now);
+          assert.equal(neonOrch.group, 'Gemini Models');
+          assert.equal(neonOrch.five.pct, 12);
+          assert.equal(neonOrch.seven.pct, 75);
+
+          const neon = parseAgyUsage(raw, 'Gemini 4 Neon (High)', now);
+          assert.equal(neon.group, 'Gemini Models');
+          assert.equal(neon.five.pct, 12);
+
+          const claude = parseAgyUsage(raw, 'Claude Opus 5.5 (High)', now);
+          assert.equal(claude.group, 'Claude and GPT models');
+          assert.equal(claude.five.pct, 100);
+          assert.equal(claude.seven.pct, 48);
+
+          const gpt = parseAgyUsage(raw, 'GPT-OSS 120B (Medium)', now);
+          assert.equal(gpt.group, 'Claude and GPT models');
+          assert.equal(gpt.seven.pct, 48);
+
+          const argon = parseAgyUsage(raw, 'Gemini 4 Argon (High)', now);
+          assert.equal(argon.group, 'Gemini 4 Argon');
+          assert.equal(argon.five.pct, -1);
+          assert.equal(argon.seven.pct, 100);
+
+          const argonOrch = parseAgyUsage(raw, 'Orchestrator (Argon)', now);
+          assert.equal(argonOrch.group, 'Gemini 4 Argon');
+          assert.equal(argonOrch.five.pct, -1);
+          assert.equal(argonOrch.seven.pct, 100);
+
+          // Expired reset timestamp resets percentage to 100
+          const expiredRaw = 'Gemini Models\\tFive Hour Limit Remaining\\t12%\\t2026-11-21T13:59:00Z';
+          assert.equal(parseAgyUsage(expiredRaw, 'Orchestrator (Neon)', now).five.pct, 100);
+
+          // computeSessionUsage breakdown + zero preservation
+          const full = computeSessionUsage({
+            input: 335_000,
+            output: 167_000,
+            cacheRead: 32_100_000,
+            cacheWrite: 0,
+            lastCtxTokens: 292_617,
+            ctxWindow: 475_000,
+            costUsd: 0.24,
+          });
+          assert.equal(full.tokenInput, 335_000);
+          assert.equal(full.tokenOutput, 167_000);
+          assert.equal(full.tokenCache, 32_100_000);
+          assert.equal(full.tokens, 32_602_000);
+          assert.equal(full.cacheHitPercent, 99);
+          assert.equal(full.ctxPercent, 62);
+          assert.equal(full.ctxTokens, 292_617);
+          assert.equal(full.ctxWindow, 475_000);
+          assert.equal(full.costUsd, 0.24);
+
+          const zeroCtx = computeSessionUsage({ input: 1000, output: 100, cacheRead: 0, ctxWindow: 1_000_000, ctxPercent: 0 });
+          assert.equal(zeroCtx.ctxPercent, 0);
+          assert.equal(zeroCtx.cacheHitPercent, 0);
+
+          const agyUsage = computeSessionUsage({ input: 9_000, output: 2_500, cacheRead: 186_000, lastCtxTokens: 195_000 });
+          assert.equal(agyUsage.ctxTokens, 195_000);
+          assert.equal(agyUsage.ctxPercent, undefined);
+          assert.equal(agyUsage.cacheHitPercent, 95);
+        });
+
+        test('model-pricing, parseAgyUsageGroups and buildDashboardStats aggregate multi-day metrics accurately', () => {
+          // Public API pricing vs internal/unpriced models
+          const sonnetCost = estimateModelCostUsd('Sonnet 4.6', { input: 1_000_000, output: 100_000, cacheRead: 2_000_000, cacheWrite: 0 });
+          assert.ok(sonnetCost !== null && Math.abs(sonnetCost - (3 + 1.5 + 0.6)) < 1e-6);
+          const codexCost = estimateModelCostUsd('gpt-5.3-codex', { input: 1_000_000, output: 1_000_000, cacheRead: 0, cacheWrite: 0 });
+          assert.ok(codexCost !== null && Math.abs(codexCost - 17.5) < 1e-6);
+          assert.equal(estimateModelCostUsd('Orchestrator (Neon)', { input: 1000, output: 100, cacheRead: 0, cacheWrite: 0 }), null);
+          assert.equal(estimateModelCostUsd('Gemini 4 Argon', { input: 1000, output: 100, cacheRead: 0, cacheWrite: 0 }), null);
+          assert.equal(estimateModelCostUsd('codex-auto-review', { input: 1000, output: 100, cacheRead: 0, cacheWrite: 0 }), null);
+
+          // parseAgyUsageGroups extracts every group in order and handles expired reset windows
+          const now = Date.parse('2026-11-21T14:00:00Z');
+          const rawGroups = [
+            'Gemini Models\\tFive Hour Limit Remaining\\t83%\\t2026-11-21T18:30:00Z',
+            'Gemini Models\\tWeekly Limit Remaining\\t67%\\t2026-11-28T08:30:00Z',
+            'Claude and GPT models\\tFive Hour Limit Remaining\\t10%\\t2026-11-21T13:59:00Z',
+            'Claude and GPT models\\tWeekly Limit Remaining\\t48%\\t2026-11-25T12:14:20Z',
+            'Gemini 4 Argon\\tGemini 4 Argon Weekly Limit\\t100%\\t2026-11-28T13:58:52Z',
+          ].join('\\n');
+          const groups = parseAgyUsageGroups(rawGroups, now);
+          assert.deepEqual(groups.map((g) => g.group), ['Gemini Models', 'Claude and GPT models', 'Gemini 4 Argon']);
+          assert.equal(groups[0].five.pct, 83);
+          assert.equal(groups[1].five.pct, 100);
+          assert.equal(groups[1].seven.pct, 48);
+          assert.equal(groups[2].five.pct, -1);
+          assert.equal(groups[2].seven.pct, 100);
+
+          // buildDashboardStats deduplicates by entry.key, normalizes project paths, preserves Pi native cost, and separates unpriced models
+          const day1 = new Date(2026, 10, 20, 10, 0, 0).getTime();
+          const day2 = new Date(2026, 10, 21, 10, 0, 0).getTime();
+          const stats = buildDashboardStats([
+            {
+              cliId: 'claude',
+              accountId: 'default',
+              accountName: '默认账号',
+              cwd: 'D:\\\\GitHub\\\\OneAI',
+              fallbackModel: '',
+              entries: [
+                { key: 'dup-1', ts: day1, model: 'Sonnet 4.6', input: 100_000, output: 10_000, cacheRead: 200_000, cacheWrite: 0 },
+                { key: 'dup-1', ts: day1, model: 'Sonnet 4.6', input: 100_000, output: 10_000, cacheRead: 200_000, cacheWrite: 0 },
+                { key: 'msg-2', ts: day2, model: 'Sonnet 4.6', input: 50_000, output: 5_000, cacheRead: 100_000, cacheWrite: 0 },
+              ],
+            },
+            {
+              cliId: 'agy',
+              accountId: 'default',
+              accountName: '默认账号',
+              cwd: undefined,
+              fallbackModel: 'Orchestrator',
+              entries: [
+                { ts: day2, model: 'Orchestrator', input: 25_000, output: 410, cacheRead: 0, cacheWrite: 0 },
+              ],
+            },
+            {
+              cliId: 'pi',
+              accountId: 'default',
+              accountName: '默认账号',
+              cwd: 'd:/github/oneai/',
+              fallbackModel: '',
+              entries: [
+                { ts: day2, model: 'custom-unlisted', input: 1000, output: 200, cacheRead: 0, cacheWrite: 0, costUsd: 0.12 },
+              ],
+            },
+          ], day2);
+          assert.equal(stats.sessions.length, 3);
+          assert.equal(stats.projects.length, 1);
+          assert.equal(stats.projects[0].name, 'OneAI');
+          assert.equal(stats.earliestDate, '2026-11-20');
+          assert.equal(stats.records.length, 4);
+          const claudeDay1 = stats.records.find((r) => r.date === '2026-11-20' && r.model === 'Sonnet 4.6');
+          assert.ok(claudeDay1 && claudeDay1.requests === 1 && claudeDay1.input === 100_000 && claudeDay1.costPriced);
+          const agyRec = stats.records.find((r) => r.model === 'Orchestrator');
+          assert.ok(agyRec && !agyRec.costPriced && agyRec.costUsd === 0);
+          const piRec = stats.records.find((r) => r.model === 'custom-unlisted');
+          assert.ok(piRec && piRec.costPriced && Math.abs(piRec.costUsd - 0.12) < 1e-6);
         });
       `,
     },

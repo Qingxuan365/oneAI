@@ -41,7 +41,8 @@ d:/GitHub/OneAI/
 │   │   ├── system-stats.ts    # 整机 CPU / 内存 / 网速采样（网速读物理网卡，常驻 PowerShell），每 2 秒推送给顶栏
 │   │   ├── task-summary.ts    # 读取任务对应会话（Claude / Codex / Kimi 的本机会话文件）里最近一条用户消息，供侧栏任务行第二行
 │   │   ├── model-format.ts    # Claude 模型 id 转显示名（无副作用，额度与用量共用）
-│   │   ├── usage-stats.ts     # 本周用量：流式解析 Claude Code / Codex（含 archived_sessions 与 .jsonl.zst，用 fzstd 解压）/ Antigravity（优先紧凑版 transcript.jsonl）/ Pi 本机会话记录，按 CLI × 账号 × 模型汇总请求数与 Tokens，给出近 26 周每日请求数（按文件 mtime + 大小缓存解析结果并持久化到 userData）
+│   │   ├── model-pricing.ts   # 公开模型 API 等值费率表，供 Dashboard 估算已收录模型的成本与价格覆盖率
+│   │   ├── usage-stats.ts     # 本周用量与 Dashboard 统计：流式解析 Claude Code / Codex（含 archived_sessions 与 .jsonl.zst，用 fzstd 解压）/ Antigravity（优先紧凑版 transcript.jsonl）/ Pi 本机会话记录（按文件 mtime + 大小缓存解析结果并持久化到 userData）
 │   │   ├── git-branch.ts      # 读取文件夹所在 Git 仓库的当前分支（只读 .git/HEAD，不执行 git）
 │   │   ├── account-env.ts     # 多账号：各 CLI 的配置目录环境变量、路径校验与目录创建，只创建目录不读凭据
 │   │   ├── account-login.ts   # 多账号：调用 CLI 自带状态命令判断登录状态（Kimi Code 只检查凭据文件是否存在）
@@ -49,6 +50,7 @@ d:/GitHub/OneAI/
 │   │   ├── known-clis.json    # 已知 AI 编程 CLI 清单（id / 名称 / 命令），新增支持的 CLI 只改这里
 │   │   ├── i18n.ts            # 主进程文案翻译（t()），语言由渲染进程通过 IPC 同步
 │   │   ├── file-preview.ts    # 文件预览：异步路径解析与只读读取，限制在任务 cwd 内（及粘贴/拖入图片白名单）
+│   │   ├── project-tree.ts    # 项目目录树：按层懒加载读取项目内目录（含实路径边界与符号链接防循环校验）
 │   │   ├── music-library.ts   # 音乐：扫描本地音乐目录、经 oneai-music:// 流式协议（及兼容读取）提供本地音频，并把在线音乐的 .m3u / .pls 歌单展开成曲目（只接受 http(s)）
 │   │   ├── workspace-store.ts # 工作区状态落盘：启动同步读取，运行期异步串行原子写入，退出前兜底刷盘
 │   │   ├── window-state.ts    # 窗口状态落盘：尺寸、位置（含多屏越界保护）、最大化状态与上次主题底色 / 标题栏覆盖层色值
@@ -73,12 +75,13 @@ d:/GitHub/OneAI/
 │           ├── clis.ts                   # 内置 CLI 定义（CliDef）与默认文件夹（本机用户主目录，由主进程提供）；全新安装不再预置示例任务
 │           ├── i18n.ts                   # 渲染进程多语言：t() / T() / setLanguage，文案以中文原文为键
 │           ├── customClis.ts             # 自定义 CLI：id 生成、转 CliDef、读取过滤与保存前校验
+│           ├── dashboardMetrics.ts       # Dashboard 纯计算与格式化模块：按时间范围与 Agent / 项目 / 账号过滤会话记录、计算 KPI / 热力图 / 月度与日趋势 / Top 5 / 构成 / 模型明细
 │           ├── musicStreams.ts           # 在线音乐：id 生成、读取过滤与添加前校验
 │           ├── workspaceState.ts         # 文件夹树的状态：folderKey、排序、旧数据迁移、状态校验、最近任务归类与读写
 │           ├── accounts.ts               # 多账号：支持的 CLI 与登录命令、环境变量文本解析、账号校验
 │           ├── previewHighlight.ts       # 文件预览语法高亮：按扩展名或文件名调用 highlight.js 分词并保留跨行作用域，跳过压缩单行与 > 1 MB 文件
 │           ├── components/
-│           │   ├── Sidebar.tsx           # 左侧品牌头部（Logo、标语、版本号）、文件夹树（Git 分支、任务）与最近任务
+│           │   ├── Sidebar.tsx           # 左侧品牌头部（Logo、标语、版本号）、Dashboard 入口、文件夹树（Git 分支、任务）与最近任务
 │           │   ├── Topbar.tsx            # 顶部导航栏（嵌入单行额度、系统资源与全局操作）
 │           │   ├── InlineQuotaText.tsx   # 顶栏单行纯文字实时额度（Tokens / Cost、5h / 7d、模型）
 │           │   ├── SystemStatsText.tsx   # 顶栏右侧单行纯文字 CPU / 内存 / 网速，订阅 `system:stats`
@@ -88,7 +91,9 @@ d:/GitHub/OneAI/
 │           │   ├── PreviewMinimap.tsx    # 文件预览右侧的代码缩略图（canvas 绘制，滑块可点击 / 拖动；由设置 previewMinimap 控制）
 │           │   ├── FilePreviewPanel.tsx  # 终端右侧只读文件预览面板（Ctrl+单击终端路径打开，宽度可拖拽、持久化并支持双击重置）
 │           │   ├── HistoryModal.tsx      # 历史会话抽屉（顶栏右上角入口）：按日期分段，显示文件夹、分支与「已打开」
-│           │   ├── UsageModal.tsx        # 本周用量弹窗（顶栏用量按钮 / Ctrl+Shift+U）：按 CLI → 账号 → 模型分组的用量表与近 26 周每日请求数方块图
+│           │   ├── ProjectTreeDrawer.tsx # 项目目录树抽屉（顶栏右上角入口 / Ctrl+Shift+E）：懒加载目录树、筛选、预览与插入路径
+│           │   ├── UsageModal.tsx        # 本周用量弹窗（快捷键 Ctrl+Shift+U）：按 CLI → 账号 → 模型分组的用量表与近 26 周每日请求数方块图
+│           │   ├── DashboardView.tsx     # Dashboard 主分析页面（侧栏顶部入口 / Ctrl+Shift+D）：跨周期 KPI、12 个月活跃热力图、趋势图、Top 5 分布、Token 构成、多组实时账号配额与模型明细，终端后台保活
 │           │   ├── SettingsModal.tsx     # 分页设置：外观、时间、终端、账号、CLI、提醒、快捷键列表
 │           │   ├── AccountsSettings.tsx  # 设置 → 账号：添加 / 编辑 / 删除账号、登录入口与登录状态
 │           │   ├── CliSettings.tsx       # 设置 → CLI：已知 CLI 的检测状态（清单取自主进程）、重新检测、添加 / 编辑 / 删除自定义 CLI

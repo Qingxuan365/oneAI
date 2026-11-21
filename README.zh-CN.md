@@ -18,11 +18,11 @@ OneAI 把 Codex、Claude Code、Kimi Code、OpenCode 等 AI 编程 CLI 放进同
 
 - **文件夹树与多任务**：任务按项目文件夹分组，每个任务有状态灯、Git 分支徽标和会话里最近一条消息；后台任务输出停下后会显示「待查看」。
 - **保活终端**：基于 xterm.js 与 Windows ConPTY（`node-pty`），切换任务或文件夹不会结束任何进程。
-- **单行实时额度**：顶栏用一行文字显示 Tokens、Cost、5h / 7d 额度和当前模型，另有 CPU、内存和网速；只有纯文字，没有弹窗。
+- **单行实时额度**：顶栏用一行文字显示输入 / 输出 / 缓存 Tokens、缓存命中率、上下文占比、Cost、5h / 7d 额度和当前模型，另有 CPU、内存和网速；只有纯文字，没有弹窗。
 - **多账号**：Codex、Claude Code、Kimi Code 可并行使用多个账号。账号只是「配置目录 + 环境变量」，OneAI 不读取、不复制你的登录凭据。
-- **本周用量面板**：按 CLI、账号、模型统计请求数与 Tokens，附近 26 周每日活跃方块图，数据来自本机会话记录。
+- **用量分析 Dashboard**：侧栏 `Dashboard` 页面（`Ctrl + Shift + D`）提供多时间区间 KPI 卡片、近 12 个月活跃热力图、Token / 费用 / 会话趋势图、Top 5 下钻、Token 构成、多分组实时账号配额与可排序模型明细表（仍保留 `Ctrl + Shift + U` 旧版本周用量面板），全部来自本机会话记录。
 - **历史会话**：浏览并恢复 Claude Code、Codex、Kimi Code 的历史会话。
-- **文件预览**：在终端里按住 Ctrl 单击路径，即可只读预览文件，支持语法高亮并带代码缩略图。
+- **项目目录树与文件预览**：顶栏右侧可展开项目目录树抽屉（`Ctrl + Shift + E`）浏览、筛选并向终端插入相对路径；单击文件或在终端按住 Ctrl 单击路径，即可只读预览文件，支持语法高亮并带代码缩略图。
 - **任意 CLI**：按 `PATH` 自动检测已安装的 CLI，其他命令可添加为自定义 CLI。
 - **简体中文与英文**、25 个主题（浅色、深色、护眼与编辑器配色），以及简短的首次引导。
 
@@ -41,7 +41,8 @@ Codex、Claude Code、Kimi Code、OpenCode、Grok Build、Antigravity、Qwen Cod
 | Codex | 支持 | 支持 | 支持 | 支持 |
 | Claude Code | 支持 | 支持 | 支持 | 支持 |
 | Kimi Code | 支持 | 支持 | 暂不支持 | 支持 |
-| Antigravity、Pi | | | 支持 | |
+| Antigravity | 支持 | | 支持 | |
+| Pi | | | 支持 | |
 | 其他 CLI 与自定义 CLI | | | | |
 
 ## 安装

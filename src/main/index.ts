@@ -9,11 +9,12 @@ import { checkAccountLogin } from './account-login';
 import { setupGitBranch } from './git-branch';
 import { setupTaskSummary } from './task-summary';
 import { listSessionHistory, deleteSessionHistory } from './session-history';
-import { getUsageStats } from './usage-stats';
+import { getDashboardStats, getUsageStats } from './usage-stats';
 import { detectInstalledClis, listKnownClis } from './cli-detect';
 import { setupWorkspaceStore } from './workspace-store';
 import { registerMusicScheme, setupMusicLibrary } from './music-library';
 import { allowPreviewFilePaths, isImageExtension, setupFilePreview } from './file-preview';
+import { setupProjectTree } from './project-tree';
 import { bindWindowState, loadWindowState, WindowStateTracker } from './window-state';
 import { getLanguage, setLanguage, t } from './i18n';
 import { quoteTerminalPath } from '../shared/paths';
@@ -176,11 +177,13 @@ function setupIPC() {
   setupWorkspaceStore();
   setupMusicLibrary(() => mainWindow);
   setupFilePreview();
+  setupProjectTree();
   setupGitBranch();
   setupTaskSummary();
   ipcMain.handle('history:list', (_event, accounts) => listSessionHistory(Array.isArray(accounts) ? accounts : []));
   ipcMain.handle('history:delete', (_event, items) => deleteSessionHistory(Array.isArray(items) ? items : []));
   ipcMain.handle('usage:stats', (_event, accounts) => getUsageStats(accounts));
+  ipcMain.handle('dashboard:stats', (_event, accounts) => getDashboardStats(accounts));
   ipcMain.handle('app:set-language', (_event, language) => {
     const before = getLanguage();
     setLanguage(language);
@@ -349,6 +352,19 @@ function setupIPC() {
     } catch {
       // 目录不存在或无法访问
     }
+    return false;
+  });
+
+  // 在系统资源管理器中定位并选中指定文件或文件夹
+  ipcMain.handle('shell:reveal-in-explorer', async (_event, targetPath: string) => {
+    try {
+      if (typeof targetPath === 'string' && targetPath.trim()) {
+        const resolved = path.resolve(targetPath);
+        await fs.promises.lstat(resolved);
+        shell.showItemInFolder(resolved);
+        return true;
+      }
+    } catch {}
     return false;
   });
 

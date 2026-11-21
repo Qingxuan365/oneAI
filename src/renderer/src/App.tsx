@@ -14,6 +14,7 @@ import { accountCli, quotaKey, sanitizeAccounts, toSessionAccount } from './acco
 import { sanitizeCustomClis, toCliDef } from './customClis';
 import { sanitizeMusicStreams } from './musicStreams';
 import { getLanguage, isLanguage, setLanguage, systemLanguage, t } from './i18n';
+import { quoteTerminalPath } from '../../shared/paths';
 import { THEME_MODE } from './themes';
 import { forgetUserActivity, hasVisibleOutput, isTaskAlive, isUserEcho } from './taskStatus';
 import { playTaskDoneSound } from './taskDoneSound';
@@ -24,7 +25,9 @@ const SettingsModal = lazy(() => import('./components/SettingsModal').then((m) =
 const OnboardingModal = lazy(() => import('./components/OnboardingModal').then((m) => ({ default: m.OnboardingModal })));
 const HistoryModal = lazy(() => import('./components/HistoryModal').then((m) => ({ default: m.HistoryModal })));
 const UsageModal = lazy(() => import('./components/UsageModal').then((m) => ({ default: m.UsageModal })));
+const DashboardView = lazy(() => import('./components/DashboardView').then((m) => ({ default: m.DashboardView })));
 const FilePreviewPanel = lazy(() => import('./components/FilePreviewPanel').then((m) => ({ default: m.FilePreviewPanel })));
+const ProjectTreeDrawer = lazy(() => import('./components/ProjectTreeDrawer').then((m) => ({ default: m.ProjectTreeDrawer })));
 
 const DEFAULT_SETTINGS: AppSettings = {
   language: systemLanguage(),
@@ -124,10 +127,13 @@ export const App: React.FC = () => {
   }, []);
   // 待查看：后台任务输出停下或进程退出后，在侧栏标记，切换过去查看后清除（不持久化）
   const [unreadTaskIds, setUnreadTaskIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [isDashboardOpen, setIsDashboardOpen] = useState(false);
   const activeTaskIdRef = useRef(activeTaskId);
   activeTaskIdRef.current = activeTaskId;
+  const isDashboardOpenRef = useRef(isDashboardOpen);
+  isDashboardOpenRef.current = isDashboardOpen;
   const markUnread = useCallback((ids: string[]) => {
-    const background = ids.filter((id) => id !== activeTaskIdRef.current);
+    const background = ids.filter((id) => isDashboardOpenRef.current || id !== activeTaskIdRef.current);
     if (background.length === 0) return;
     setUnreadTaskIds((prev) => (background.every((id) => prev.has(id)) ? prev : new Set([...prev, ...background])));
   }, []);
@@ -139,13 +145,13 @@ export const App: React.FC = () => {
     window.electronAPI?.setActiveSession?.(activeTaskId, activeCliId);
   }, [activeTaskId, activeCliId]);
   useEffect(() => {
-    if (!activeTaskId || !unreadTaskIds.has(activeTaskId)) return;
+    if (!activeTaskId || isDashboardOpen || !unreadTaskIds.has(activeTaskId)) return;
     setUnreadTaskIds((prev) => {
       const next = new Set(prev);
       next.delete(activeTaskId);
       return next;
     });
-  }, [activeTaskId, unreadTaskIds]);
+  }, [activeTaskId, isDashboardOpen, unreadTaskIds]);
   const [quotas, setQuotas] = useState<Record<string, QuotaData>>({});
   const [workReminderVisible, setWorkReminderVisible] = useState(false);
   const terminalViewportRef = useRef<TerminalViewportRef>(null);
@@ -227,7 +233,7 @@ export const App: React.FC = () => {
   const notifyDoneSound = useCallback((ids: string[]) => {
     const sound = settingsRef.current;
     if (ids.length === 0 || sound.taskDoneSoundEnabled === false) return;
-    const viewing = document.hasFocus() ? activeTaskIdRef.current : null;
+    const viewing = document.hasFocus() && !isDashboardOpenRef.current ? activeTaskIdRef.current : null;
     const audible = sound.taskDoneSoundBackgroundOnly !== true ? ids : ids.filter((id) => id !== viewing);
     if (audible.length > 0) playTaskDoneSound(sound.taskDoneSoundVolume);
   }, []);
@@ -279,6 +285,7 @@ export const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isUsageOpen, setIsUsageOpen] = useState(false);
+  const [isFileTreeOpen, setIsFileTreeOpen] = useState(false);
   const [filePreview, setFilePreview] = useState<{ cwd: string; path: string; line?: number; openedAt: number } | null>(null);
   const [previewWidth, setPreviewWidth] = useState<number>(() => {
     try {
@@ -756,7 +763,8 @@ export const App: React.FC = () => {
   const handleToggleSidebar = useCallback(() => setIsSidebarCollapsed((collapsed) => !collapsed), []);
   const handleOpenSettings = useCallback(() => setIsSettingsOpen(true), []);
   const handleOpenHistory = useCallback(() => setIsHistoryOpen(true), []);
-  const handleOpenUsage = useCallback(() => setIsUsageOpen(true), []);
+  const handleOpenDashboard = useCallback(() => setIsDashboardOpen(true), []);
+  const handleCloseDashboard = useCallback(() => setIsDashboardOpen(false), []);
 
   // 折叠 / 展开文件夹
   const handleToggleFolder = useCallback((folderPath: string) => {
@@ -791,6 +799,7 @@ export const App: React.FC = () => {
   // startIfStopped 为 false 时只切换视图，不拉起已停止的任务（键盘轮换、关闭后接替）
   const handleSelectTask = useCallback((taskId: string, startIfStopped = true) => {
     const task = tasksRef.current.find((item) => item.id === taskId);
+    setIsDashboardOpen(false);
     setActiveTaskId(taskId);
     // 保证该任务所在的文件夹处于展开状态
     if (task) setFolders((prev) => ensureFolder(prev, task.cwd, true));
@@ -921,6 +930,7 @@ export const App: React.FC = () => {
 
     setTasks((prev) => [...prev, newTask]);
     setFolders((prev) => ensureFolder(prev, resolvedCwd, true));
+    setIsDashboardOpen(false);
     setActiveTaskId(newTaskId);
 
     return { success: true };
@@ -1007,6 +1017,15 @@ export const App: React.FC = () => {
       if (latest) setQuotas(latest);
     }
   }, []);
+  const handleRefreshDashboardQuotas = useCallback(async () => {
+    if (!window.electronAPI) return;
+    const latest = await window.electronAPI.refreshQuota();
+    if (latest) setQuotas(latest);
+    if (visibleClisRef.current.some((cli) => cli.id === 'agy')) {
+      const withAgy = await window.electronAPI.refreshQuota('agy');
+      if (withAgy) setQuotas(withAgy);
+    }
+  }, []);
 
   // 重启指定任务，未指定时为当前任务
   const handleRestartSession = useCallback(async (taskId: string | null = activeTaskIdRef.current) => {
@@ -1062,9 +1081,20 @@ export const App: React.FC = () => {
     terminalViewportRef.current?.exportActiveTerminalLog(mode) || { success: false, error: t('没有活动终端') }
   ), []);
   const handlePreviewFile = useCallback((cwd: string, path: string, line?: number) => {
+    setIsDashboardOpen(false);
     setFilePreview({ cwd, path, line, openedAt: Date.now() });
   }, []);
   const handleClosePreview = useCallback(() => setFilePreview(null), []);
+  const handleToggleFileTree = useCallback(() => setIsFileTreeOpen((v) => !v), []);
+  const handleCloseFileTree = useCallback(() => setIsFileTreeOpen(false), []);
+  const handleInsertPathToTerminal = useCallback((relPath: string) => {
+    if (!activeTaskIdRef.current) return;
+    setIsDashboardOpen(false);
+    terminalViewportRef.current?.insertTextToActiveTerminal(`${quoteTerminalPath(relPath)} `);
+  }, []);
+  const handleRevealInExplorer = useCallback((targetPath: string) => {
+    void window.electronAPI?.revealInExplorer?.(targetPath);
+  }, []);
 
   // 从历史会话恢复：已有对应任务则直接切换，否则用 CLI 自带的恢复命令新建任务
   const handleResumeHistory = useCallback(async (entry: HistoryEntry) => {
@@ -1091,8 +1121,10 @@ export const App: React.FC = () => {
   shortcutRef.current = (e) => {
     if (!e.ctrlKey || e.altKey || e.metaKey) return false;
     if (isNewTaskOpen || isSettingsOpen || isHistoryOpen || isUsageOpen || workReminderVisible || confirmOptions) return false;
-    const ordered = orderedTasks(folders, visibleTasks);
     const key = e.key.toLowerCase();
+    if (e.shiftKey && key === 'e') { setIsFileTreeOpen((v) => !v); return true; }
+    if (isFileTreeOpen) return false;
+    const ordered = orderedTasks(folders, visibleTasks);
     if (key === 'tab') {
       if (ordered.length < 2) return true;
       const index = ordered.findIndex((task) => task.id === activeTaskId);
@@ -1122,10 +1154,11 @@ export const App: React.FC = () => {
       return true;
     }
     if (key === 'w') {
-      if (activeTask && visibleClis.some((cli) => cli.id === activeTask.groupId)) void handleCloseTask(activeTask.id);
+      if (!isDashboardOpen && activeTask && visibleClis.some((cli) => cli.id === activeTask.groupId)) void handleCloseTask(activeTask.id);
       return true;
     }
     if (key === 'b') { setIsSidebarCollapsed((collapsed) => !collapsed); return true; }
+    if (key === 'd') { setIsDashboardOpen((v) => !v); return true; }
     if (key === 'h') { setIsHistoryOpen(true); return true; }
     if (key === 'u') { setIsUsageOpen(true); return true; }
     return false;
@@ -1211,12 +1244,14 @@ ${entry.cwd}`}
     );
   }, [hasActiveTask, history, visibleClis, workspacePath, workspaceBranch, settings.language, handleAddFolderVoid, handleResumeHistory, handleQuickNewTask, handleOpenNewTask]);
 
-  // 低频弹窗首次打开前不加载分包、不挂载；首次打开后保持挂载交由 isOpen 控制显隐，保留选项卡与筛选词等内部状态
-  const everOpenedModalsRef = useRef({ newTask: false, history: false, usage: false, settings: false });
+  // 低频弹窗与 Dashboard 首次打开前不加载分包、不挂载；首次打开后保持挂载交由显隐控制，保留内部状态
+  const everOpenedModalsRef = useRef({ newTask: false, history: false, usage: false, settings: false, fileTree: false, dashboard: false });
   if (isNewTaskOpen) everOpenedModalsRef.current.newTask = true;
   if (isHistoryOpen) everOpenedModalsRef.current.history = true;
   if (isUsageOpen) everOpenedModalsRef.current.usage = true;
   if (isSettingsOpen) everOpenedModalsRef.current.settings = true;
+  if (isFileTreeOpen) everOpenedModalsRef.current.fileTree = true;
+  if (isDashboardOpen) everOpenedModalsRef.current.dashboard = true;
   const openHistoryIds = useMemo(
     () => new Set(tasks.flatMap((task) => (task.historyId ? [`${task.accountId ?? 'default'}:${task.historyId}`, ...(!task.accountId ? [task.historyId] : [])] : []))),
     [tasks],
@@ -1254,7 +1289,9 @@ ${entry.cwd}`}
         clockOffsetHours={settings.clockOffsetHours}
         recentFolders={recentFolders}
         activeTaskId={activeTaskId}
+        isDashboardActive={isDashboardOpen}
         onAddFolder={handleAddFolderVoid}
+        onOpenDashboard={handleOpenDashboard}
         onSelectTask={handleSelectTask}
         onToggleFolder={handleToggleFolder}
         onReorderFolder={reorderFolder}
@@ -1293,18 +1330,21 @@ ${entry.cwd}`}
           onClearScreen={handleClearScreen}
           onRestartSession={handleRestartActive}
           onOpenHistory={handleOpenHistory}
-          onOpenUsage={handleOpenUsage}
+          isDashboardOpen={isDashboardOpen}
+          isFileTreeOpen={isFileTreeOpen}
+          onToggleFileTree={handleToggleFileTree}
           onExportLogs={handleExportLogs}
           language={settings.language}
         />
 
-        {/* 多实例保活终端容器（切换时不销毁，display: none 保活） */}
-        <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* 多实例保活终端容器（切换任务或打开 Dashboard 时不销毁，display: none 保活） */}
+        <div className="flex min-h-0 flex-1 overflow-hidden" style={isDashboardOpen ? { display: 'none' } : undefined}>
           <TerminalViewport
             theme={resolvedTheme}
             ref={terminalViewportRef}
             tasks={allTasks}
             activeTaskId={activeTaskId}
+            hidden={isDashboardOpen}
             fontSize={settings.terminalFontSize}
             lineHeight={settings.terminalLineHeight}
             cursorStyle={settings.terminalCursorStyle}
@@ -1332,6 +1372,24 @@ ${entry.cwd}`}
             </Suspense>
           )}
         </div>
+
+        {everOpenedModalsRef.current.dashboard && (
+          <div className="flex min-h-0 flex-1 overflow-hidden" style={isDashboardOpen ? undefined : { display: 'none' }}>
+            <Suspense fallback={null}>
+              <DashboardView
+                isActive={isDashboardOpen}
+                accounts={settings.accounts}
+                quotas={quotas}
+                visibleClis={visibleClis}
+                tasks={visibleTasks}
+                onRefreshQuotas={handleRefreshDashboardQuotas}
+                onSelectTask={handleSelectTask}
+                onBackToTerminal={handleCloseDashboard}
+                language={settings.language}
+              />
+            </Suspense>
+          </div>
+        )}
       </div>
 
       {/* 新建子任务弹窗 */}
@@ -1367,6 +1425,23 @@ ${entry.cwd}`}
       {everOpenedModalsRef.current.usage && (
         <Suspense fallback={null}>
           <UsageModal isOpen={isUsageOpen} onClose={() => setIsUsageOpen(false)} accounts={settings.accounts} />
+        </Suspense>
+      )}
+
+      {everOpenedModalsRef.current.fileTree && (
+        <Suspense fallback={null}>
+          <ProjectTreeDrawer
+            isOpen={isFileTreeOpen}
+            onClose={handleCloseFileTree}
+            rootPath={workspacePath}
+            gitBranch={workspaceBranch}
+            activePreviewPath={filePreview?.path ?? null}
+            hasActiveTerminal={Boolean(activeTask)}
+            onPreviewFile={handlePreviewFile}
+            onInsertPath={handleInsertPathToTerminal}
+            onRevealInExplorer={handleRevealInExplorer}
+            language={settings.language}
+          />
         </Suspense>
       )}
 

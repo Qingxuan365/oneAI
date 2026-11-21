@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listSessionHistory: (accounts?: HistoryAccountRef[]) => ipcRenderer.invoke('history:list', accounts),
   deleteSessionHistory: (items: Array<{ cliId: HistoryEntry['cliId']; id: string; accountId?: string }>) => ipcRenderer.invoke('history:delete', items),
   getUsageStats: (accounts: UsageAccountRef[]) => ipcRenderer.invoke('usage:stats', accounts),
+  getDashboardStats: (accounts: UsageAccountRef[]) => ipcRenderer.invoke('dashboard:stats', accounts),
   detectClis: (custom?: Array<{ id: string; command: string }>) => ipcRenderer.invoke('cli:detect', custom),
   listKnownClis: () => ipcRenderer.invoke('cli:known'),
   setLanguage: (language: string) => ipcRenderer.invoke('app:set-language', language),
@@ -94,6 +95,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   readPreviewFile: (cwd: string, filePath: string) =>
     ipcRenderer.invoke('preview:read', cwd, filePath),
+
+  listDirectory: (rootPath: string, relDir?: string) =>
+    ipcRenderer.invoke('fs:list-dir', rootPath, relDir),
+
+  revealInExplorer: (targetPath: string) =>
+    ipcRenderer.invoke('shell:reveal-in-explorer', targetPath),
 
   openExternal: (url: string) =>
     ipcRenderer.invoke('shell:open-external', url),

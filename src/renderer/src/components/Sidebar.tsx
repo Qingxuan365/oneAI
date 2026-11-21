@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { BedDouble, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Folder, FolderOpen, FolderPlus, GitBranch, GripVertical, History, Moon, PanelLeftOpen, Pencil, Plus, RotateCcw, Settings, SlidersHorizontal, Sun, Trash2, User, X } from 'lucide-react';
+import { BedDouble, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Folder, FolderOpen, FolderPlus, GitBranch, GripVertical, History, LayoutDashboard, Moon, PanelLeftOpen, Pencil, Plus, RotateCcw, Settings, SlidersHorizontal, Sun, Trash2, User, X } from 'lucide-react';
 import { Account, CliDef, FolderEntry, HistoryEntry, MusicStream, TaskSession } from '../types';
 
 const NO_STREAMS: MusicStream[] = [];
@@ -31,6 +31,8 @@ interface SidebarProps {
   /** 由历史会话归类出的「最近任务」文件夹 */
   recentFolders?: RecentFolder[];
   activeTaskId: string | null;
+  /** Dashboard 主视图是否处于激活状态 */
+  isDashboardActive?: boolean;
   /** 后台有新结果、尚未切过去查看的任务 */
   unreadTaskIds?: ReadonlySet<string>;
   /** 自定义侧栏宽度（px）；缺省时随 uiScale 使用 w-80 */
@@ -42,6 +44,7 @@ interface SidebarProps {
   onClearStoppedTasks?: (folderPath: string) => void;
   onPinRecentFolder?: (folderPath: string) => void;
   onAddFolder: () => void;
+  onOpenDashboard?: () => void;
   onSelectTask: (taskId: string) => void;
   onToggleFolder: (folderPath: string) => void;
   onReorderFolder: (sourcePath: string, targetPath: string) => void;
@@ -100,6 +103,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   clockOffsetHours = 0,
   recentFolders = [],
   activeTaskId,
+  isDashboardActive = false,
   unreadTaskIds,
   width,
   onResizeWidth,
@@ -109,6 +113,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   onClearStoppedTasks,
   onPinRecentFolder,
   onAddFolder,
+  onOpenDashboard,
   onSelectTask,
   onToggleFolder,
   onReorderFolder,
@@ -449,6 +454,24 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
           <AppLogo size={20} />
         </div>
 
+        {onOpenDashboard && (
+          <div className="flex w-full shrink-0 justify-center border-b border-line py-1.5">
+            <button
+              type="button"
+              data-dashboard-nav
+              onClick={onOpenDashboard}
+              aria-current={isDashboardActive ? 'page' : undefined}
+              title="Dashboard (Ctrl+Shift+D)"
+              aria-label="Dashboard"
+              className={`relative flex h-9 w-9 items-center justify-center rounded-md transition-colors ${
+                isDashboardActive ? 'bg-selected text-accent' : 'text-fg-subtle hover:bg-hover hover:text-fg'
+              }`}
+            >
+              <LayoutDashboard size={16} />
+            </button>
+          </div>
+        )}
+
         <div className="flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-2">
           {folders.map((folder) => {
             const key = folderKey(folder.path);
@@ -472,7 +495,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                 </button>
                 {tasksOf(folder.path).map((task) => {
                   const order = taskOrder.get(task.id) ?? 0;
-                  const isActive = task.id === activeTaskId;
+                  const isActive = !isDashboardActive && task.id === activeTaskId;
                   const statusMeta = TASK_STATUS_META[task.status];
                   const isUnread = !isActive && Boolean(unreadTaskIds?.has(task.id));
                   const account = accountOf(task);
@@ -547,6 +570,28 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
         </p>
       </div>
 
+      {/* Dashboard 导航菜单（品牌头部正下方） */}
+      {onOpenDashboard && (
+        <div className="shrink-0 border-b border-line px-2 py-2">
+          <button
+            type="button"
+            data-dashboard-nav
+            onClick={onOpenDashboard}
+            aria-current={isDashboardActive ? 'page' : undefined}
+            title="Dashboard (Ctrl+Shift+D)"
+            className={`relative flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-ui transition-colors ${
+              isDashboardActive
+                ? 'bg-selected font-medium text-fg'
+                : 'text-fg-muted hover:bg-hover hover:text-fg'
+            }`}
+          >
+            {isDashboardActive && <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-accent" aria-hidden="true" />}
+            <LayoutDashboard size={15} className={`shrink-0 ${isDashboardActive ? 'text-accent' : 'text-fg-subtle'}`} aria-hidden="true" />
+            <span className="truncate">Dashboard</span>
+          </button>
+        </div>
+      )}
+
       {/* 文件夹与任务树 */}
       <div className="flex-1 overflow-y-auto px-2 pb-3">
         <div className="sticky top-0 z-10 flex items-center justify-between bg-surface px-2 pb-1.5 pt-3 text-2xs text-fg-faint">
@@ -586,7 +631,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
             const key = folderKey(folder.path);
             const name = folderName(folder.path);
             const folderTasks = tasksOf(folder.path);
-            const hasActiveChild = folderTasks.some((task) => task.id === activeTaskId);
+            const hasActiveChild = !isDashboardActive && folderTasks.some((task) => task.id === activeTaskId);
             const unreadCount = folderTasks.filter((task) => task.id !== activeTaskId && unreadTaskIds?.has(task.id)).length;
             const hasError = folderTasks.some((task) => task.status === 'error');
             const hasRunning = folderTasks.some((task) => task.status === 'running' || task.status === 'starting');
@@ -709,7 +754,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                     )}
 
                     {folderTasks.map((task) => {
-                      const isActive = task.id === activeTaskId;
+                      const isActive = !isDashboardActive && task.id === activeTaskId;
                       const statusMeta = TASK_STATUS_META[task.status];
                       const isUnread = !isActive && Boolean(unreadTaskIds?.has(task.id));
                       const cli = cliOf(task);

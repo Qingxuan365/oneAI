@@ -18,6 +18,14 @@ function percentColor(pct: number): string {
   return 'text-danger';
 }
 
+// 上下文占用百分比配色：>= 85 红色，65-84 黄色，< 65 正文色
+function ctxColor(pct?: number): string {
+  if (pct === undefined) return 'text-fg';
+  if (pct >= 85) return 'text-danger';
+  if (pct >= 65) return 'text-warning';
+  return 'text-fg';
+}
+
 // 推理思考等级（low | medium | high | xhigh | max）配色
 function effortColor(effort: string): string {
   const eff = effort.toLowerCase();
@@ -88,25 +96,71 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = React.memo(({ quo
     { label: '7d', percent: quota.sevenDayPercent, reset: quota.sevenDayResetsOn },
   ];
 
+  const hasBreakdown = quota.tokenInput !== undefined || quota.tokenOutput !== undefined || quota.tokenCache !== undefined;
+  const hasTokens = hasBreakdown || quota.tokens !== undefined;
+  const totalTokens = quota.tokens ?? ((quota.tokenInput ?? 0) + (quota.tokenOutput ?? 0) + (quota.tokenCache ?? 0));
+  const hasCache = quota.cacheHitPercent !== undefined;
+  const hasCost = quota.costUsd !== undefined;
+  const hasUsage = hasTokens || hasCache || hasCost;
+  const hasCtx = quota.ctxPercent !== undefined || quota.ctxTokens !== undefined;
+
+  const tokensTitle = hasBreakdown
+    ? t('最近活跃会话累计 token（输入 {input} · 输出 {output} · 缓存 {cache} · 合计 {total}）', {
+      input: (quota.tokenInput ?? 0).toLocaleString('en-US'),
+      output: (quota.tokenOutput ?? 0).toLocaleString('en-US'),
+      cache: (quota.tokenCache ?? 0).toLocaleString('en-US'),
+      total: totalTokens.toLocaleString('en-US'),
+    })
+    : (quota.tokens !== undefined
+      ? t('最近活跃会话累计 token（输入 + 输出 + 缓存读写）：{tokens}', { tokens: quota.tokens.toLocaleString('en-US') })
+      : undefined);
+
+  const ctxValue = quota.ctxPercent !== undefined
+    ? `${quota.ctxPercent}%`
+    : (quota.ctxTokens !== undefined ? formatTokens(quota.ctxTokens) : '');
+  const ctxTitle = quota.ctxPercent !== undefined && quota.ctxTokens !== undefined && quota.ctxWindow !== undefined
+    ? t('当前上下文占用：{percent}%（{used} / {limit}）', { percent: quota.ctxPercent, used: formatTokens(quota.ctxTokens), limit: formatTokens(quota.ctxWindow) })
+    : quota.ctxPercent !== undefined
+      ? t('当前上下文占用：{percent}%', { percent: quota.ctxPercent })
+      : quota.ctxTokens !== undefined
+        ? t('当前上下文已用：{used} tokens', { used: formatTokens(quota.ctxTokens) })
+        : undefined;
+
   return (
-    <div className="flex items-center gap-2 font-mono text-ui text-fg-muted" title={quota.model ? (quota.effort ? t('{model} · 推理思考等级: {effort}', { model: quota.model, effort: quota.effort }) : quota.model) : undefined}>
-      {/* 最近活跃会话的累计用量；没有数据的 CLI 不显示。空间不足时整段由 .quota-usage 收起 */}
-      {(quota.tokens !== undefined || quota.costUsd !== undefined) && (
-        <span className="quota-usage flex items-center gap-2 whitespace-nowrap">
-          {quota.tokens !== undefined && (
-            <span title={t('最近活跃会话累计 token（输入 + 输出 + 缓存读写）：{tokens}', { tokens: quota.tokens.toLocaleString('en-US') })}>
+    <div className="flex items-center gap-1 font-mono text-ui text-fg-muted" title={quota.model ? (quota.effort ? t('{model} · 推理思考等级: {effort}', { model: quota.model, effort: quota.effort }) : quota.model) : undefined}>
+      {/* 最近活跃会话的累计用量；没有数据的 CLI 不显示。空间不足时先将明细折为总计，再整段由 .quota-usage 收起 */}
+      {hasUsage && (
+        <span className="quota-usage flex items-center gap-1 whitespace-nowrap text-xs">
+          {hasTokens && (
+            <span title={tokensTitle}>
               <span className="text-fg-subtle">Tokens: </span>
-              <span className="font-semibold text-fg">{formatTokens(quota.tokens)}</span>
+              {hasBreakdown ? (
+                <>
+                  <span className="quota-tokens-breakdown">
+                    in <span className="font-semibold text-fg">{formatTokens(quota.tokenInput ?? 0)}</span>, out <span className="font-semibold text-fg">{formatTokens(quota.tokenOutput ?? 0)}</span>, cache <span className="font-semibold text-fg">{formatTokens(quota.tokenCache ?? 0)}</span>
+                  </span>
+                  <span className="quota-tokens-compact font-semibold text-fg" aria-hidden="true">{formatTokens(totalTokens)}</span>
+                </>
+              ) : (
+                <span className="font-semibold text-fg">{formatTokens(quota.tokens!)}</span>
+              )}
             </span>
           )}
-          {quota.tokens !== undefined && quota.costUsd !== undefined && <Divider />}
-          {quota.costUsd !== undefined && (
+          {hasTokens && hasCache && <Divider />}
+          {hasCache && (
+            <span title={t('最近活跃会话缓存命中率：{percent}%', { percent: quota.cacheHitPercent! })}>
+              <span className="text-fg-subtle">Cache: </span>
+              <span className="font-semibold text-fg">{quota.cacheHitPercent}%</span>
+            </span>
+          )}
+          {(hasTokens || hasCache) && hasCost && <Divider />}
+          {hasCost && (
             <span title={t('最近活跃会话累计费用（美元）')}>
               <span className="text-fg-subtle">Cost: </span>
-              <span className="font-semibold text-fg">${quota.costUsd.toFixed(2)}</span>
+              <span className="font-semibold text-fg">${quota.costUsd!.toFixed(2)}</span>
             </span>
           )}
-          <Divider />
+          {(windows.length > 0 || quota.model || hasCtx) && <Divider />}
         </span>
       )}
 
@@ -139,7 +193,18 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = React.memo(({ quo
         </>
       )}
 
-      {/* 额外辅助消息（如 Ctx 上下文用量） */}
+      {/* 当前上下文占用；用独立 .quota-ctx 控制显示优先级，窄窗口下仍尽量保留 */}
+      {hasCtx && (
+        <>
+          {(windows.length > 0 || quota.model) && <Divider className="quota-ctx" />}
+          <span className="quota-ctx whitespace-nowrap text-xs" title={ctxTitle}>
+            <span className="text-fg-subtle">Ctx: </span>
+            <span className={`font-semibold ${ctxColor(quota.ctxPercent)}`}>{ctxValue}</span>
+          </span>
+        </>
+      )}
+
+      {/* 额外辅助消息 */}
       {quota.message && (
         <>
           <Divider className="quota-detail" />

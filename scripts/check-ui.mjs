@@ -19,7 +19,9 @@ await build({
     import { FilePreviewPanel } from './src/renderer/src/components/FilePreviewPanel';
     import { NewTaskModal } from './src/renderer/src/components/NewTaskModal';
     import { HistoryModal } from './src/renderer/src/components/HistoryModal';
+    import { ProjectTreeDrawer } from './src/renderer/src/components/ProjectTreeDrawer';
     import { UsageModal } from './src/renderer/src/components/UsageModal';
+    import { DashboardView } from './src/renderer/src/components/DashboardView';
     import { SettingsModal } from './src/renderer/src/components/SettingsModal';
     import { OnboardingModal } from './src/renderer/src/components/OnboardingModal';
     import { THEME_IDS } from './src/shared/types';
@@ -38,7 +40,51 @@ await build({
       listSessionHistory: async (accounts) => { const h = (id, cliId, title, cwd, ago, extra = {}) => ({ id, cliId, title, cwd, updatedAt: Date.now() - ago, command: 'x', ...extra }); const base = [h('h1', 'codex', 'Today one', 'D:/GitHub/OneAI', 60000), h('h2', 'claude', 'Yesterday one', 'D:/plan', 86400000 + 3600000 * 2), h('h3', 'kimi', 'Old one', 'D:/old', 10 * 86400000)]; return Array.isArray(accounts) && accounts.length ? [h('h-acc', 'codex', 'Account session', 'D:/acc', 30000, { accountId: accounts[0].id, accountName: accounts[0].name }), ...base] : base; },
       getGitBranches: async (dirs) => Object.fromEntries(dirs.map((d) => [d, d === 'D:/GitHub/OneAI' ? 'main' : null])),
       getUsageStats: async () => window.usageFixture(window.usageEmpty),
+      getDashboardStats: async () => window.dashboardFixture(window.dashboardEmpty),
       deleteSessionHistory: async () => ({ deleted: 0, failed: 0 }) };
+    window.dashboardEmpty = false;
+    window.dashboardFixture = (empty) => {
+      const pad = n => String(n).padStart(2, '0');
+      const key = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+      const now = new Date();
+      const dayAgo = (n) => { const d = new Date(now.getFullYear(), now.getMonth(), now.getDate()); d.setDate(d.getDate() - n); return key(d); };
+      const accounts = empty ? [] : [
+        { cliId: 'codex', accountId: 'default', name: t('默认账号') },
+        { cliId: 'codex', accountId: 'alt-id', name: 'alt' },
+        { cliId: 'claude', accountId: 'default', name: t('默认账号') },
+        { cliId: 'agy', accountId: 'default', name: t('默认账号') },
+        { cliId: 'pi', accountId: 'default', name: t('默认账号') },
+      ];
+      const projects = empty ? [] : [
+        { key: 'd:/github/oneai', path: 'D:/GitHub/OneAI', name: 'OneAI' },
+        { key: 'd:/sports', path: 'D:/sports', name: 'sports' },
+      ];
+      const sessions = empty ? [] : [
+        { id: 0, cliId: 'codex', accountId: 'default', accountName: t('默认账号'), project: 'd:/github/oneai', projectPath: 'D:/GitHub/OneAI', projectName: 'OneAI' },
+        { id: 1, cliId: 'codex', accountId: 'alt-id', accountName: 'alt', project: 'd:/sports', projectPath: 'D:/sports', projectName: 'sports' },
+        { id: 2, cliId: 'claude', accountId: 'default', accountName: t('默认账号'), project: 'd:/github/oneai', projectPath: 'D:/GitHub/OneAI', projectName: 'OneAI' },
+        { id: 3, cliId: 'agy', accountId: 'default', accountName: t('默认账号'), project: '', projectPath: '', projectName: '' },
+        { id: 4, cliId: 'pi', accountId: 'default', accountName: t('默认账号'), project: 'd:/github/oneai', projectPath: 'D:/GitHub/OneAI', projectName: 'OneAI' },
+      ];
+      const records = empty ? [] : [
+        // session 0 appears on both today and 5 days ago (tests deduplicated session counting)
+        { s: 0, date: dayAgo(0), model: 'gpt-5.3-codex', requests: 10, input: 100_000, output: 10_000, cacheRead: 900_000, cacheWrite: 0, costUsd: 1.40, costPriced: true },
+        { s: 0, date: dayAgo(5), model: 'gpt-5.3-codex', requests: 20, input: 200_000, output: 20_000, cacheRead: 1_800_000, cacheWrite: 0, costUsd: 2.80, costPriced: true },
+        { s: 1, date: dayAgo(20), model: 'gpt-5.3-codex', requests: 8, input: 50_000, output: 5_000, cacheRead: 400_000, cacheWrite: 0, costUsd: 0.70, costPriced: true },
+        { s: 2, date: dayAgo(2), model: 'Sonnet 5.5', requests: 15, input: 50_000, output: 15_000, cacheRead: 500_000, cacheWrite: 20_000, costUsd: 1.50, costPriced: true },
+        { s: 3, date: dayAgo(45), model: 'Orchestrator', requests: 12, input: 30_000, output: 3_000, cacheRead: 120_000, cacheWrite: 0, costUsd: 0, costPriced: false },
+        { s: 4, date: dayAgo(1), model: 'deepseek-chat', requests: 5, input: 20_000, output: 4_000, cacheRead: 80_000, cacheWrite: 0, costUsd: 0.05, costPriced: true },
+      ];
+      return {
+        generatedAt: Date.now(),
+        timezone: 'America/Los_Angeles',
+        earliestDate: empty ? null : dayAgo(45),
+        accounts,
+        projects,
+        sessions,
+        records,
+      };
+    };
     // 用量面板夹具：近 26 周的每日请求数（每 3 天一个非零值，最大 39），以及三个 CLI 的模型行
     window.usageEmpty = false;
     window.usageMany = false;
@@ -88,19 +134,22 @@ await build({
       { id: 'claude', name: 'Claude Code', icon: 'claude', defaultCommand: 'claude' },
       { id: 'terminal', get name() { return t('系统终端'); }, icon: 'terminal', defaultCommand: 'powershell.exe' },
     ];
-    window.draw = (status = 'running', accountName) => {
+    window.draw = (status = 'running', accountName, quotaOverride) => {
       const task = { id: 'task', groupId: 'codex', title: 'Task 1: UI regression', status, cwd: 'D:/GitHub/OneAI', createdAt: 1 };
       const group = CLIS[0];
+      const baseQuota = { status: 'normal', cliName: 'Codex', model: 'gpt-5-codex', effort: 'high', tokens: 823_000, tokenInput: 335_000, tokenOutput: 167_000, tokenCache: 321_000, cacheHitPercent: 99, ctxPercent: 62, ctxTokens: 292_617, ctxWindow: 475_000, costUsd: 0.24, fiveHourPercent: 82, sevenDayPercent: 65, fiveHourResetsIn: '2h 45m', sevenDayResetsOn: '3d 22h 16m' };
+      const quota = quotaOverride ? { ...baseQuota, ...quotaOverride } : baseQuota;
       flushSync(() => root.render(<div className="workbench-ui flex h-screen">
         <Sidebar isCollapsed={false} clis={CLIS} folders={[{ path: task.cwd, isExpanded: true }]} tasks={[task]} activeTaskId={task.id}
           onAddFolder={() => {}} onSelectTask={() => window.events.push('select')} onToggleFolder={() => window.events.push('toggle')}
           onReorderFolder={() => {}} onNewTask={() => {}} onCloseTask={() => window.events.push('close')} onRenameTask={(_id, title) => window.events.push('rename:' + title)} />
         <div className="flex-1 min-w-0"><Topbar isSidebarCollapsed={false} onToggleSidebar={() => {}} currentGroup={group} activeTask={task} accountName={accountName}
-          quota={{ status: 'online', cliName: 'Codex', model: 'gpt-5-codex', effort: 'high', tokens: 866_000, costUsd: 0.24, fiveHourPercent: 82, sevenDayPercent: 65, fiveHourResetsIn: '2h 45m', sevenDayResetsOn: 'Sun' }} onRefreshQuota={async () => {}} onOpenSearch={() => window.events.push('search')}
-          dateVisible={!window.hideDate} onClearScreen={() => {}} onRestartSession={async () => {}} onExportLogs={async () => ({ success: true })} onOpenHistory={() => {}} onOpenUsage={() => window.events.push('usage')} /></div>
+          quota={quota} onRefreshQuota={async () => {}} onOpenSearch={() => window.events.push('search')}
+          dateVisible={!window.hideDate} onClearScreen={() => {}} onRestartSession={async () => {}} onExportLogs={async () => ({ success: true })} onOpenHistory={() => {}} onToggleFileTree={() => window.events.push('file-tree')} /></div>
       </div>));
       window.pushStats?.(window.fakeStats);
     };
+    window.drawQuota = (quota) => window.draw('running', undefined, quota);
     window.draw();
     // Kimi 风格界面：输入框、底边框和状态栏；真实光标停在输入行最右端（line）或状态栏右下角（status）。
     // 记录 textarea 每次样式变化后的位置，供输入法定位回归检查使用。
@@ -129,13 +178,13 @@ await build({
     const mkTask = (id, groupId, cwd, extra = {}) => ({ id, groupId, title: id, status: 'idle', cwd, createdAt: 1, ...extra });
     // withMusic：带一条在线音乐，用于检查折叠侧栏时播放器不被卸载
     const MUSIC_STREAMS = [{ id: 'm1', name: 'Test radio', url: 'https://example.com/test.mp3' }];
-    window.drawSidebar = (isCollapsed = false, clockOffset = 0, withMusic = false, customWidth = null) => {
+    window.drawSidebar = (isCollapsed = false, clockOffset = 0, withMusic = false, customWidth = null, isDashboardActive = false) => {
       const tasks = [mkTask('side-a', 'codex', 'D:/GitHub/OneAI', { title: 'Side a' }), mkTask('side-b', 'codex', 'D:/GitHub/OneAI', { title: 'Side b' }), mkTask('side-c', 'claude', 'D:/sports', { title: 'Side c' }), mkTask('side-d', 'claude', 'D:/sports', { title: 'Side d', status: 'stopped' }), mkTask('side-t', 'terminal', 'D:/sports', { title: 'Side t' })];
       const folders = [{ path: 'D:/GitHub/OneAI', isExpanded: true }, { path: 'D:/sports', isExpanded: true }, { path: 'D:/empty', isExpanded: true }];
       const entry = (id, cliId, title, ago) => ({ id, cliId, title, cwd: 'D:/plan', updatedAt: Date.now() - ago, command: cliId + ' resume ' + id });
       const recent = [{ key: keyOf('D:/plan'), path: 'D:/plan', updatedAt: Date.now() - 3600000, total: 7, entries: [entry('h1', 'codex', 'History one', 3600000), entry('h2', 'claude', 'History two', 7200000)] }];
       flushSync(() => root.render(<div className="workbench-ui flex h-screen">
-        <Sidebar isCollapsed={isCollapsed} width={customWidth} clis={CLIS} folders={folders} tasks={tasks} activeTaskId="side-a" unreadTaskIds={new Set(['side-a', 'side-b'])}
+        <Sidebar isCollapsed={isCollapsed} isDashboardActive={isDashboardActive} width={customWidth} clis={CLIS} folders={folders} tasks={tasks} activeTaskId="side-a" unreadTaskIds={new Set(['side-a', 'side-b'])}
           gitBranches={{ [keyOf('D:/GitHub/OneAI')]: 'main', [keyOf('D:/sports')]: 'feature/x', [keyOf('D:/plan')]: 'dev' }} recentFolders={recent}
           clockOffsetHours={clockOffset} summaries={{ 'side-a': { text: 'Fix the login bug' }, 'side-b': { text: null }, 'side-c': { text: 'long '.repeat(40).trim() } }}
           onResizeWidth={(w) => window.events.push('resize:' + w)} onResetWidth={() => window.events.push('reset-width')}
@@ -143,7 +192,7 @@ await build({
           onToggleAllFolders={(expand) => window.events.push('toggle-all:' + expand)}
           onClearStoppedTasks={(p) => window.events.push('clear-stopped:' + p)}
           onPinRecentFolder={(p) => window.events.push('pin-recent:' + p)}
-          onAddFolder={() => window.events.push('add-folder')} onSelectTask={(id) => window.events.push('select:' + id)}
+          onAddFolder={() => window.events.push('add-folder')} onOpenDashboard={() => window.events.push('open-dashboard')} onSelectTask={(id) => window.events.push('select:' + id)}
           onToggleFolder={(p) => window.events.push('toggle:' + p)} onReorderFolder={(s, t) => window.events.push('reorder-folder:' + s + '>' + t)}
           onNewTask={(p, cli, acc) => window.events.push('quick:' + p + ':' + cli + (acc ? ':' + acc : ''))} onCustomNewTask={(p) => window.events.push('custom:' + p)}
           onCloseTask={(id) => window.events.push('close:' + id)} onRenameTask={() => {}}
@@ -190,7 +239,47 @@ await build({
     window.drawOnboarding = (clis) => flushSync(() => root.render(<div className="workbench-ui h-screen"><OnboardingHarness clis={clis} /></div>));
     window.drawSettings = () => flushSync(() => root.render(<div className="workbench-ui h-screen"><SettingsHarness /></div>));
     window.drawUsage = () => flushSync(() => root.render(<div className="workbench-ui h-screen"><UsageModal key={String(window.usageEmpty) + String(window.usageMany)} isOpen onClose={() => {}} accounts={[]} /></div>));
+    window.drawDashboard = (withTasks = true) => {
+      const clis = [...CLIS, { id: 'agy', name: 'Antigravity', icon: 'agy', defaultCommand: 'agy' }];
+      const quotas = {
+        agy: {
+          cliId: 'agy', cliName: 'Antigravity', model: 'Orchestrator', effort: 'neon',
+          fiveHourPercent: 93, fiveHourResetsIn: '2h 39m', sevenDayPercent: 98, sevenDayResetsOn: '5d 12h',
+          quotaGroups: [
+            { group: 'Gemini Models', fiveHourPercent: 93, fiveHourResetsIn: '2h 39m', sevenDayPercent: 98, sevenDayResetsOn: '5d 12h' },
+            { group: 'Claude and GPT models', fiveHourPercent: 80, fiveHourResetsIn: '3h 10m', sevenDayPercent: 65, sevenDayResetsOn: '4d 1h' },
+            { group: 'Gemini 4 Argon', fiveHourPercent: -1, fiveHourResetsIn: '--', sevenDayPercent: 100, sevenDayResetsOn: '6d 18h' },
+          ],
+          lastUpdated: Date.now(), status: 'normal',
+        },
+        codex: { cliId: 'codex', cliName: 'Codex', model: 'gpt-5.3-codex', fiveHourPercent: 85, fiveHourResetsIn: '1h 20m', sevenDayPercent: 72, sevenDayResetsOn: '3d 5h', lastUpdated: Date.now(), status: 'normal' },
+        'acc-alt': { cliId: 'codex', cliName: 'Codex', model: 'gpt-5.3-codex', fiveHourPercent: 95, fiveHourResetsIn: '4h 0m', sevenDayPercent: 90, sevenDayResetsOn: '6d 0h', lastUpdated: Date.now(), status: 'normal' },
+      };
+      const tasks = withTasks ? [mkTask('dash-t1', 'codex', 'D:/GitHub/OneAI', { title: 'Task 1' })] : [];
+      flushSync(() => root.render(<div className="workbench-ui flex h-screen">
+        <Sidebar isCollapsed={false} isDashboardActive clis={clis} folders={[{ path: 'D:/GitHub/OneAI', isExpanded: true }]} tasks={tasks} activeTaskId={tasks[0]?.id ?? null}
+          onAddFolder={() => {}} onOpenDashboard={() => window.events.push('open-dashboard')} onSelectTask={(id) => window.events.push('dashboard-task:' + id)}
+          onToggleFolder={() => {}} onReorderFolder={() => {}} onNewTask={() => {}} onCloseTask={() => {}} />
+        <div className="flex flex-1 flex-col min-w-0 h-full overflow-hidden">
+          <Topbar isSidebarCollapsed={false} onToggleSidebar={() => {}} currentGroup={clis[0]} activeTask={tasks[0] ?? null}
+            isDashboardOpen quota={quotas.codex} onRefreshQuota={async () => {}} onOpenHistory={() => {}} onToggleFileTree={() => {}} />
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <DashboardView key={String(window.dashboardEmpty)} isActive accounts={window.accountsFixture} quotas={quotas} visibleClis={clis} tasks={tasks}
+              onRefreshQuotas={async () => { window.events.push('dashboard-refresh-quotas'); }}
+              onSelectTask={(id) => window.events.push('dashboard-task:' + id)}
+              onBackToTerminal={() => window.events.push('dashboard-back')} />
+          </div>
+        </div>
+      </div>));
+    };
     window.drawHistory = (open, accounts) => flushSync(() => root.render(<div className="workbench-ui h-screen"><HistoryModal isOpen onClose={() => {}} onResume={(e) => window.events.push('resume:' + e.id + (e.accountId ? ':' + e.accountId : ''))} openHistoryIds={new Set(open)} accounts={accounts} /></div>));
+    window.drawFileTree = (isOpen = true, activePreviewPath = null, hasActiveTerminal = true) => flushSync(() => root.render(<div className="workbench-ui h-screen">
+      <ProjectTreeDrawer isOpen={isOpen} onClose={() => window.events.push('tree-close')} rootPath="D:/GitHub/OneAI" gitBranch="main"
+        activePreviewPath={activePreviewPath} hasActiveTerminal={hasActiveTerminal}
+        onPreviewFile={(cwd, filePath) => window.events.push('tree-preview:' + cwd + '|' + filePath)}
+        onInsertPath={(relPath) => window.events.push('tree-insert:' + relPath)}
+        onRevealInExplorer={(targetPath) => window.events.push('tree-reveal:' + targetPath)} />
+    </div>));
     window.drawTermMany = (count, active) => {
       const tasks = Array.from({ length: count }, (_, i) => ({ id: 'many-' + i, groupId: 'terminal', title: 'm' + i, status: 'running', cwd: 'D:/GitHub/OneAI', createdAt: 1 }));
       flushSync(() => root.render(<div className="workbench-ui flex h-screen"><TerminalViewport theme="dark" tasks={tasks} activeTaskId={'many-' + active} /></div>));
@@ -341,27 +430,57 @@ app.whenReady().then(async () => {
         const header = document.querySelector('header').getBoundingClientRect();
         const rects = ['oneai-terminal-tools', 'oneai-topbar-clock', 'oneai-topbar-quota', 'oneai-topbar-sys']
           .map(id => document.getElementById(id).getBoundingClientRect()).filter(rect => rect.width > 0);
-        rects.push(document.querySelector('header button[aria-label="查看本周用量"]').getBoundingClientRect());
         rects.push(document.querySelector('header button[aria-label="查看历史会话"]').getBoundingClientRect());
+        rects.push(document.querySelector('header button[aria-label="项目目录树"]').getBoundingClientRect());
         const quota = document.getElementById('oneai-topbar-quota');
         return rects.length >= 3 && rects.every((rect, i) => rect.left >= header.left && rect.right <= (rects[i + 1]?.left ?? header.right))
           && quota.scrollWidth <= quota.clientWidth;
       })()\`) });
-      if (width === 1280 || width === 1440) result.push({ name: width + ' topbar still shows the account badge (visible, not just in the DOM)', ok: await win.webContents.executeJavaScript("document.querySelector('.topbar-account').getClientRects().length > 0") });
+      if (width === 900) result.push({ name: '900 topbar automatically hides clock when space runs out', ok: await win.webContents.executeJavaScript("(() => { const c = document.getElementById('oneai-topbar-clock'); return c.getAttribute('data-clock-mode') === 'hidden' && c.getBoundingClientRect().width === 0; })()") });
+      if (width === 1280 || width === 1440) result.push({ name: width + ' topbar still shows the account badge and Ctx (visible, not just in the DOM)', ok: await win.webContents.executeJavaScript("document.querySelector('.topbar-account').getClientRects().length > 0 && document.querySelector('.quota-ctx').getClientRects().length > 0") });
       if (width > 900) result.push({ name: width + ' task title keeps at least 48px', ok: await win.webContents.executeJavaScript("document.querySelector('header .truncate[title]').getBoundingClientRect().width >= 48") });
     }
+    result.push({ name: 'topbar no longer renders the weekly usage button', ok: await win.webContents.executeJavaScript(\`!document.querySelector('header button[aria-label="查看本周用量"]')\`) });
     result.push({ name: 'topbar at 2800 shows clock, usage and all system stats', ok: await win.webContents.executeJavaScript(\`
-      ['#oneai-topbar-clock', '.quota-usage', '.topbar-sys-cpu', '.topbar-sys-mem', '.topbar-sys-net'].every(sel => document.querySelector(sel).getClientRects().length > 0)\`) });
+      ['#oneai-topbar-clock', '.quota-usage', '.quota-tokens-breakdown', '.topbar-sys-cpu', '.topbar-sys-mem', '.topbar-sys-net'].every(sel => document.querySelector(sel).getClientRects().length > 0)\`) });
+    result.push({ name: 'topbar at 2800 maximized shows full date-time clock', ok: await win.webContents.executeJavaScript("(() => { const c = document.getElementById('oneai-topbar-clock'); const t = c.textContent.trim(); return c.getAttribute('data-clock-mode') === 'full' && c.getBoundingClientRect().width > 0 && t.includes('-') && t.includes(':'); })()") });
+    result.push({ name: 'topbar clock renders with bold font weight', ok: await win.webContents.executeJavaScript("parseInt(getComputedStyle(document.getElementById('oneai-topbar-clock')).fontWeight, 10) >= 700") });
     win.setSize(1920, 900);
     await win.webContents.executeJavaScript('window.setMaximized(true)');
     await settleSize();
-    result.push({ name: 'maximized 1920 topbar keeps usage, system stats and reset time', ok: await win.webContents.executeJavaScript(\`
-      ['#oneai-topbar-sys', '.quota-usage', '.quota-detail', '.topbar-account'].every(sel => document.querySelector(sel).getClientRects().length > 0)\`) });
+    result.push({ name: 'maximized 1920 topbar keeps usage breakdown, Ctx, system stats and reset time', ok: await win.webContents.executeJavaScript(\`
+      ['#oneai-topbar-sys', '.quota-usage', '.quota-tokens-breakdown', '.quota-detail', '.quota-ctx', '.topbar-account'].every(sel => document.querySelector(sel).getClientRects().length > 0)\`) });
+    result.push({ name: 'maximized 1920 topbar hides clock when full stress-test quota leaves no room', ok: await win.webContents.executeJavaScript("(() => { const c = document.getElementById('oneai-topbar-clock'); const title = document.querySelector('header .truncate[title]'); return c.getAttribute('data-clock-mode') === 'hidden' && c.getBoundingClientRect().width === 0 && title.getBoundingClientRect().width >= 48; })()") });
+    result.push({ name: 'maximized 1920 topbar adapts clock across time, full and hidden modes as free space changes', ok: await win.webContents.executeJavaScript(\`(async () => {
+      const tick = (ms = 80) => new Promise(r => setTimeout(r, ms));
+      const c = document.getElementById('oneai-topbar-clock');
+      const title = document.querySelector('header .truncate[title]');
+      window.draw('running', undefined, { costUsd: undefined, sevenDayResetsOn: '--' });
+      await tick();
+      const timeText = c.textContent.trim();
+      const timeOk = c.getAttribute('data-clock-mode') === 'time' && c.getBoundingClientRect().width > 0 && !timeText.includes('-') && timeText.split(':').length === 3 && title.getBoundingClientRect().width >= 48;
+      window.draw('running', undefined, { tokens: undefined, tokenInput: undefined, tokenOutput: undefined, tokenCache: undefined, cacheHitPercent: undefined, costUsd: undefined, sevenDayPercent: -1, sevenDayResetsOn: '--', ctxPercent: undefined, ctxTokens: undefined });
+      await tick();
+      const fullOk = c.getAttribute('data-clock-mode') === 'full' && c.getBoundingClientRect().width > 0 && c.textContent.includes('-') && c.textContent.includes(':');
+      window.draw('running', '工作账号');
+      await tick();
+      const hiddenOk = c.getAttribute('data-clock-mode') === 'hidden' && c.getBoundingClientRect().width === 0;
+      return timeOk && fullOk && hiddenOk;
+    })()\`) });
     result.push({ name: 'topbar usage and system text content', ok: await win.webContents.executeJavaScript(\`(() => {
       const quota = document.getElementById('oneai-topbar-quota').textContent;
       const sys = document.getElementById('oneai-topbar-sys').textContent;
-      return quota.includes('Tokens: 866k') && quota.includes('Cost: $0.24') && quota.includes('5h: 82%') && quota.includes('Model: gpt-5-codex')
+      return quota.includes('Tokens: in 335k, out 167k, cache 321k') && quota.includes('Cache: 99%') && quota.includes('Cost: $0.24') && quota.includes('5h: 82%') && quota.includes('Model: gpt-5-codex') && quota.includes('Ctx: 62%')
         && sys.includes('CPU: 100%') && sys.includes('Mem: 31.9 GB') && sys.includes('↑999K/s') && sys.includes('↓99.9M/s');
+    })()\`) });
+    result.push({ name: 'topbar renders Ctx 0%, token-only Ctx, and legacy total Tokens fallback', ok: await win.webContents.executeJavaScript(\`(() => {
+      window.drawQuota({ ctxPercent: 0 });
+      const zeroOk = document.getElementById('oneai-topbar-quota').textContent.includes('Ctx: 0%');
+      window.drawQuota({ ctxPercent: undefined, ctxTokens: 195_000, ctxWindow: undefined });
+      const tokCtxOk = document.getElementById('oneai-topbar-quota').textContent.includes('Ctx: 195k');
+      window.drawQuota({ tokens: 866_000, tokenInput: undefined, tokenOutput: undefined, tokenCache: undefined, cacheHitPercent: undefined });
+      const legacyOk = document.getElementById('oneai-topbar-quota').textContent.includes('Tokens: 866k');
+      return zeroOk && tokCtxOk && legacyOk;
     })()\`) });
     await win.webContents.executeJavaScript("window.draw(); document.querySelector('button[aria-current]').focus()");
     await key('F2', 'F2', 113);
@@ -866,7 +985,7 @@ app.whenReady().then(async () => {
         return '...' + [...hit].slice(Math.max(0, at - 25), at + 25).join('');
       };
       window.setUiLanguage('en');
-      for (const [name, fn] of [['main layout', () => window.draw()], ['sidebar', () => window.drawSidebar()], ['collapsed sidebar', () => window.drawSidebar(true)], ['account sidebar', () => window.drawAccountSidebar()], ['usage', () => window.drawUsage()], ['history', () => window.drawHistory([])]]) {
+      for (const [name, fn] of [['main layout', () => window.draw()], ['sidebar', () => window.drawSidebar()], ['collapsed sidebar', () => window.drawSidebar(true)], ['account sidebar', () => window.drawAccountSidebar()], ['usage', () => window.drawUsage()], ['dashboard', () => window.drawDashboard()], ['history', () => window.drawHistory([])]]) {
         fn(); await tick(300);
         const bad = findCjk(document.body);
         check('English ' + name + ' has no Chinese' + (bad ? ': ' + bad : ''), !bad);
@@ -876,12 +995,13 @@ app.whenReady().then(async () => {
         }
       }
       window.setUiLanguage('zh-CN');
-      // 顶栏日期：最大化时显示年月日与星期，设置里关闭后只显示时间
-      window.hideDate = false; window.draw(); await tick();
+      // 顶栏日期：最大化且空间充足时显示年月日与星期，设置里关闭后只显示时间
+      const lightQuota = { tokens: undefined, tokenInput: undefined, tokenOutput: undefined, tokenCache: undefined, cacheHitPercent: undefined, costUsd: undefined, sevenDayPercent: -1, sevenDayResetsOn: '--', ctxPercent: undefined, ctxTokens: undefined };
+      window.hideDate = false; window.drawQuota(lightQuota); await tick();
       window.setMaximized(true); await tick(400);
       const clock = () => document.getElementById('oneai-topbar-clock').textContent.trim();
       check('maximized top bar shows the date by default', clock().indexOf('-') > 0 && clock().indexOf(':') > 0);
-      window.hideDate = true; window.draw(); await tick(400);
+      window.hideDate = true; window.drawQuota(lightQuota); await tick(400);
       check('with the date switched off the top bar shows only the time', clock().indexOf('-') < 0 && clock().split(':').length === 3);
       window.hideDate = false; window.setMaximized(false); window.draw(); await tick();
       return checks;
@@ -1001,8 +1121,11 @@ app.whenReady().then(async () => {
 
       window.ptyWrites = [];
       window.electronAPI.writeSession = async (id, text) => { window.ptyWrites.push({ id, text }); return true; };
-      // 初次绘制会连续触发几次终端尺寸同步（也算用户动作），等它们过了回显窗口再按键
-      window.drawTerm('custom-shift', 'custom-ab12cd34'); await wait(1800);
+      // 初次绘制会连续触发几次终端尺寸同步（也算用户动作），等它们过了回显窗口再按键；
+      // 隐藏窗口的 rAF / ResizeObserver 按 ~1 Hz 触发，先等首帧完成再等防抖与回显窗口结束，避免依赖时钟相位
+      window.drawTerm('custom-shift', 'custom-ab12cd34');
+      await new Promise(r => requestAnimationFrame(() => r()));
+      await wait(1300);
       const echoBefore = window.isUserEcho('custom-shift');
       press({ key: 'Enter', code: 'Enter', keyCode: 13, shiftKey: true }); await wait(100);
       check('Shift+Enter is left alone in custom CLI tasks', !window.ptyWrites.some(w => w.text === ESC_CR));
@@ -1292,7 +1415,9 @@ app.whenReady().then(async () => {
       // 代码缩略图（minimap）
       const longText = Array.from({ length: 300 }, (_, i) => '  const value' + i + ' = ' + i + ';').join(String.fromCharCode(10));
       window.electronAPI.readPreviewFile = async () => ({ kind: 'text', path: 'long.ts', size: 9000, content: longText });
-      window.drawPreview(150, 10); await wait(300);
+      window.drawPreview(150, 10);
+      for (let i = 0; i < 40 && document.querySelectorAll('pre > div').length !== 300; i++) await wait(50);
+      await wait(300);
       const mini = () => document.querySelector('[data-preview-minimap]');
       const slider = () => document.querySelector('[data-preview-minimap-slider]');
       const scroller = () => document.querySelector('aside[aria-label="文件预览"] .overflow-auto');
@@ -1376,6 +1501,123 @@ app.whenReady().then(async () => {
       delete window.electronAPI.getSessionSnapshot;
       window.electronAPI.onSessionData = () => () => {};
       window.electronAPI.onSessionExit = () => () => {};
+      window.clearRoot();
+      // 项目目录树按钮与右侧抽屉
+      window.events = [];
+      window.draw(); await wait(80);
+      document.querySelector('header button[aria-label="项目目录树"]').click();
+      check('topbar project tree button triggers toggle', window.events.includes('file-tree'));
+      window.events = [];
+      window.electronAPI.writeClipboardText = async (text) => { window.events.push('clip:' + text); return true; };
+      let dirListCalls = 0;
+      window.electronAPI.listDirectory = async (rootPath, relDir = '') => {
+        dirListCalls++;
+        if (relDir === 'src') {
+          return {
+            ok: true, rootPath, dirPath: rootPath + '/src',
+            entries: [
+              { name: 'components', relPath: 'src/components', fullPath: rootPath + '/src/components', isDir: true },
+              { name: 'App.tsx', relPath: 'src/App.tsx', fullPath: rootPath + '/src/App.tsx', isDir: false },
+            ],
+          };
+        }
+        if (relDir === 'big') {
+          return {
+            ok: true, rootPath, dirPath: rootPath + '/big',
+            truncated: true, totalCount: 650,
+            entries: [{ name: 'first.ts', relPath: 'big/first.ts', fullPath: rootPath + '/big/first.ts', isDir: false }],
+          };
+        }
+        return {
+          ok: true, rootPath, dirPath: rootPath,
+          entries: [
+            { name: '.git', relPath: '.git', fullPath: rootPath + '/.git', isDir: true, dimmed: true },
+            { name: 'big', relPath: 'big', fullPath: rootPath + '/big', isDir: true },
+            { name: 'node_modules', relPath: 'node_modules', fullPath: rootPath + '/node_modules', isDir: true, dimmed: true },
+            { name: 'src', relPath: 'src', fullPath: rootPath + '/src', isDir: true },
+            { name: 'package.json', relPath: 'package.json', fullPath: rootPath + '/package.json', isDir: false },
+          ],
+        };
+      };
+      window.drawFileTree(true, 'D:/GitHub/OneAI/package.json', true); await wait(120);
+      const treeDlg = document.querySelector('[role="dialog"]');
+      const treeRect = treeDlg.getBoundingClientRect();
+      const rowOf = (rel) => document.querySelector('[data-tree-path="' + rel + '"]');
+      const itemOf = (rel) => rowOf(rel).querySelector('button[role="treeitem"]');
+      check('project tree drawer renders below 44px topbar with title and branch', treeRect.top >= 44 && treeDlg.textContent.includes('OneAI') && treeDlg.querySelector('[data-git-branch]')?.textContent.includes('main'));
+      check('project tree dims node_modules and .git entries', rowOf('node_modules').getAttribute('data-tree-dimmed') === 'true' && parseFloat(getComputedStyle(itemOf('node_modules')).opacity) < 0.8 && !rowOf('src').hasAttribute('data-tree-dimmed'));
+      check('active preview file is highlighted in tree', itemOf('package.json').getAttribute('aria-selected') === 'true');
+      const callsBeforeExpand = dirListCalls;
+      itemOf('src').click(); await wait(120);
+      check('clicking a folder lazily loads and expands children with indent guides', dirListCalls === callsBeforeExpand + 1 && Boolean(rowOf('src/App.tsx')) && rowOf('src/App.tsx').querySelectorAll('span.w-px').length === 1);
+      const filterInput = treeDlg.querySelector('input[placeholder="筛选已展开的文件与文件夹"]');
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(filterInput, 'App.tsx');
+      filterInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await wait(60);
+      check('filter keeps matching file and its ancestor folder while hiding unmatched rows', Boolean(rowOf('src')) && Boolean(rowOf('src/App.tsx')) && !rowOf('package.json'));
+      setter.call(filterInput, '');
+      filterInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await wait(60);
+      rowOf('src/App.tsx').querySelector('button[aria-label="插入路径到当前终端"]').click(); await wait(60);
+      check('inline insert path triggers onInsertPath without closing the drawer', window.events.includes('tree-insert:src/App.tsx') && !window.events.includes('tree-close') && Boolean(document.querySelector('[role="dialog"]')));
+      rowOf('src/App.tsx').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 900, clientY: 220 })); await wait(60);
+      const treeMenu = document.querySelector('[role="menu"]');
+      check('context menu lists file actions', treeMenu && ['预览文件', '插入路径到终端', '复制相对路径', '复制完整路径', '在资源管理器中显示'].every(label => treeMenu.textContent.includes(label)));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); await wait(60);
+      check('Esc closes context menu first while keeping drawer open', !document.querySelector('[role="menu"]') && !window.events.includes('tree-close') && Boolean(document.querySelector('[role="dialog"]')));
+      itemOf('big').click(); await wait(120);
+      check('truncated directory renders truncation notice', treeDlg.textContent.includes('仅显示前 1 / 650 项'));
+      itemOf('src').click(); await wait(60);
+      check('clicking an expanded folder collapses its children', !rowOf('src/App.tsx'));
+      itemOf('package.json').click(); await wait(60);
+      check('clicking a file triggers preview and closes drawer', window.events.includes('tree-preview:D:/GitHub/OneAI|D:/GitHub/OneAI/package.json') && window.events.includes('tree-close'));
+      delete window.electronAPI.listDirectory;
+      delete window.electronAPI.writeClipboardText;
+      window.clearRoot();
+
+      // 侧栏 Dashboard 菜单与 Dashboard 全量分析页面
+      window.events = [];
+      window.drawSidebar(false, 0, false, null, false); await wait(100);
+      const navBtn = document.querySelector('[data-dashboard-nav]');
+      check('expanded sidebar shows Dashboard menu below brand header and triggers onOpenDashboard', Boolean(navBtn) && navBtn.getBoundingClientRect().top >= document.querySelector('aside > div').getBoundingClientRect().bottom - 1 && (navBtn.click(), window.events.includes('open-dashboard')));
+      window.events = [];
+      window.drawSidebar(false, 0, false, null, true); await wait(100);
+      check('active Dashboard clears task active highlight', document.querySelector('[data-dashboard-nav]')?.getAttribute('aria-current') === 'page' && !document.querySelector('[data-task-id="side-a"] button[aria-current]'));
+      window.events = [];
+      window.drawSidebar(true, 0, false, null, false); await wait(100);
+      check('collapsed sidebar keeps Dashboard icon entry', Boolean(document.querySelector('[data-dashboard-nav]')) && (document.querySelector('[data-dashboard-nav]').click(), window.events.includes('open-dashboard')));
+
+      window.events = [];
+      window.dashboardEmpty = false;
+      window.drawDashboard(true); await wait(250);
+      const dash = document.getElementById('oneai-dashboard-view');
+      check('Dashboard topbar shows Dashboard breadcrumb and hides terminal tools and quota strip', document.querySelector('header').textContent.includes('Dashboard') && !document.getElementById('oneai-terminal-tools') && !document.getElementById('oneai-topbar-quota'));
+      check('Dashboard renders 4 KPI cards with deduplicated session count and estimated USD cost', dash.querySelector('[data-kpi="tokens"]').textContent.includes('4.33 M') && dash.querySelector('[data-kpi="sessions"]').textContent.includes('5') && dash.querySelector('[data-kpi="cost"]').textContent.includes('$6.45') && dash.querySelector('[data-kpi="cache"]').textContent.includes('%'));
+      check('Dashboard renders 12-month heatmap with active and hatched missing cells', dash.querySelectorAll('[data-dashboard-cell]').length >= 364 && dash.querySelectorAll('[data-dashboard-cell][data-status="active"]').length === 6 && dash.querySelectorAll('[data-dashboard-cell][data-status="missing"]').length > 200);
+      dash.querySelector('[data-dashboard-range="today"]').click(); await wait(100);
+      check('switching range tab to today filters KPIs to today only', dash.querySelector('[data-kpi="tokens"]').textContent.includes('1.01 M') && dash.querySelector('[data-kpi="sessions"]').textContent.includes('1'));
+      dash.querySelector('[data-dashboard-range="overview"]').click(); await wait(100);
+      dash.querySelector('[data-breakdown-item="codex"]').click(); await wait(100);
+      check('clicking breakdown bar filters KPIs and shows clear filter chip', dash.querySelector('[data-kpi="sessions"]').textContent.includes('2') && dash.textContent.includes('清除筛选'));
+      [...dash.querySelectorAll('button')].find(b => b.textContent.includes('清除筛选')).click(); await wait(100);
+      check('clearing filter restores full overview totals', dash.querySelector('[data-kpi="sessions"]').textContent.includes('5'));
+      dash.querySelector('[data-trend-metric="sessions"]').click(); await wait(80);
+      check('trend session metric displays non-additive session footnote', dash.textContent.includes('不能直接按日相加'));
+      dash.querySelector('[aria-label="选择分布维度"]').value = 'project';
+      dash.querySelector('[aria-label="选择分布维度"]').dispatchEvent(new Event('change', { bubbles: true })); await wait(80);
+      check('breakdown dimension switches to project and lists OneAI', dash.querySelector('[data-dashboard-breakdown]').textContent.includes('OneAI'));
+      check('Account quotas panel renders multi-group Antigravity and Codex accounts', dash.querySelector('[data-dashboard-quotas]').textContent.includes('Gemini Models') && dash.querySelector('[data-dashboard-quotas]').textContent.includes('Claude and GPT models') && dash.querySelector('[data-dashboard-quotas]').textContent.includes('Gemini 4 Argon') && dash.querySelector('[data-dashboard-quotas]').textContent.includes('alt'));
+      check('Model details table renders rows including unpriced label', dash.querySelectorAll('[data-dashboard-model-row]').length === 5 && dash.querySelector('#dashboard-model-details').textContent.includes('未定价'));
+      dash.querySelector('[data-dashboard-task="dash-t1"]').click();
+      check('clicking a workspace task card jumps back to that task', window.events.includes('dashboard-task:dash-t1'));
+      [...dash.querySelectorAll('button')].find(b => b.textContent.includes('返回终端')).click();
+      check('back to terminal button invokes onBackToTerminal', window.events.includes('dashboard-back'));
+      window.dashboardEmpty = true;
+      window.drawDashboard(false); await wait(200);
+      const emptyDashText = document.getElementById('oneai-dashboard-view').textContent;
+      check('empty Dashboard renders cleanly without NaN', emptyDashText.includes('Dashboard.') && !emptyDashText.includes('NaN'));
+      window.dashboardEmpty = false;
       window.clearRoot();
       return checks;
     })()\`));

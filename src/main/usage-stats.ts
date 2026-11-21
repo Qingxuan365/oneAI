@@ -8,10 +8,22 @@ import { quotaService } from './quota-service';
 import { formatClaudeModel } from './model-format';
 import { isAccountCli, resolveConfigDir } from './account-env';
 import { normalizePathKey } from './fs-utils';
-import type { UsageAccountInfo, UsageAccountRef, UsageCli, UsageDay, UsageRow, UsageStats } from '../shared/types';
+import { estimateModelCostUsd } from './model-pricing';
+import type {
+  DashboardDailyRecord,
+  DashboardProjectInfo,
+  DashboardSessionMeta,
+  DashboardStats,
+  UsageAccountInfo,
+  UsageAccountRef,
+  UsageCli,
+  UsageDay,
+  UsageRow,
+  UsageStats,
+} from '../shared/types';
 import { t } from './i18n';
 
-export type { UsageAccountInfo, UsageAccountRef, UsageCli, UsageDay, UsageRow, UsageStats };
+export type { DashboardStats, UsageAccountInfo, UsageAccountRef, UsageCli, UsageDay, UsageRow, UsageStats };
 
 /** 方块图覆盖的周数（含本周）；本机会话日志只保留一段时间，更早的天数记为 0 */
 export const HEATMAP_WEEKS = 26;
@@ -24,6 +36,12 @@ interface Entry {
   output: number;
   cacheRead: number;
   cacheWrite: number;
+  costUsd?: number;   // 仅 Pi 等原生带单次费用的日志填充
+}
+
+interface ParsedFile {
+  cwd?: string;
+  entries: Entry[];
 }
 
 interface FileSource {
@@ -40,7 +58,7 @@ const AGY_ROOT = path.join(home, '.gemini', 'antigravity-cli');
 const PI_SESSIONS = path.join(home, '.pi', 'agent', 'sessions');
 
 // 单个会话文件的解析结果，按 mtime + 大小判断是否过期；持久化到 userData 下避免重启后重复解压全部历史归档会话
-const fileCache = new Map<string, { mtimeMs: number; size: number; entries: Entry[] }>();
+const fileCache = new Map<string, { mtimeMs: number; size: number; cwd?: string; entries: Entry[] }>();
 const PARSE_CONCURRENCY = 6;
 let diskCacheLoaded = false;
 let savingDiskCache = false;
@@ -54,7 +72,7 @@ function usageCachePath(): string | null {
   }
 }
 
-const DISK_CACHE_VERSION = 3;
+const DISK_CACHE_VERSION = 4;
 
 async function ensureDiskCacheLoaded(): Promise<void> {
   if (diskCacheLoaded) return;
@@ -66,7 +84,12 @@ async function ensureDiskCacheLoaded(): Promise<void> {
     if (parsed && typeof parsed === 'object' && parsed.version === DISK_CACHE_VERSION && parsed.files && typeof parsed.files === 'object') {
       for (const [file, val] of Object.entries(parsed.files as Record<string, any>)) {
         if (val && typeof val.mtimeMs === 'number' && typeof val.size === 'number' && Array.isArray(val.entries)) {
-          fileCache.set(file, { mtimeMs: val.mtimeMs, size: val.size, entries: val.entries });
+          fileCache.set(file, {
+            mtimeMs: val.mtimeMs,
+            size: val.size,
+            ...(typeof val.cwd === 'string' && val.cwd ? { cwd: val.cwd } : {}),
+            entries: val.entries,
+          });
         }
       }
     }
@@ -85,7 +108,7 @@ function scheduleSaveDiskCache(): void {
     try {
       do {
         pendingDiskCacheSave = false;
-        const files: Record<string, { mtimeMs: number; size: number; entries: Entry[] }> = {};
+        const files: Record<string, { mtimeMs: number; size: number; cwd?: string; entries: Entry[] }> = {};
         for (const [file, value] of fileCache) files[file] = value;
         const tmp = `${cacheFile}.tmp`;
         await fs.promises.mkdir(path.dirname(cacheFile), { recursive: true });
@@ -153,12 +176,17 @@ async function listJsonl(dir: string): Promise<string[]> {
 }
 
 // Claude Code：同一条 assistant 消息会按内容块写成多行，按 message.id + requestId 去重并以最后一行为准
-async function parseClaude(file: string): Promise<Entry[]> {
+async function parseClaude(file: string): Promise<ParsedFile> {
   const byKey = new Map<string, Entry>();
+  let cwd: string | undefined;
   await readLines(file, (line) => {
-    if (!line.includes('"type":"assistant"') || !line.includes('"usage"')) return;
+    const wantCwd = !cwd && line.includes('"cwd"');
+    const wantUsage = line.includes('"type":"assistant"') && line.includes('"usage"');
+    if (!wantCwd && !wantUsage) return;
     try {
       const e = JSON.parse(line);
+      if (!cwd && typeof e.cwd === 'string' && e.cwd.trim()) cwd = e.cwd.trim();
+      if (!wantUsage) return;
       const usage = e.message?.usage;
       const model = e.message?.model;
       const ts = Date.parse(e.timestamp);
@@ -175,7 +203,7 @@ async function parseClaude(file: string): Promise<Entry[]> {
       });
     } catch { /* 忽略坏行 */ }
   });
-  return [...byKey.values()];
+  return { cwd, entries: [...byKey.values()] };
 }
 
 /** codex-auto-review 是 Codex 自动审查（guardian）子会话使用的内部模型 id，加上中文说明避免被误认为主模型 */
@@ -184,15 +212,21 @@ const AUTO_REVIEW_MODEL = 'codex-auto-review';
 const modelLabel = (model: string) => (model === AUTO_REVIEW_MODEL ? t('自动审查 (codex-auto-review)') : model);
 
 // Codex：turn_context 给出模型，token_count 给出每次请求的用量；总量没有增长的重复事件不计；缺失模型时在汇总阶段代入实时默认模型
-async function parseCodex(file: string): Promise<Entry[]> {
+async function parseCodex(file: string): Promise<ParsedFile> {
   const entries: Entry[] = [];
+  let cwd: string | undefined;
   let model = '';
   let lastTotal = -1;
   await readLines(file, (line) => {
+    const isMeta = !cwd && line.includes('"session_meta"');
     const isContext = line.includes('"turn_context"');
-    if (!isContext && !line.includes('"token_count"')) return;
+    if (!isMeta && !isContext && !line.includes('"token_count"')) return;
     try {
       const e = JSON.parse(line);
+      if (e.type === 'session_meta') {
+        if (!cwd && typeof e.payload?.cwd === 'string' && e.payload.cwd.trim()) cwd = e.payload.cwd.trim();
+        return;
+      }
       if (isContext && e.type === 'turn_context') {
         if (typeof e.payload?.model === 'string' && e.payload.model) model = e.payload.model;
         return;
@@ -216,7 +250,7 @@ async function parseCodex(file: string): Promise<Entry[]> {
       });
     } catch { /* 忽略坏行 */ }
   });
-  return entries;
+  return { cwd, entries };
 }
 
 // Antigravity：PLANNER_RESPONSE 步骤带 token；记录里没有模型字段，只能从 USER_INPUT 末尾的 <USER_SETTINGS_CHANGE> 块中跟踪。
@@ -250,7 +284,7 @@ export function extractAgyModelChange(line: string): string | null {
   return VALID_AGY_MODEL.test(stripped) ? stripped : null;
 }
 
-async function parseAgy(file: string): Promise<Entry[]> {
+async function parseAgy(file: string): Promise<ParsedFile> {
   const entries: Entry[] = [];
   let model = '';
   await readLines(file, (line) => {
@@ -274,7 +308,7 @@ async function parseAgy(file: string): Promise<Entry[]> {
       });
     } catch { /* 忽略坏行 */ }
   });
-  return entries;
+  return { cwd: undefined, entries };
 }
 
 const DEFAULT_ACCOUNT = { id: 'default', get name() { return t('默认账号'); } };
@@ -295,29 +329,38 @@ function accountDirs(defaultDir: string, cliId: 'claude' | 'codex', accounts: Us
 
 // Pi：每条 assistant 消息自带 provider / model / usage（输入为未命中缓存部分，与缓存读写、输出相加等于 totalTokens）；
 // 出错的请求 usage 全为 0，没有消耗，不计入
-async function parsePi(file: string): Promise<Entry[]> {
+async function parsePi(file: string): Promise<ParsedFile> {
   const entries: Entry[] = [];
+  let cwd: string | undefined;
   await readLines(file, (line) => {
-    if (!line.includes('"role":"assistant"') || !line.includes('"usage"')) return;
+    const isSession = !cwd && line.includes('"type":"session"');
+    const isUsage = line.includes('"role":"assistant"') && line.includes('"usage"');
+    if (!isSession && !isUsage) return;
     try {
       const e = JSON.parse(line);
+      if (e.type === 'session') {
+        if (!cwd && typeof e.cwd === 'string' && e.cwd.trim()) cwd = e.cwd.trim();
+        return;
+      }
       const message = e.message;
       const usage = message?.usage;
       const ts = Date.parse(e.timestamp);
       if (e.type !== 'message' || message?.role !== 'assistant' || !usage || typeof message.model !== 'string' || !message.model || !Number.isFinite(ts)) return;
-      const entry = {
+      const costTotal = typeof usage.cost?.total === 'number' && Number.isFinite(usage.cost.total) && usage.cost.total > 0 ? usage.cost.total : undefined;
+      const entry: Entry = {
         ts,
         model: message.model,
         input: num(usage.input),
         output: num(usage.output),
         cacheRead: num(usage.cacheRead),
         cacheWrite: num(usage.cacheWrite),
+        ...(costTotal !== undefined ? { costUsd: costTotal } : {}),
       };
       if (entry.input + entry.output + entry.cacheRead + entry.cacheWrite === 0) return;
       entries.push(entry);
     } catch { /* 忽略坏行 */ }
   });
-  return entries;
+  return { cwd, entries };
 }
 
 /** 额度服务读取模型名是异步的：统计开始前并行扫描各 CLI 会话目录与默认模型，保持固定顺序以保证跨文件去重确定性 */
@@ -395,25 +438,25 @@ async function collectSources(accounts: UsageAccountRef[]): Promise<FileSource[]
   return [...claudeSources, ...codexSources, ...agySources, ...piSources];
 }
 
-async function loadEntries(source: FileSource, rangeStart: number): Promise<{ entries: Entry[]; dirty: boolean }> {
+async function loadEntries(source: FileSource, rangeStart: number): Promise<{ cwd?: string; entries: Entry[]; dirty: boolean }> {
   let stat: fs.Stats;
   try { stat = await fs.promises.stat(source.file); } catch { return { entries: [], dirty: false }; }
-  if (stat.mtimeMs < rangeStart) {
-    // 超过 26 周统计窗口的旧文件从持久化缓存中剔除，避免 usage-cache-v1.json 只增不减
-    const evicted = fileCache.delete(source.file);
-    return { entries: [], dirty: evicted };
+  if (rangeStart > 0 && stat.mtimeMs < rangeStart) {
+    return { entries: [], dirty: false };
   }
   const cached = fileCache.get(source.file);
-  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return { entries: cached.entries, dirty: false };
-  let entries: Entry[];
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    return { cwd: cached.cwd, entries: cached.entries, dirty: false };
+  }
+  let parsed: ParsedFile;
   try {
-    entries = source.cliId === 'claude' ? await parseClaude(source.file)
+    parsed = source.cliId === 'claude' ? await parseClaude(source.file)
       : source.cliId === 'codex' ? await parseCodex(source.file)
         : source.cliId === 'pi' ? await parsePi(source.file)
           : await parseAgy(source.file);
   } catch { return { entries: [], dirty: false }; }
-  fileCache.set(source.file, { mtimeMs: stat.mtimeMs, size: stat.size, entries });
-  return { entries, dirty: true };
+  fileCache.set(source.file, { mtimeMs: stat.mtimeMs, size: stat.size, ...(parsed.cwd ? { cwd: parsed.cwd } : {}), entries: parsed.entries });
+  return { cwd: parsed.cwd, entries: parsed.entries, dirty: true };
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -424,6 +467,30 @@ function mondayOf(date: Date): Date {
   const monday = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
   return monday;
+}
+
+async function loadSourcesConcurrently(sources: FileSource[], rangeStart: number): Promise<ParsedFile[]> {
+  let cacheDirty = false;
+  const liveFiles = new Set(sources.map((source) => source.file));
+  for (const file of fileCache.keys()) {
+    if (!liveFiles.has(file)) {
+      fileCache.delete(file);
+      cacheDirty = true;
+    }
+  }
+  const loaded: ParsedFile[] = new Array(sources.length);
+  let nextIdx = 0;
+  const workerCount = Math.min(PARSE_CONCURRENCY, sources.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIdx < sources.length) {
+      const i = nextIdx++;
+      const { cwd, entries, dirty } = await loadEntries(sources[i], rangeStart);
+      loaded[i] = { cwd, entries };
+      if (dirty) cacheDirty = true;
+    }
+  }));
+  if (cacheDirty) scheduleSaveDiskCache();
+  return loaded;
 }
 
 export async function getUsageStats(accounts: unknown): Promise<UsageStats> {
@@ -446,34 +513,12 @@ export async function getUsageStats(accounts: unknown): Promise<UsageStats> {
   const rows = new Map<string, UsageRow>();
   const accountsSeen = new Map<string, UsageAccountInfo>();
   const seen = new Set<string>();
-  let cacheDirty = false;
-  // 只在会话文件的 mtime 落在统计范围内才读取；已读过且未变化的文件走缓存
-  const liveFiles = new Set(sources.map((source) => source.file));
-  for (const file of fileCache.keys()) {
-    if (!liveFiles.has(file)) {
-      fileCache.delete(file);
-      cacheDirty = true;
-    }
-  }
-
-  // 有限并发读取解析，结果按原 sources 下标顺序汇总，保证跨文件去重键与顺序完全确定
-  const loadedEntries: Entry[][] = new Array(sources.length);
-  let nextIdx = 0;
-  const workerCount = Math.min(PARSE_CONCURRENCY, sources.length);
-  await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (nextIdx < sources.length) {
-      const i = nextIdx++;
-      const { entries, dirty } = await loadEntries(sources[i], rangeStart);
-      loadedEntries[i] = entries;
-      if (dirty) cacheDirty = true;
-    }
-  }));
-  if (cacheDirty) scheduleSaveDiskCache();
+  const loaded = await loadSourcesConcurrently(sources, rangeStart);
 
   for (let i = 0; i < sources.length; i++) {
     const source = sources[i];
     const sessionRows = new Set<UsageRow>();
-    for (const entry of loadedEntries[i]) {
+    for (const entry of loaded[i].entries) {
       if (entry.ts < rangeStart || entry.ts >= rangeEnd.getTime()) continue;
       if (entry.key) {
         if (seen.has(entry.key)) continue;
@@ -512,4 +557,161 @@ export async function getUsageStats(accounts: unknown): Promise<UsageStats> {
     rows: [...rows.values()].sort((a, b) => total(b) - total(a) || b.requests - a.requests),
     days: [...days.values()],
   };
+}
+
+export interface DashboardBuildItem {
+  cliId: UsageCli;
+  accountId: string;
+  accountName: string;
+  cwd?: string;
+  fallbackModel: string;
+  entries: Entry[];
+}
+
+function projectNameOf(rawPath: string): string {
+  const trimmed = rawPath.trim().replace(/[\\/]+$/, '');
+  if (!trimmed) return rawPath.trim();
+  const sep = Math.max(trimmed.lastIndexOf('\\'), trimmed.lastIndexOf('/'));
+  if (sep >= 0 && sep < trimmed.length - 1) return trimmed.slice(sep + 1);
+  return trimmed;
+}
+
+/** 按会话与本地日期汇总 Dashboard 数据，供渲染进程在各时间范围与维度间即时过滤 */
+export function buildDashboardStats(items: DashboardBuildItem[], now = Date.now()): DashboardStats {
+  const seen = new Set<string>();
+  const accountsSeen = new Map<string, UsageAccountInfo>();
+  const projectsMap = new Map<string, DashboardProjectInfo>();
+  const sessions: DashboardSessionMeta[] = [];
+  const records: DashboardDailyRecord[] = [];
+  let earliestDate: string | null = null;
+
+  for (const item of items) {
+    const buckets = new Map<string, {
+      date: string;
+      resolvedModel: string;
+      requests: number;
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+      nativeCostUsd: number;
+      hasNativeCost: boolean;
+    }>();
+
+    for (const entry of item.entries) {
+      if (!Number.isFinite(entry.ts) || entry.ts <= 0) continue;
+      if (entry.key) {
+        if (seen.has(entry.key)) continue;
+        seen.add(entry.key);
+      }
+      const date = dateKey(new Date(entry.ts));
+      if (!earliestDate || date < earliestDate) earliestDate = date;
+      const resolvedModel = entry.model || item.fallbackModel;
+      const key = `${date}\t${resolvedModel}`;
+      let bucket = buckets.get(key);
+      if (!bucket) {
+        bucket = {
+          date,
+          resolvedModel,
+          requests: 0,
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          nativeCostUsd: 0,
+          hasNativeCost: false,
+        };
+        buckets.set(key, bucket);
+      }
+      bucket.requests += 1;
+      bucket.input += entry.input;
+      bucket.output += entry.output;
+      bucket.cacheRead += entry.cacheRead;
+      bucket.cacheWrite += entry.cacheWrite;
+      if (typeof entry.costUsd === 'number' && Number.isFinite(entry.costUsd) && entry.costUsd > 0) {
+        bucket.nativeCostUsd += entry.costUsd;
+        bucket.hasNativeCost = true;
+      }
+    }
+
+    if (buckets.size === 0) continue;
+    const sessionId = sessions.length;
+    const rawCwd = item.cwd?.trim() ?? '';
+    const projectKey = rawCwd ? normalizePathKey(rawCwd) : '';
+    const projectName = rawCwd ? projectNameOf(rawCwd) : '';
+    if (projectKey && !projectsMap.has(projectKey)) {
+      projectsMap.set(projectKey, { key: projectKey, path: rawCwd, name: projectName });
+    }
+    const accountKey = `${item.cliId}:${item.accountId}`;
+    if (!accountsSeen.has(accountKey)) {
+      accountsSeen.set(accountKey, { cliId: item.cliId, accountId: item.accountId, name: item.accountName });
+    }
+    sessions.push({
+      id: sessionId,
+      cliId: item.cliId,
+      accountId: item.accountId,
+      accountName: item.accountName,
+      project: projectKey,
+      projectPath: rawCwd,
+      projectName,
+    });
+
+    for (const b of buckets.values()) {
+      let costUsd = 0;
+      let costPriced = false;
+      if (b.hasNativeCost) {
+        costUsd = b.nativeCostUsd;
+        costPriced = true;
+      } else {
+        const estimated = estimateModelCostUsd(b.resolvedModel, b);
+        if (estimated !== null) {
+          costUsd = estimated;
+          costPriced = true;
+        }
+      }
+      records.push({
+        s: sessionId,
+        date: b.date,
+        model: modelLabel(b.resolvedModel),
+        ...(b.resolvedModel === AUTO_REVIEW_MODEL ? { subagent: true } : {}),
+        requests: b.requests,
+        input: b.input,
+        output: b.output,
+        cacheRead: b.cacheRead,
+        cacheWrite: b.cacheWrite,
+        costUsd,
+        costPriced,
+      });
+    }
+  }
+
+  let timezone = 'Local';
+  try {
+    timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local';
+  } catch {}
+
+  return {
+    generatedAt: now,
+    timezone,
+    earliestDate,
+    accounts: [...accountsSeen.values()],
+    projects: [...projectsMap.values()].sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path)),
+    sessions,
+    records,
+  };
+}
+
+export async function getDashboardStats(accounts: unknown): Promise<DashboardStats> {
+  await ensureDiskCacheLoaded();
+  const sources = await collectSources(Array.isArray(accounts) ? accounts as UsageAccountRef[] : []);
+  const loaded = await loadSourcesConcurrently(sources, 0);
+  const items: DashboardBuildItem[] = sources.map((source, i) => ({
+    cliId: source.cliId,
+    accountId: source.accountId,
+    accountName: source.accountName,
+    cwd: loaded[i].cwd,
+    fallbackModel: source.fallbackModel(),
+    entries: loaded[i].entries,
+  }));
+  return buildDashboardStats(items, Date.now());
 }

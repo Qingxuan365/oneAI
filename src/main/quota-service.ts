@@ -6,7 +6,7 @@ import https from 'node:https';
 import { execFile } from 'node:child_process';
 import { isAccountCli, resolveConfigDir, AccountCliId } from './account-env';
 import { isSamePath, normalizePathKey, setBoundedMap } from './fs-utils';
-import type { QuotaData } from '../shared/types';
+import type { QuotaData, QuotaGroupSnapshot } from '../shared/types';
 import { t } from './i18n';
 import { formatClaudeModel } from './model-format';
 
@@ -65,9 +65,160 @@ const CLAUDE_HOME_DEFAULT = path.join(os.homedir(), '.claude');
 const KIMI_HOME_DEFAULT = path.join(os.homedir(), '.kimi-code');
 const CLAUDE_STATUS_FILE = path.join(os.homedir(), '.config', 'oneai', 'claude-status.json');
 const AGY_SETTINGS_FILE = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'settings.json');
+const AGY_BRAIN_DIR = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'brain');
 const PI_SETTINGS_FILE = path.join(os.homedir(), '.pi', 'agent', 'settings.json');
 const PI_MODELS_FILE = path.join(os.homedir(), '.pi', 'agent', 'models.json');
 const PI_SESSIONS_DIR = path.join(os.homedir(), '.pi', 'agent', 'sessions');
+
+export interface SessionTokenUsage {
+  tokens?: number;
+  tokenInput?: number;
+  tokenOutput?: number;
+  tokenCache?: number;
+  cacheHitPercent?: number;
+  ctxPercent?: number;
+  ctxTokens?: number;
+  ctxWindow?: number;
+  costUsd?: number;
+}
+
+const cleanNonNeg = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0);
+
+/** 统一计算顶栏展示的会话累计 tokens（in / out / cache）、缓存命中率与上下文占用，各 CLI 共用 */
+export function computeSessionUsage(params: {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite?: number;
+  lastCtxTokens?: number;
+  ctxWindow?: number;
+  ctxPercent?: number;
+  costUsd?: number;
+}): SessionTokenUsage {
+  const input = cleanNonNeg(params.input);
+  const output = cleanNonNeg(params.output);
+  const cacheRead = cleanNonNeg(params.cacheRead);
+  const cacheWrite = cleanNonNeg(params.cacheWrite);
+  const cache = cacheRead + cacheWrite;
+  const tokens = input + output + cache;
+  const totalInput = input + cache;
+  const cacheHitPercent = totalInput > 0 ? Math.max(0, Math.min(100, Math.round((cacheRead / totalInput) * 100))) : undefined;
+  const ctxTokens = typeof params.lastCtxTokens === 'number' && Number.isFinite(params.lastCtxTokens) && params.lastCtxTokens >= 0
+    ? params.lastCtxTokens
+    : undefined;
+  const ctxWindow = typeof params.ctxWindow === 'number' && Number.isFinite(params.ctxWindow) && params.ctxWindow > 0
+    ? params.ctxWindow
+    : undefined;
+  const ctxPercent = typeof params.ctxPercent === 'number' && Number.isFinite(params.ctxPercent)
+    ? Math.max(0, Math.min(100, Math.round(params.ctxPercent)))
+    : (ctxTokens !== undefined && ctxWindow !== undefined
+      ? Math.max(0, Math.min(100, Math.round((ctxTokens / ctxWindow) * 100)))
+      : undefined);
+  const costUsd = typeof params.costUsd === 'number' && Number.isFinite(params.costUsd) && params.costUsd >= 0
+    ? params.costUsd
+    : undefined;
+
+  const out: SessionTokenUsage = {};
+  if (tokens > 0) {
+    out.tokens = tokens;
+    out.tokenInput = input;
+    out.tokenOutput = output;
+    out.tokenCache = cache;
+  }
+  if (cacheHitPercent !== undefined) out.cacheHitPercent = cacheHitPercent;
+  if (ctxPercent !== undefined) out.ctxPercent = ctxPercent;
+  if (ctxTokens !== undefined) out.ctxTokens = ctxTokens;
+  if (ctxWindow !== undefined) out.ctxWindow = ctxWindow;
+  if (costUsd !== undefined) out.costUsd = costUsd;
+  return out;
+}
+
+interface AgyUsageRow {
+  group: string;
+  label: string;
+  pct: number;
+  resetMs: number;
+}
+
+function parseAgyRows(raw: string): AgyUsageRow[] {
+  const rows: AgyUsageRow[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const parts = line.split('\t');
+    if (parts.length < 3) continue;
+    const group = parts[0]?.trim();
+    const label = parts[1]?.trim();
+    if (!group || !label) continue;
+    const n = parseInt(parts[2] ?? '', 10);
+    const pct = Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : -1;
+    const parsedReset = parts[3] ? Date.parse(parts[3].trim()) : NaN;
+    const resetMs = Number.isFinite(parsedReset) ? parsedReset : 0;
+    rows.push({ group, label, pct, resetMs });
+  }
+  return rows;
+}
+
+function pickAgyWindow(rows: AgyUsageRow[], targetGroup: string, re: RegExp, now: number): { pct: number; resetMs: number } {
+  const targetLower = targetGroup.toLowerCase();
+  const hit = rows.find((r) => r.group.toLowerCase() === targetLower && re.test(r.label));
+  if (!hit) return { pct: -1, resetMs: 0 };
+  const expired = hit.pct >= 0 && hit.resetMs > 0 && hit.resetMs <= now;
+  return { pct: expired ? 100 : hit.pct, resetMs: hit.resetMs };
+}
+
+/**
+ * 解析 `agy -p /usage` 的全部分组额度（按首次出现顺序去重），供 Dashboard 展示同账号下的全部配额窗口。
+ */
+export function parseAgyUsageGroups(raw: string, now = Date.now()): Array<{
+  group: string;
+  five: { pct: number; resetMs: number };
+  seven: { pct: number; resetMs: number };
+}> {
+  const rows = parseAgyRows(raw);
+  const groups: string[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const lower = row.group.toLowerCase();
+    if (seen.has(lower)) continue;
+    seen.add(lower);
+    groups.push(row.group);
+  }
+  return groups.map((group) => ({
+    group,
+    five: pickAgyWindow(rows, group, /five\s*hour|5h/i, now),
+    seven: pickAgyWindow(rows, group, /weekly|7d/i, now),
+  }));
+}
+
+/**
+ * 解析 `agy -p /usage` 的制表符输出并匹配当前模型所在额度分组。
+ * Claude / GPT 走 `Claude and GPT models`；独立模型分组（如 `Gemini 4 Argon`）优先匹配同名或 Argon 模型；其余 Gemini 与 `Orchestrator (Neon)` 归入 `Gemini Models`。
+ */
+export function parseAgyUsage(raw: string, modelName: string, now = Date.now()): {
+  group: string;
+  five: { pct: number; resetMs: number };
+  seven: { pct: number; resetMs: number };
+} {
+  const rows = parseAgyRows(raw);
+
+  let targetGroup = 'Gemini Models';
+  if (/claude|gpt/i.test(modelName)) {
+    targetGroup = 'Claude and GPT models';
+  } else {
+    const lowerModel = modelName.toLowerCase();
+    const dedicated = [...new Set(rows.map((r) => r.group))].find((g) => {
+      const lg = g.toLowerCase();
+      if (lg === 'gemini models' || lg === 'claude and gpt models') return false;
+      return lowerModel.includes(lg) || (/argon/i.test(modelName) && /argon/i.test(g));
+    });
+    if (dedicated) targetGroup = dedicated;
+  }
+
+  return {
+    group: targetGroup,
+    five: pickAgyWindow(rows, targetGroup, /five\s*hour|5h/i, now),
+    seven: pickAgyWindow(rows, targetGroup, /weekly|7d/i, now),
+  };
+}
 
 function formatDuration(diffMs: number): string {
   if (diffMs <= 0) return '0m';
@@ -131,9 +282,9 @@ export class QuotaService {
         model: kimiInfo.model,
         effort: kimiInfo.effort,
         planType: 'Kimi Coding',
-        fiveHourPercent: 100,
+        fiveHourPercent: -1,
         fiveHourResetsIn: '--',
-        sevenDayPercent: 100,
+        sevenDayPercent: -1,
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'normal',
@@ -144,9 +295,9 @@ export class QuotaService {
         model: codexInfo.model,
         effort: codexInfo.effort,
         planType: 'Plus',
-        fiveHourPercent: 100,
+        fiveHourPercent: -1,
         fiveHourResetsIn: '--',
-        sevenDayPercent: 100,
+        sevenDayPercent: -1,
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'normal',
@@ -157,9 +308,9 @@ export class QuotaService {
         model: claudeInfo.model,
         effort: claudeInfo.effort,
         planType: 'Pro',
-        fiveHourPercent: 100,
+        fiveHourPercent: -1,
         fiveHourResetsIn: '--',
-        sevenDayPercent: 100,
+        sevenDayPercent: -1,
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'normal',
@@ -253,7 +404,10 @@ export class QuotaService {
     if (prev) clearTimeout(prev);
     this.debounceMap.set(key, setTimeout(() => {
       this.debounceMap.delete(key);
-      void this.refreshQuota(key);
+      if (this.quotasCache[key] || this.accounts.has(key)) {
+        this.cacheExpiry[key] = 0;
+        void this.fetchQuotaForCli(key, false).then(() => this.broadcast());
+      }
     }, delayMs));
   }
 
@@ -357,8 +511,9 @@ export class QuotaService {
   public setActiveCli(cliId: string | null): void {
     const prev = this.activeCliId;
     this.activeCliId = cliId;
-    if (cliId === 'agy' && prev !== 'agy' && !this.agyMissing && (this.agyUsageRaw === null || Date.now() - this.agyUsageAt >= this.AGY_USAGE_TTL_MS)) {
-      void this.refreshQuota('agy');
+    if (cliId === 'agy' && prev !== 'agy') {
+      this.cacheExpiry['agy'] = 0;
+      void this.fetchQuotaForCli('agy', false).then(() => this.broadcast());
     }
   }
 
@@ -708,17 +863,34 @@ export class QuotaService {
     return { model, effort };
   }
 
-  private piSessionCache: { file: string; offset: number; pending: Buffer; state: { provider?: string; modelId?: string; thinkingLevel?: string } } | null = null;
+  private piSessionCache: {
+    file: string;
+    offset: number;
+    pending: Buffer;
+    state: {
+      provider?: string;
+      modelId?: string;
+      thinkingLevel?: string;
+      hasUsage: boolean;
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+      costUsd: number;
+      lastCtxTokens?: number;
+    };
+  } | null = null;
 
-  /** 找到最近修改的 pi 会话文件，取其中最后一条 model_change / thinking_level_change；pi 的 /model 只写会话文件，不改 settings.json。 */
-  private piSessionPending: Promise<{ provider?: string; modelId?: string; thinkingLevel?: string }> | null = null;
+  /** 找到最近修改的 pi 会话文件，取其中最后一条 model_change / thinking_level_change 及累计 usage；pi 的 /model 只写会话文件，不改 settings.json。 */
+  private piSessionPending: Promise<NonNullable<QuotaService['piSessionCache']>['state']> | null = null;
 
   private readPiSessionState() {
     if (!this.piSessionPending) this.piSessionPending = this.loadPiSessionState().finally(() => { this.piSessionPending = null; });
     return this.piSessionPending;
   }
 
-  private async loadPiSessionState(): Promise<{ provider?: string; modelId?: string; thinkingLevel?: string }> {
+  private async loadPiSessionState(): Promise<NonNullable<QuotaService['piSessionCache']>['state']> {
+    const emptyState = () => ({ hasUsage: false, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 });
     try {
       const dirs = await fs.promises.readdir(PI_SESSIONS_DIR);
       const candidates = (await Promise.all(dirs.map(async (dir) => {
@@ -734,12 +906,12 @@ export class QuotaService {
       for (const item of candidates) {
         if (item && (!latest || item.mtime > latest.mtime)) latest = item;
       }
-      if (!latest) return {};
+      if (!latest) return emptyState();
       // 会话文件只追加：记住已读到的位置，之后只读新增的部分，避免长会话每次刷新都整份重读
       let cache = this.piSessionCache;
       const size = (await fs.promises.stat(latest.file)).size;
       if (!cache || cache.file !== latest.file || size < cache.offset) {
-        cache = { file: latest.file, offset: 0, pending: Buffer.alloc(0), state: {} };
+        cache = { file: latest.file, offset: 0, pending: Buffer.alloc(0), state: emptyState() };
         this.piSessionCache = cache;
       }
       if (size > cache.offset) {
@@ -758,25 +930,49 @@ export class QuotaService {
         cache.pending = lastNewline < 0 ? data : data.subarray(lastNewline + 1);
         if (lastNewline >= 0) {
           for (const line of data.subarray(0, lastNewline).toString('utf8').split('\n')) {
-            if (!line.startsWith('{"type":"model_change"') && !line.startsWith('{"type":"thinking_level_change"')) continue;
+            const isChange = line.startsWith('{"type":"model_change"') || line.startsWith('{"type":"thinking_level_change"');
+            const isUsage = line.includes('"role":"assistant"') && line.includes('"usage"');
+            if (!isChange && !isUsage) continue;
             try {
               const e = JSON.parse(line);
               if (e.type === 'model_change') { cache.state.provider = e.provider; cache.state.modelId = e.modelId; }
-              else cache.state.thinkingLevel = e.thinkingLevel;
+              else if (e.type === 'thinking_level_change') cache.state.thinkingLevel = e.thinkingLevel;
+              else if (e.type === 'message' && e.message?.role === 'assistant' && e.message.usage) {
+                const u = e.message.usage;
+                const inp = cleanNonNeg(u.input);
+                const out = cleanNonNeg(u.output);
+                const cr = cleanNonNeg(u.cacheRead);
+                const cw = cleanNonNeg(u.cacheWrite);
+                if (inp + out + cr + cw > 0) {
+                  cache.state.hasUsage = true;
+                  cache.state.input += inp;
+                  cache.state.output += out;
+                  cache.state.cacheRead += cr;
+                  cache.state.cacheWrite += cw;
+                  const cost = cleanNonNeg(u.cost?.total);
+                  if (cost > 0) cache.state.costUsd += cost;
+                  cache.state.lastCtxTokens = inp + cr + cw;
+                }
+              }
             } catch {}
           }
         }
       }
       return cache.state;
     } catch {
-      return {};
+      return emptyState();
     }
   }
 
-  /** 读取 pi 当前模型：优先取最近会话里的实际模型，没有会话时回退 settings.json 的 defaultModel；显示名取自 models.json。 */
-  public async getPiInfo(): Promise<{ model: string; effort?: string }> {
+  private async readPiDetails(): Promise<{
+    model: string;
+    effort?: string;
+    ctxWindow?: number;
+    session: NonNullable<QuotaService['piSessionCache']>['state'];
+  }> {
     let model = 'Auto';
     let effort: string | undefined = undefined;
+    let ctxWindow: number | undefined = undefined;
     let provider: string | undefined;
     let modelId: string | undefined;
     try {
@@ -794,33 +990,41 @@ export class QuotaService {
         const list: any[] = (provider && providers[provider]?.models) || [];
         const hit = list.find((m) => m.id === modelId);
         if (hit?.name) model = hit.name;
+        if (typeof hit?.contextWindow === 'number' && hit.contextWindow > 0) ctxWindow = hit.contextWindow;
       } catch {}
     }
+    return { model, effort, ctxWindow, session };
+  }
+
+  /** 读取 pi 当前模型：优先取最近会话里的实际模型，没有会话时回退 settings.json 的 defaultModel；显示名取自 models.json。 */
+  public async getPiInfo(): Promise<{ model: string; effort?: string }> {
+    const { model, effort } = await this.readPiDetails();
     return { model, effort };
   }
 
   /** 读取 agy 当前模型，settings.json 中形如 "Gemini 4 Hydrogen (Medium)"，括号内为推理等级。 */
-  public async getAgyInfo(): Promise<{ model: string; effort?: string }> {
+  public async getAgyInfo(): Promise<{ model: string; effort?: string; rawModel: string }> {
     let model = 'Auto';
     let effort: string | undefined = undefined;
+    let rawModel = 'Auto';
     try {
       const raw = JSON.parse(await fs.promises.readFile(AGY_SETTINGS_FILE, 'utf8')).model;
       if (typeof raw === 'string' && raw.trim()) {
-        const m = raw.trim().match(/^(.*?)\s*\(([^)]+)\)$/);
+        rawModel = raw.trim();
+        const m = rawModel.match(/^(.*?)\s*\(([^)]+)\)$/);
         if (m) {
           model = m[1];
           effort = m[2].toLowerCase();
         } else {
-          model = raw.trim();
+          model = rawModel;
         }
       }
     } catch {}
-    return { model, effort };
+    return { model, effort, rawModel };
   }
 
   /** key 为缓存键（默认账号是 'kimi'），home 为该账号的 KIMI_CODE_HOME；账号读取失败时额度记为未知，不借用默认账号的缓存 */
   private async fetchKimiQuota(key: string = 'kimi', home: string = KIMI_HOME_DEFAULT): Promise<QuotaData> {
-    const isAccount = !isSamePath(home, KIMI_HOME_DEFAULT);
     const credPath = path.join(home, 'credentials', 'kimi-code.json');
     const kimiInfo = await this.getKimiInfo(home);
     const currentModel = kimiInfo.model;
@@ -922,18 +1126,29 @@ export class QuotaService {
       };
     } catch (err: any) {
       console.warn('[QuotaService] Kimi fetch fallback:', err.message);
-      return this.quotasCache[key] || {
+      const prev = this.quotasCache[key];
+      const hasRealPrev = Boolean(prev && (prev.fiveHourResetsIn !== '--' || prev.sevenDayResetsOn !== '--'));
+      if (hasRealPrev) {
+        return {
+          ...prev,
+          model: currentModel,
+          effort: currentEffort,
+          lastUpdated: Date.now(),
+        };
+      }
+      return {
         cliId: 'kimi',
         cliName: 'Kimi Code',
         model: currentModel,
         effort: currentEffort,
-        fiveHourPercent: isAccount ? -1 : 100,
+        planType: 'Kimi Coding',
+        fiveHourPercent: -1,
         fiveHourResetsIn: '--',
-        sevenDayPercent: isAccount ? -1 : 100,
+        sevenDayPercent: -1,
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'normal',
-        message: isAccount ? t('额度读取失败：{reason}', { reason: err.message }) : undefined,
+        message: t('额度读取失败：{reason}', { reason: err.message }),
       };
     }
   }
@@ -995,25 +1210,22 @@ export class QuotaService {
       let foundRateLimits: any = null;
       let turnContext: { model?: string; effort?: string; at: number } | null = null;
       let planType = 'Plus';
+      let foundMainSession = false;
+      let sessionUsage: SessionTokenUsage | undefined;
 
       for (const item of filesWithStats.slice(0, 10)) {
         try {
           const tail = await this.readCodexTail(item.path, item.mtime, item.size);
-          if (!turnContext) turnContext = tail.context;
+          if (!tail.isSubagent && !foundMainSession) {
+            foundMainSession = true;
+            sessionUsage = tail.usage;
+          }
+          if (!turnContext && tail.context) turnContext = tail.context;
           if (!foundRateLimits && tail.rateLimits) {
             foundRateLimits = tail.rateLimits;
             if (foundRateLimits.plan_type) planType = foundRateLimits.plan_type.toUpperCase();
           }
-          if (foundRateLimits && turnContext) break;
-        } catch {}
-      }
-
-      // 累计 token 只取最新会话文件的最后一条 token_count，新会话尚无记录时不显示
-      let tokens: number | undefined;
-      if (filesWithStats[0]) {
-        try {
-          const item = filesWithStats[0];
-          tokens = (await this.readCodexTail(item.path, item.mtime, item.size)).tokens;
+          if (foundRateLimits && turnContext && foundMainSession) break;
         } catch {}
       }
 
@@ -1034,29 +1246,30 @@ export class QuotaService {
         const primary = foundRateLimits.primary || {};
         const secondary = foundRateLimits.secondary || {};
 
-        // 窗口已过重置时间说明额度已恢复，不再沿用日志里的旧占用
+        // 窗口已过重置时间说明额度已恢复，不再沿用日志里的旧占用；缺失窗口返回 -1
         const remaining = (w: any): number => {
+          if (!w || typeof w.used_percent !== 'number') return -1;
           if (w.resets_at && w.resets_at * 1000 <= Date.now()) return 100;
-          const used = typeof w.used_percent === 'number' ? w.used_percent : 0;
-          return Math.max(0, Math.min(100, Math.round(100 - used)));
+          return Math.max(0, Math.min(100, Math.round(100 - w.used_percent)));
         };
         const fiveHourPercent = remaining(primary);
         const sevenDayPercent = remaining(secondary);
 
-        let fiveHourResetsIn = t('已就绪');
-        if (primary.resets_at) {
+        let fiveHourResetsIn = fiveHourPercent < 0 ? '--' : t('已就绪');
+        if (fiveHourPercent >= 0 && primary.resets_at) {
           const resetMs = primary.resets_at * 1000;
           const diff = resetMs - Date.now();
           if (diff > 0) fiveHourResetsIn = formatDuration(diff);
         }
 
-        let sevenDayResetsOn = t('近期重置');
-        if (secondary.resets_at) {
+        let sevenDayResetsOn = sevenDayPercent < 0 ? '--' : t('近期重置');
+        if (sevenDayPercent >= 0 && secondary.resets_at) {
           const resetMs = secondary.resets_at * 1000;
           sevenDayResetsOn = formatResetDay(resetMs);
         }
 
-        const minPct = Math.min(fiveHourPercent, sevenDayPercent);
+        const known = [fiveHourPercent, sevenDayPercent].filter((p) => p >= 0);
+        const minPct = known.length ? Math.min(...known) : 100;
         const status = minPct < 15 ? 'critical' : minPct < 40 ? 'warning' : 'normal';
 
         return {
@@ -1065,7 +1278,7 @@ export class QuotaService {
           model,
           effort,
           planType,
-          tokens,
+          ...sessionUsage,
           fiveHourPercent,
           fiveHourResetsIn,
           sevenDayPercent,
@@ -1081,7 +1294,7 @@ export class QuotaService {
         model,
         effort,
         planType,
-        tokens,
+        ...sessionUsage,
         fiveHourPercent: unknownPct,
         fiveHourResetsIn: '--',
         sevenDayPercent: unknownPct,
@@ -1097,8 +1310,9 @@ export class QuotaService {
   }
 
   private codexTailCache = new Map<string, {
-    mtimeMs: number; size: number; tokens?: number; rateLimits: any;
+    mtimeMs: number; size: number; usage?: SessionTokenUsage; rateLimits: any;
     context: { model?: string; effort?: string; at: number } | null;
+    isSubagent: boolean;
   }>();
 
   private async readCodexTail(file: string, mtimeMs: number, size: number) {
@@ -1108,7 +1322,7 @@ export class QuotaService {
       this.codexTailCache.set(file, cached);
       return cached;
     }
-    const result: NonNullable<typeof cached> = { mtimeMs, size, rateLimits: null, context: null };
+    const result: NonNullable<typeof cached> = { mtimeMs, size, rateLimits: null, context: null, isSubagent: false };
     const handle = await fs.promises.open(file, 'r');
     let content: string;
     try {
@@ -1121,43 +1335,98 @@ export class QuotaService {
       if (!line.includes('"turn_context"') && !line.includes('"rate_limits"') && !line.includes('"total_token_usage"')) continue;
       try {
         const parsed = JSON.parse(line);
-        if (!result.context && line.includes('"turn_context"') && parsed?.payload?.model) {
-          result.context = { model: parsed.payload.model, effort: typeof parsed.payload.effort === 'string' ? parsed.payload.effort : undefined, at: Date.parse(parsed.timestamp) || mtimeMs };
+        if (line.includes('"turn_context"') && parsed?.payload?.model) {
+          if (parsed.payload.model === 'codex-auto-review') {
+            result.isSubagent = true;
+          } else if (!result.context) {
+            result.context = { model: parsed.payload.model, effort: typeof parsed.payload.effort === 'string' ? parsed.payload.effort : undefined, at: Date.parse(parsed.timestamp) || mtimeMs };
+          }
         }
         const limits = parsed?.payload?.rate_limits;
         if (!result.rateLimits && limits && (limits.primary || limits.secondary)) result.rateLimits = limits;
-        const tokens = parsed?.payload?.info?.total_token_usage?.total_tokens;
-        if (result.tokens === undefined && typeof tokens === 'number') result.tokens = tokens;
+        const info = parsed?.payload?.info;
+        const total = info?.total_token_usage;
+        if (!result.usage && total && typeof total.total_tokens === 'number') {
+          const rawIn = cleanNonNeg(total.input_tokens);
+          const cachedIn = cleanNonNeg(total.cached_input_tokens);
+          const cacheWrite = cleanNonNeg(total.cache_write_input_tokens);
+          const out = cleanNonNeg(total.output_tokens);
+          const uncachedIn = Math.max(0, rawIn - cachedIn);
+          const lastIn = typeof info?.last_token_usage?.input_tokens === 'number' ? info.last_token_usage.input_tokens : undefined;
+          const ctxWindow = typeof info?.model_context_window === 'number' && info.model_context_window > 0 ? info.model_context_window : undefined;
+          const usage = computeSessionUsage({
+            input: uncachedIn,
+            output: out,
+            cacheRead: cachedIn,
+            cacheWrite,
+            lastCtxTokens: lastIn,
+            ctxWindow,
+          });
+          if (total.total_tokens > 0) usage.tokens = total.total_tokens;
+          result.usage = usage;
+        }
       } catch {}
     }
     setBoundedMap(this.codexTailCache, file, result, 50);
     return result;
   }
 
-  private claudeTokenCache: { file: string; offset: number; pending: Buffer; perMessage: Map<string, number>; total: number } | null = null;
+  private claudeTokenCache: {
+    file: string;
+    offset: number;
+    pending: Buffer;
+    perMessage: Map<string, { input: number; output: number; cacheRead: number; cacheWrite: number }>;
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    lastCtxTokens?: number;
+  } | null = null;
+  private claudeLastRateLimits: any = null;
 
   /**
    * 累计 Claude Code 会话 token：快照里的 context_window 只是当前上下文大小，累计值要从会话记录算。
    * 同一条 assistant 消息会按内容块写成多行（usage 相同或递增），按 message.id + requestId 去重并以最后一行为准。
    * 只统计主会话记录，不含子代理的独立记录；会话文件只追加，按偏移增量读取并分片，避免大文件一次读入。
    */
-  private claudeTokenPending: Promise<number | undefined> | null = null;
+  private claudeTokenPending: Promise<SessionTokenUsage | undefined> | null = null;
 
-  private readClaudeSessionTokens(file: string): Promise<number | undefined> {
+  private toClaudeSessionUsage(cache: NonNullable<QuotaService['claudeTokenCache']>): SessionTokenUsage | undefined {
+    if (cache.perMessage.size === 0) return undefined;
+    return computeSessionUsage({
+      input: cache.input,
+      output: cache.output,
+      cacheRead: cache.cacheRead,
+      cacheWrite: cache.cacheWrite,
+      lastCtxTokens: cache.lastCtxTokens,
+    });
+  }
+
+  private readClaudeSessionTokens(file: string): Promise<SessionTokenUsage | undefined> {
     if (this.claudeTokenPending) {
-      return this.claudeTokenPending.then(() => this.claudeTokenCache?.file === file
-        ? this.claudeTokenCache.total : this.readClaudeSessionTokens(file));
+      return this.claudeTokenPending.then(() => (this.claudeTokenCache?.file === file
+        ? this.toClaudeSessionUsage(this.claudeTokenCache)
+        : this.readClaudeSessionTokens(file)));
     }
     this.claudeTokenPending = this.loadClaudeSessionTokens(file).finally(() => { this.claudeTokenPending = null; });
     return this.claudeTokenPending;
   }
 
-  private async loadClaudeSessionTokens(file: string): Promise<number | undefined> {
+  private async loadClaudeSessionTokens(file: string): Promise<SessionTokenUsage | undefined> {
     try {
       const size = (await fs.promises.stat(file)).size;
       let cache = this.claudeTokenCache;
       if (!cache || cache.file !== file || size < cache.offset) {
-        cache = { file, offset: 0, pending: Buffer.alloc(0), perMessage: new Map(), total: 0 };
+        cache = {
+          file,
+          offset: 0,
+          pending: Buffer.alloc(0),
+          perMessage: new Map(),
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+        };
         this.claudeTokenCache = cache;
       }
       const SLICE = 1024 * 1024;
@@ -1178,17 +1447,32 @@ export class QuotaService {
               const e = JSON.parse(line);
               const u = e.message?.usage;
               if (e.type !== 'assistant' || !u) continue;
-              const sum = (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
-              const key = `${e.message.id}:${e.requestId}`;
-              cache.total += sum - (cache.perMessage.get(key) ?? 0);
-              cache.perMessage.set(key, sum);
+              const inp = cleanNonNeg(u.input_tokens);
+              const out = cleanNonNeg(u.output_tokens);
+              const cr = cleanNonNeg(u.cache_read_input_tokens);
+              const cw = cleanNonNeg(u.cache_creation_input_tokens);
+              const key = `${e.message?.id ?? e.uuid}:${e.requestId ?? ''}`;
+              const prevMsg = cache.perMessage.get(key);
+              if (prevMsg) {
+                cache.input -= prevMsg.input;
+                cache.output -= prevMsg.output;
+                cache.cacheRead -= prevMsg.cacheRead;
+                cache.cacheWrite -= prevMsg.cacheWrite;
+              }
+              cache.input += inp;
+              cache.output += out;
+              cache.cacheRead += cr;
+              cache.cacheWrite += cw;
+              cache.perMessage.set(key, { input: inp, output: out, cacheRead: cr, cacheWrite: cw });
+              const ctx = inp + cr + cw;
+              if (ctx > 0) cache.lastCtxTokens = ctx;
             } catch {}
           }
         }
       } finally {
         await fd.close();
       }
-      return cache.total;
+      return this.toClaudeSessionUsage(cache);
     } catch {
       return undefined;
     }
@@ -1220,7 +1504,10 @@ export class QuotaService {
       return { ...base, message: t('等待 Claude Code 会话数据') };
     }
 
-    const rl = data.rate_limits || {};
+    if (data.rate_limits && (data.rate_limits.five_hour || data.rate_limits.seven_day)) {
+      this.claudeLastRateLimits = data.rate_limits;
+    }
+    const rl = (data.rate_limits && (data.rate_limits.five_hour || data.rate_limits.seven_day) ? data.rate_limits : this.claudeLastRateLimits) || {};
     const now = Date.now();
     const calc = (w: any): { pct: number; resetMs?: number } => {
       if (!w || typeof w.used_percentage !== 'number') return { pct: -1 };
@@ -1231,17 +1518,38 @@ export class QuotaService {
     };
     const five = calc(rl.five_hour);
     const seven = calc(rl.seven_day);
+    const sessionUsage = typeof data.transcript_path === 'string' ? await this.readClaudeSessionTokens(data.transcript_path) : undefined;
+
+    const cw = data.context_window;
+    const ctxWindow = typeof cw?.context_window_size === 'number' && cw.context_window_size > 0 ? cw.context_window_size : undefined;
+    const curUsage = cw?.current_usage;
+    const statusCtxTokens = curUsage && typeof curUsage === 'object'
+      ? cleanNonNeg(curUsage.input_tokens) + cleanNonNeg(curUsage.cache_read_input_tokens) + cleanNonNeg(curUsage.cache_creation_input_tokens)
+      : undefined;
+    const ctxTokens = statusCtxTokens ?? sessionUsage?.ctxTokens;
+    const explicitCtxPct = typeof cw?.used_percentage === 'number' && Number.isFinite(cw.used_percentage) ? cw.used_percentage : undefined;
+    const ctxPctFromCalc = explicitCtxPct !== undefined
+      ? explicitCtxPct
+      : (ctxTokens !== undefined && ctxWindow !== undefined
+        ? (ctxTokens / ctxWindow) * 100
+        : (ctxWindow !== undefined ? 0 : undefined));
+    const ctxPercent = ctxPctFromCalc !== undefined ? Math.max(0, Math.min(100, Math.round(ctxPctFromCalc))) : undefined;
+    const known = [five.pct, seven.pct].filter((p) => p >= 0);
+    const minPct = known.length ? Math.min(...known) : 100;
+    const status = minPct < 15 ? 'critical' : minPct < 40 ? 'warning' : 'normal';
 
     return {
       ...base,
-      tokens: typeof data.transcript_path === 'string' ? await this.readClaudeSessionTokens(data.transcript_path) : undefined,
+      ...sessionUsage,
+      ...(ctxPercent !== undefined ? { ctxPercent } : {}),
+      ...(ctxTokens !== undefined ? { ctxTokens } : {}),
+      ...(ctxWindow !== undefined ? { ctxWindow } : {}),
       costUsd: typeof data.cost?.total_cost_usd === 'number' ? data.cost.total_cost_usd : undefined,
       fiveHourPercent: five.pct,
       fiveHourResetsIn: five.resetMs ? formatDuration(five.resetMs - now) : '--',
       sevenDayPercent: seven.pct,
       sevenDayResetsOn: seven.resetMs ? formatResetDay(seven.resetMs) : '--',
-      status: Math.min(five.pct, seven.pct) >= 0 && Math.min(five.pct, seven.pct) < 10 ? 'critical' : 'normal',
-      message: data.context_window?.used_percentage ? `Ctx: ${data.context_window.used_percentage}%` : undefined,
+      status,
     };
   }
 
@@ -1262,14 +1570,26 @@ export class QuotaService {
     };
   }
 
-  // pi 是通用客户端，没有 5h / 7d 额度，只展示当前默认模型。
+  // pi 是通用客户端，没有 5h / 7d 额度，展示当前模型与会话累计用量 / 上下文占用。
   private async fetchPiQuota(): Promise<QuotaData> {
-    const piInfo = await this.getPiInfo();
+    const { model, effort, ctxWindow, session } = await this.readPiDetails();
+    const sessionUsage = session.hasUsage
+      ? computeSessionUsage({
+        input: session.input,
+        output: session.output,
+        cacheRead: session.cacheRead,
+        cacheWrite: session.cacheWrite,
+        lastCtxTokens: session.lastCtxTokens,
+        ctxWindow,
+        costUsd: session.costUsd > 0 ? session.costUsd : undefined,
+      })
+      : undefined;
     return {
       cliId: 'pi',
       cliName: 'Pi',
-      model: piInfo.model,
-      effort: piInfo.effort,
+      model,
+      effort,
+      ...sessionUsage,
       fiveHourPercent: -1,
       fiveHourResetsIn: '--',
       sevenDayPercent: -1,
@@ -1280,21 +1600,143 @@ export class QuotaService {
     };
   }
 
+  private agySessionCache: {
+    file: string;
+    offset: number;
+    pending: Buffer;
+    input: number;
+    output: number;
+    cacheRead: number;
+    lastCtxTokens?: number;
+    hasData: boolean;
+  } | null = null;
+  private agySessionPending: Promise<SessionTokenUsage | undefined> | null = null;
+
+  private toAgySessionUsage(cache: NonNullable<QuotaService['agySessionCache']>): SessionTokenUsage | undefined {
+    if (!cache.hasData) return undefined;
+    return computeSessionUsage({
+      input: cache.input,
+      output: cache.output,
+      cacheRead: cache.cacheRead,
+      lastCtxTokens: cache.lastCtxTokens,
+    });
+  }
+
+  private readAgySessionUsage(): Promise<SessionTokenUsage | undefined> {
+    if (!this.agySessionPending) {
+      this.agySessionPending = this.loadAgySessionUsage().finally(() => { this.agySessionPending = null; });
+    }
+    return this.agySessionPending;
+  }
+
+  private async loadAgySessionUsage(): Promise<SessionTokenUsage | undefined> {
+    try {
+      const dirs = await fs.promises.readdir(AGY_BRAIN_DIR, { withFileTypes: true });
+      const candidates = await Promise.all(dirs.filter((d) => d.isDirectory()).map(async (d) => {
+        const logsDir = path.join(AGY_BRAIN_DIR, d.name, '.system_generated', 'logs');
+        for (const name of ['transcript.jsonl', 'transcript_full.jsonl']) {
+          const file = path.join(logsDir, name);
+          try {
+            const stat = await fs.promises.stat(file);
+            return { file, mtime: stat.mtimeMs, size: stat.size };
+          } catch {}
+        }
+        return null;
+      }));
+      let latest: { file: string; mtime: number; size: number } | null = null;
+      for (const item of candidates) {
+        if (item && (!latest || item.mtime > latest.mtime)) latest = item;
+      }
+      if (!latest) return undefined;
+
+      let cache = this.agySessionCache;
+      if (!cache || cache.file !== latest.file || latest.size < cache.offset) {
+        cache = {
+          file: latest.file,
+          offset: 0,
+          pending: Buffer.alloc(0),
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          hasData: false,
+        };
+        this.agySessionCache = cache;
+      }
+      if (latest.size > cache.offset) {
+        const SLICE = 512 * 1024;
+        const fd = await fs.promises.open(latest.file, 'r');
+        try {
+          while (cache.offset < latest.size) {
+            const chunk = Buffer.alloc(Math.min(SLICE, latest.size - cache.offset));
+            const { bytesRead: read } = await fd.read(chunk, 0, chunk.length, cache.offset);
+            if (read <= 0) break;
+            cache.offset += read;
+            const data = Buffer.concat([cache.pending, chunk.subarray(0, read)]);
+            const lastNewline = data.lastIndexOf(0x0a);
+            cache.pending = lastNewline < 0 ? data : data.subarray(lastNewline + 1);
+            if (lastNewline < 0) continue;
+            for (const line of data.subarray(0, lastNewline).toString('utf8').split('\n')) {
+              if (!line.includes('"PLANNER_RESPONSE"')) continue;
+              try {
+                const e = JSON.parse(line);
+                if (e.type !== 'PLANNER_RESPONSE') continue;
+                const inp = cleanNonNeg(e.input_tokens);
+                const out = cleanNonNeg(e.output_tokens);
+                const cr = cleanNonNeg(e.cache_read_tokens);
+                if (inp + out + cr > 0) {
+                  cache.hasData = true;
+                  cache.input += inp;
+                  cache.output += out;
+                  cache.cacheRead += cr;
+                  cache.lastCtxTokens = inp + cr;
+                }
+              } catch {}
+            }
+          }
+        } finally {
+          await fd.close();
+        }
+      }
+      return this.toAgySessionUsage(cache);
+    } catch {
+      return undefined;
+    }
+  }
+
   /**
    * 通过 `agy -p /usage` 读取额度：输出为制表符分隔的「分组 / 窗口 / 剩余百分比 / 重置时间(UTC)」，
    * 不读取 agy 的凭据。单次约 5 秒，仅在当前活动任务为 agy 或手动刷新时按 TTL 调用，避免后台空闲时无谓拉起子进程。
    */
   private async fetchAgyQuota(forceUsage = false): Promise<QuotaData> {
-    const agyInfo = await this.getAgyInfo();
+    const prev = this.quotasCache['agy'];
+    const now = Date.now();
+    const shouldRunUsage = forceUsage || this.activeCliId === 'agy';
+    const [agyInfo, freshUsage] = await Promise.all([
+      this.getAgyInfo(),
+      shouldRunUsage ? this.readAgySessionUsage() : Promise.resolve(undefined),
+    ]);
+    const pickPrevUsage = (q?: QuotaData): SessionTokenUsage | undefined => {
+      if (!q) return undefined;
+      const u: SessionTokenUsage = {};
+      if (q.tokens !== undefined) u.tokens = q.tokens;
+      if (q.tokenInput !== undefined) u.tokenInput = q.tokenInput;
+      if (q.tokenOutput !== undefined) u.tokenOutput = q.tokenOutput;
+      if (q.tokenCache !== undefined) u.tokenCache = q.tokenCache;
+      if (q.cacheHitPercent !== undefined) u.cacheHitPercent = q.cacheHitPercent;
+      if (q.ctxPercent !== undefined) u.ctxPercent = q.ctxPercent;
+      if (q.ctxTokens !== undefined) u.ctxTokens = q.ctxTokens;
+      if (q.ctxWindow !== undefined) u.ctxWindow = q.ctxWindow;
+      if (q.costUsd !== undefined) u.costUsd = q.costUsd;
+      return u;
+    };
+    const sessionUsage = shouldRunUsage ? freshUsage : pickPrevUsage(prev);
     const base = {
       cliId: 'agy',
       cliName: 'Antigravity',
       model: agyInfo.model,
       effort: agyInfo.effort,
+      ...sessionUsage,
     };
-    const prev = this.quotasCache['agy'];
-    const now = Date.now();
-    const shouldRunUsage = forceUsage || this.activeCliId === 'agy';
     if (shouldRunUsage && !this.agyMissing && (this.agyUsageRaw === null || now - this.agyUsageAt >= this.AGY_USAGE_TTL_MS)) {
       if (!this.agyUsagePending) {
         this.agyUsagePending = this.runAgyUsage()
@@ -1329,24 +1771,21 @@ export class QuotaService {
       };
     }
 
-    // Gemini 系列共用「Gemini Models」额度，其余（Claude / GPT）共用另一组
-    const group = /gemini/i.test(agyInfo.model) ? 'Gemini Models' : 'Claude and GPT models';
-    const pick = (label: RegExp): { pct: number; resetMs: number } => {
-      for (const line of this.agyUsageRaw!.split(/\r?\n/)) {
-        const [g, l, pct, reset] = line.split('\t');
-        if (g === group && l && label.test(l)) {
-          const n = parseInt(pct, 10);
-          const t = new Date(reset).getTime();
-          return { pct: Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : -1, resetMs: Number.isFinite(t) ? t : 0 };
-        }
-      }
-      return { pct: -1, resetMs: 0 };
-    };
-    const five = pick(/^Five Hour/i);
-    const seven = pick(/^Weekly/i);
+    const currentNow = Date.now();
+    const { five, seven } = parseAgyUsage(this.agyUsageRaw, agyInfo.rawModel, currentNow);
+    const quotaGroups: QuotaGroupSnapshot[] = parseAgyUsageGroups(this.agyUsageRaw, currentNow).map((g) => {
+      const fiveDiff = g.five.resetMs - currentNow;
+      return {
+        group: g.group,
+        fiveHourPercent: g.five.pct,
+        fiveHourResetsIn: g.five.pct < 0 ? '--' : fiveDiff > 0 ? formatDuration(fiveDiff) : t('已就绪'),
+        sevenDayPercent: g.seven.pct,
+        sevenDayResetsOn: g.seven.pct < 0 ? '--' : g.seven.resetMs ? formatResetDay(g.seven.resetMs) : t('近期重置'),
+      };
+    });
     const known = [five.pct, seven.pct].filter((x) => x >= 0);
     const minPct = known.length ? Math.min(...known) : 100;
-    const fiveReset = five.resetMs - Date.now();
+    const fiveReset = five.resetMs - currentNow;
 
     return {
       ...base,
@@ -1355,6 +1794,7 @@ export class QuotaService {
       fiveHourResetsIn: five.pct < 0 ? '--' : fiveReset > 0 ? formatDuration(fiveReset) : t('已就绪'),
       sevenDayPercent: seven.pct,
       sevenDayResetsOn: seven.pct < 0 ? '--' : seven.resetMs ? formatResetDay(seven.resetMs) : t('近期重置'),
+      quotaGroups: quotaGroups.length > 0 ? quotaGroups : undefined,
       lastUpdated: this.agyUsageAt,
       status: minPct < 15 ? 'critical' : minPct < 40 ? 'warning' : 'normal',
       message: this.agyUsageError ? t('额度刷新失败：{reason}', { reason: this.agyUsageError }) : undefined,

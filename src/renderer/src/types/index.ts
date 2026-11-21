@@ -1,10 +1,17 @@
 import type {
   AccountCliId,
+  DashboardDailyRecord,
+  DashboardProjectInfo,
+  DashboardSessionMeta,
+  DashboardStats,
+  DirectoryListResult,
+  DirectoryTreeEntry,
   FilePreviewResult,
   HistoryAccountRef,
   HistoryEntry,
   LoginStatus,
   QuotaData,
+  QuotaGroupSnapshot,
   SessionAccount,
   SessionSnapshot,
   SystemStats,
@@ -21,11 +28,18 @@ import { THEME_IDS } from '../../../shared/types';
 export { THEME_IDS };
 export type {
   AccountCliId,
+  DashboardDailyRecord,
+  DashboardProjectInfo,
+  DashboardSessionMeta,
+  DashboardStats,
+  DirectoryListResult,
+  DirectoryTreeEntry,
   FilePreviewResult,
   HistoryAccountRef,
   HistoryEntry,
   LoginStatus,
   QuotaData,
+  QuotaGroupSnapshot,
   SessionAccount,
   SessionSnapshot,
   SystemStats,
@@ -146,6 +160,8 @@ export interface ElectronTerminalAPI {
   deleteSessionHistory: (items: Array<{ cliId: HistoryEntry['cliId']; id: string; accountId?: string }>) => Promise<{ deleted: number; failed: number }>;
   /** 本周各 CLI × 模型的用量与每日请求数（Claude Code / Codex / Antigravity / Pi）；accounts 为需要一并统计的账号配置目录 */
   getUsageStats?: (accounts: UsageAccountRef[]) => Promise<UsageStats>;
+  /** 全量 Dashboard 统计（按会话与本地日期聚合，供区间/Agent/项目/账号多维过滤与等值成本估算） */
+  getDashboardStats?: (accounts: UsageAccountRef[]) => Promise<DashboardStats>;
   /** 主进程里的已知 CLI 清单（设置 → CLI 显示用），不是写死在界面里 */
   listKnownClis?: () => Promise<Array<{ id: string; name: string; command: string }>>;
   /** 通知主进程当前界面语言，主进程里会显示到界面的文案（错误、额度提示等）跟随它 */
@@ -167,6 +183,8 @@ export interface ElectronTerminalAPI {
   resolvePreviewPaths?: (cwd: string, candidates: string[]) => Promise<Array<string | null>>;
   allowDroppedPreview?: (paths: string[]) => Promise<boolean>;
   readPreviewFile?: (cwd: string, filePath: string) => Promise<FilePreviewResult>;
+  listDirectory?: (rootPath: string, relDir?: string) => Promise<DirectoryListResult>;
+  revealInExplorer?: (targetPath: string) => Promise<boolean>;
   openExternal?: (url: string) => Promise<boolean>;
   /** 在资源管理器中打开文件夹，目录不存在时返回 false */
   openDirectory?: (dir: string) => Promise<boolean>;

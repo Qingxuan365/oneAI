@@ -29,6 +29,14 @@ export interface HistoryAccountRef {
   configDir: string;
 }
 
+export interface QuotaGroupSnapshot {
+  group: string;
+  fiveHourPercent: number;
+  fiveHourResetsIn: string;
+  sevenDayPercent: number;
+  sevenDayResetsOn: string;
+}
+
 export interface QuotaData {
   cliId: string;
   cliName: string;
@@ -36,11 +44,19 @@ export interface QuotaData {
   effort?: string;           // 推理思考等级: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   planType?: string;
   tokens?: number;           // 最近活跃会话累计 token（输入 + 输出 + 缓存读写），无数据时缺省
-  costUsd?: number;          // 最近活跃会话累计费用（美元），仅 Claude Code 提供
+  tokenInput?: number;       // 最近活跃会话累计未命中缓存输入 token，无数据时缺省
+  tokenOutput?: number;      // 最近活跃会话累计输出 token，无数据时缺省
+  tokenCache?: number;       // 最近活跃会话累计缓存 token（缓存读 + 缓存写），无数据时缺省
+  cacheHitPercent?: number;  // 最近活跃会话缓存命中率（0-100），无数据时缺省
+  ctxPercent?: number;       // 最近活跃会话当前上下文占用百分比（0-100），无数据时缺省
+  ctxTokens?: number;        // 最近活跃会话当前上下文 token 数，无数据时缺省
+  ctxWindow?: number;        // 当前模型上下文窗口上限（token），仅在 CLI 明确提供时填写
+  costUsd?: number;          // 最近活跃会话累计费用（美元），Claude Code / Pi 提供
   fiveHourPercent: number;   // 5h remaining pct (0-100)，未知为 -1
   fiveHourResetsIn: string;  // e.g. "2h 45m"
   sevenDayPercent: number;   // 7d remaining pct (0-100)，未知为 -1
   sevenDayResetsOn: string;  // e.g. "Resets Sun"
+  quotaGroups?: QuotaGroupSnapshot[]; // 同一账号下的多组独立额度（如 Antigravity 的 Gemini / Claude / Argon 分组）
   lastUpdated: number;
   status: 'normal' | 'warning' | 'critical' | 'offline';
   message?: string;
@@ -82,6 +98,46 @@ export interface UsageStats {
   days: UsageDay[];          // 周一对齐、连续的每日请求数，到本周周日为止
 }
 
+export interface DashboardSessionMeta {
+  id: number;
+  cliId: UsageCli;
+  accountId: string;
+  accountName: string;
+  project: string;           // 归一化项目键（normalizePathKey），无 cwd 时为空串
+  projectPath: string;
+  projectName: string;
+}
+
+export interface DashboardDailyRecord {
+  s: number;                 // 对应 sessions 中的 id
+  date: string;              // 本地日期 YYYY-MM-DD
+  model: string;
+  subagent?: boolean;
+  requests: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  costUsd: number;
+  costPriced: boolean;
+}
+
+export interface DashboardProjectInfo {
+  key: string;
+  path: string;
+  name: string;
+}
+
+export interface DashboardStats {
+  generatedAt: number;
+  timezone: string;
+  earliestDate: string | null;
+  accounts: UsageAccountInfo[];
+  projects: DashboardProjectInfo[];
+  sessions: DashboardSessionMeta[];
+  records: DashboardDailyRecord[];
+}
+
 export interface UsageAccountRef {
   id: string;
   name: string;
@@ -101,6 +157,24 @@ export type FilePreviewResult =
   | { kind: 'text'; path: string; size: number; content: string }
   | { kind: 'image'; path: string; size: number; dataUrl: string }
   | { kind: 'binary' | 'too-large' | 'error'; path: string; size?: number; message?: string };
+
+export interface DirectoryTreeEntry {
+  name: string;
+  relPath: string;   // 相对于项目根目录的正斜杠路径
+  fullPath: string;  // 解析后的原生绝对路径，供文件预览与在资源管理器中定位
+  isDir: boolean;
+  dimmed?: boolean;  // 隐藏文件/目录或常见构建/依赖目录（如 node_modules、.git、dist）
+}
+
+export interface DirectoryListResult {
+  ok: boolean;
+  rootPath: string;
+  dirPath: string;
+  entries: DirectoryTreeEntry[];
+  truncated?: boolean;
+  totalCount?: number;
+  error?: string;
+}
 
 export interface SessionSnapshot {
   buffer: string;

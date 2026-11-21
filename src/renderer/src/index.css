@@ -732,6 +732,16 @@ html, body, #root {
   }
 }
 
+/* Dashboard 热力图无日志日期斜线底纹，颜色取自当前主题语义变量 */
+.heatmap-cell-missing {
+  background-color: rgb(var(--color-control) / 0.35);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgb(var(--color-line-strong) / 0.32) 0 1.5px,
+    transparent 1.5px 5px
+  );
+}
+
 /* 弹窗进入动效，遵循系统「减少动态效果」设置 */
 @keyframes overlay-in {
   from { opacity: 0; }
@@ -756,41 +766,49 @@ html, body, #root {
 }
 
 /*
- * 顶栏按自身宽度逐级收起次要信息，依次为：时钟、网速、内存、CPU、Tokens / Cost、额度重置时间、模型名。
+ * 时钟根据实际剩余空间在 Topbar.tsx 中动态降级（完整日期时间 -> HH:MM:SS -> 隐藏）；
+ * 其余次要信息按顶栏宽度逐级收起，依次为：网速、内存、CPU、Tokens 明细折为总计、Tokens/Cache/Cost、额度重置时间、Ctx、模型名。
  * 断点使用 rem，随界面缩放档位一起变化，比较对象是顶栏去掉内边距后的内容宽度；
  * 面包屑由 flex 自动截断。各断点按「面包屑与工具至少留约 394px（任务名约 56px）+ 已显示的各块自然宽度」估算，
- * 其中时钟按最大化时的完整格式（约 281px）、系统资源按最宽取值（定宽）计算。
+ * 系统资源按最宽取值（定宽）计算。
  * 新增或加宽顶栏内容后，需要在 check-ui 的宽度扫描里重新确认没有重叠。
  */
 .topbar {
   container: topbar / inline-size;
 }
-@container topbar (max-width: 108rem) {
-  .topbar-clock { display: none; }
+.quota-tokens-compact {
+  display: none;
 }
-@container topbar (max-width: 91rem) {
+@container topbar (max-width: 109rem) {
   .topbar-sys-net { display: none; }
 }
-@container topbar (max-width: 82rem) {
+@container topbar (max-width: 103rem) {
   .topbar-sys-mem { display: none; }
 }
-@container topbar (max-width: 75rem) {
+@container topbar (max-width: 94rem) {
   .topbar-sys { display: none; }
 }
-@container topbar (max-width: 70rem) {
+@container topbar (max-width: 90rem) {
+  .quota-tokens-breakdown { display: none; }
+  .quota-tokens-compact { display: inline; }
+}
+@container topbar (max-width: 78rem) {
   .quota-usage { display: none; }
 }
-@container topbar (max-width: 58rem) {
+@container topbar (max-width: 65rem) {
   .quota-detail { display: none; }
 }
-@container topbar (max-width: 50rem) {
+@container topbar (max-width: 53.5rem) {
+  .quota-ctx { display: none; }
+}
+@container topbar (max-width: 52.5rem) {
   .quota-model { display: none; }
   .topbar-account { display: none; }
 }
-@container topbar (max-width: 46rem) {
+@container topbar (max-width: 48.5rem) {
   .topbar-group-name { display: none; }
 }
-@container topbar (max-width: 26rem) {
+@container topbar (max-width: 28.5rem) {
   .quota-model-info, .quota-model-divider { display: none; }
   #oneai-terminal-tools { gap: 0; }
   #oneai-topbar-quota > div { gap: 0.25rem; }

@@ -24,6 +24,7 @@ export interface TerminalViewportRef {
   clearActiveTerminal: () => void;
   restartActiveTerminal: (taskId?: string | null, options?: RestartSessionOptions) => Promise<{ success: boolean; error?: string } | undefined>;
   exportActiveTerminalLog: (mode: 'copy' | 'save') => Promise<{ success: boolean; filePath?: string; canceled?: boolean; error?: string }>;
+  insertTextToActiveTerminal: (text: string) => boolean;
 }
 
 /** 把终端里实际渲染出来的文字（含回滚区）导出为纯文本，折行的物理行合并为一行。 */
@@ -45,6 +46,8 @@ interface TerminalViewportProps {
   theme: ThemeId;
   tasks: TaskSession[];
   activeTaskId: string | null;
+  /** 外部整屏视图（如 Dashboard）覆盖时为 true，暂停前台即时刷帧与零尺寸 fit */
+  hidden?: boolean;
   fontSize?: number;
   lineHeight?: number;
   cursorStyle?: 'bar' | 'block' | 'underline';
@@ -558,6 +561,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
   cursorBlink = true,
   smoothScroll = false,
   linkClick = false,
+  hidden = false,
   emptyState,
   onPreviewFile,
 }, ref) => {
@@ -566,6 +570,8 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
   const containerRef = useRef<HTMLDivElement>(null);
   const linkClickRef = useRef(linkClick);
   linkClickRef.current = linkClick;
+  const hiddenRef = useRef<boolean>(hidden);
+  hiddenRef.current = hidden;
   // 单击即开时链接悬停始终显示手型光标（见 index.css 的 link-click）
   useEffect(() => { containerRef.current?.classList.toggle('link-click', linkClick); }, [linkClick]);
   const lastSizeSyncRef = useRef('');
@@ -635,6 +641,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
   // 空格和回车留给按钮本身；有弹窗或菜单打开、焦点在输入框时不干预。
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (hiddenRef.current) return;
       if (e.ctrlKey || e.altKey || e.metaKey || e.defaultPrevented) return;
       if (!(e.key === 'Process' || (e.key.length === 1 && e.key !== ' '))) return;
       const active = document.activeElement;
@@ -648,6 +655,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
     const onClick = (e: MouseEvent) => {
       if (e.detail === 0) return; // 键盘触发的 click（回车 / 空格），保留按钮焦点以便键盘操作
       window.setTimeout(() => {
+        if (hiddenRef.current) return;
         const active = document.activeElement;
         if (!active) return;
         const isMusicRange = active.tagName === 'INPUT' && (active as HTMLInputElement).type === 'range' && Boolean(active.closest('[data-music-player]'));
@@ -848,6 +856,17 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
     }
   };
 
+  const insertTextToActiveTerminal = (text: string): boolean => {
+    if (!activeTaskId || !text) return false;
+    const instance = instancesRef.current.get(activeTaskId);
+    if (instance) {
+      instance.term.paste(text);
+    } else {
+      void writePty(activeTaskId, text);
+    }
+    return true;
+  };
+
   // 暴露给外层 Topbar 控制
   useImperativeHandle(ref, () => ({
     openSearch: () => setIsSearchOpen(true),
@@ -855,6 +874,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
     clearActiveTerminal,
     restartActiveTerminal,
     exportActiveTerminalLog,
+    insertTextToActiveTerminal,
   }));
 
   // 动态更新所有已有终端的字体大小、行高与光标样式，实时触发自适应排版
@@ -875,7 +895,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
       if (cursorBlink !== undefined && instance.term.options.cursorBlink !== cursorBlink) {
         instance.term.options.cursorBlink = cursorBlink;
       }
-      if (changed) {
+      if (changed && !hiddenRef.current) {
         try {
           instance.fitAddon.fit();
         } catch {}
@@ -1404,7 +1424,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
     // PTY 可能晚于 xterm 实例创建。任务状态变化（尤其 starting -> running）后
     // 再同步一次真实行列，避免 Kimi 重绘输入框时按默认 120 列发生横向回卷；
     // 后台其他任务或 running / idle / waiting 瞬态切换时不重复触发 fit 布局测量。
-    if (activeTaskId) {
+    if (activeTaskId && !hiddenRef.current) {
       const activeInstance = instancesRef.current.get(activeTaskId);
       if (activeInstance) {
         const rawStatus = tasks.find((task) => task.id === activeTaskId)?.status;
@@ -1412,6 +1432,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
         const preKey = `${activeTaskId}:${syncBucket}`;
         if (!lastSizeSyncRef.current.startsWith(`${preKey}:`)) {
           requestAnimationFrame(() => {
+            if (hiddenRef.current) return;
             try {
               activeInstance.fitAddon.fit();
               const { cols, rows } = activeInstance.term;
@@ -1480,11 +1501,12 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
       const isCurrent = id === activeTaskId;
       instance.container.style.display = isCurrent ? 'block' : 'none';
 
-      if (isCurrent) {
+      if (isCurrent && !hiddenRef.current) {
         // 先按当前容器尺寸 fit，再写入隐藏期间攒下的输出，避免按旧宽度排版后再回卷
         try { instance.fitAddon.fit(); } catch { /* ignore */ }
         instance.flush();
         setTimeout(() => {
+          if (hiddenRef.current) return;
           try {
             instance.fitAddon.fit();
             // 鼠标刚点中目标任务行时保留其焦点以便 F2 重命名 / Alt+方向键排序；通过快捷键从别处切来时聚焦终端
@@ -1501,6 +1523,30 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
     });
   }, [activeTaskId]);
 
+  // 从整屏视图（如 Dashboard）切回终端时，容器由 display:none 恢复可见，重新 fit 并同步行列
+  const prevHiddenRef = useRef(hidden);
+  useEffect(() => {
+    const wasHidden = prevHiddenRef.current;
+    prevHiddenRef.current = hidden;
+    if (!wasHidden || hidden || !activeTaskId) return;
+    const instance = instancesRef.current.get(activeTaskId);
+    if (!instance) return;
+    try { instance.fitAddon.fit(); } catch { /* ignore */ }
+    instance.flush();
+    const timer = setTimeout(() => {
+      if (hiddenRef.current) return;
+      try {
+        instance.fitAddon.fit();
+        const keepOnTarget = document.activeElement?.closest(`[data-task-id="${CSS.escape(activeTaskId)}"]`)?.querySelector('[data-keep-focus]') === document.activeElement;
+        if (!keepOnTarget) instance.term.focus();
+        instance.term.refresh(0, instance.term.rows - 1);
+        const { cols, rows } = instance.term;
+        resizePty(activeTaskId, cols, rows);
+      } catch { /* ignore */ }
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [hidden, activeTaskId]);
+
   // 监听来自 Electron 主进程的 PTY stdout 数据流，通过微帧缓冲合并写入对应终端
   useEffect(() => {
     const unsubData = window.electronAPI?.onSessionData(({ id, data, seq }) => {
@@ -1516,9 +1562,9 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
         }
         instance.pendingData += data;
 
-        // 隐藏的终端不需要逐帧呈现：攒 250ms 再写入，减少后台高输出任务的写入与解析调度；
+        // 隐藏的终端（含被 Dashboard 覆盖时）不需要逐帧呈现：攒 250ms 再写入，减少后台高输出任务的写入与解析调度；
         // 积压超过 1 MiB 时立即写入，避免字符串无限增长。切换显示时会立即写入剩余数据。
-        if (id !== activeTaskIdRef.current) {
+        if (hiddenRef.current || id !== activeTaskIdRef.current) {
           if (instance.pendingData.length > HIDDEN_FLUSH_MAX_LENGTH) instance.flush();
           else if (!instance.flushTimer) instance.flushTimer = setTimeout(() => instance.flush(), HIDDEN_FLUSH_DELAY_MS);
           return;
@@ -1580,6 +1626,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
     const resizeObserver = new ResizeObserver(() => {
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
+        if (hiddenRef.current || !containerRef.current || containerRef.current.clientWidth === 0) return;
         if (activeTaskId) {
           const instance = instancesRef.current.get(activeTaskId);
           if (instance) {

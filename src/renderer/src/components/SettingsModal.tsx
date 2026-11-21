@@ -74,6 +74,8 @@ const SHORTCUTS: { title: string; items: [string, string][] }[] = [
       ['Ctrl + Shift + B', T('折叠或展开左侧导航栏')],
       ['Ctrl + Shift + H', T('打开历史会话')],
       ['Ctrl + Shift + U', T('打开本周用量')],
+      ['Ctrl + Shift + D', T('打开或关闭 Dashboard')],
+      ['Ctrl + Shift + E', T('打开或关闭项目目录树')],
       ['Ctrl + ,', T('打开设置')],
       [T('F2 / 双击任务'), T('重命名任务')],
     ],
