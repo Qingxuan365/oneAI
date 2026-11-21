@@ -31,9 +31,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   onboardingDone: false,
   theme: 'system',
   voiceReminderEnabled: true,
-  taskDoneSoundEnabled: false,
+  taskDoneSoundEnabled: true,
   taskDoneSoundVolume: 60,
-  taskDoneSoundBackgroundOnly: true,
+  taskDoneSoundBackgroundOnly: false,
   workReminderHours: 1,
   terminalFontSize: 15,
   terminalLineHeight: 1.3,
@@ -44,7 +44,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   terminalLinkClick: false,
   previewMinimap: true,
   musicDirectory: '',
-  musicPlayerVisible: true,
+  musicPlayerVisible: false,
   musicStreams: [],
   clockOffsetHours: 0,
   topbarDateVisible: true,
@@ -226,9 +226,9 @@ export const App: React.FC = () => {
   // 任务完成提示音：开关打开且至少有一个任务不在当前视窗（或窗口失焦）时响一声
   const notifyDoneSound = useCallback((ids: string[]) => {
     const sound = settingsRef.current;
-    if (ids.length === 0 || sound.taskDoneSoundEnabled !== true) return;
+    if (ids.length === 0 || sound.taskDoneSoundEnabled === false) return;
     const viewing = document.hasFocus() ? activeTaskIdRef.current : null;
-    const audible = sound.taskDoneSoundBackgroundOnly === false ? ids : ids.filter((id) => id !== viewing);
+    const audible = sound.taskDoneSoundBackgroundOnly !== true ? ids : ids.filter((id) => id !== viewing);
     if (audible.length > 0) playTaskDoneSound(sound.taskDoneSoundVolume);
   }, []);
   const voiceReminderEnabledRef = useRef(settings.voiceReminderEnabled);

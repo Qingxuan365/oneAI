@@ -92,7 +92,7 @@ function formatResetDay(targetMs: number): string {
   const hours = String(Math.floor((totalMinutes % 1440) / 60)).padStart(2, '0');
   const minutes = String(totalMinutes % 60).padStart(2, '0');
   const time = `${hours}:${minutes}`;
-  return days === 1 ? t('1 天 {time}', { time }) : t('{n} 天 {time}', { n: days, time });
+  return `${days}d ${time}`;
 }
 
 export class QuotaService {

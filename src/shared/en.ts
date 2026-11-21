@@ -66,8 +66,6 @@ export const EN: Record<string, string> = {
   '{n} 分钟前': '{n} min ago',
   '{n} 小时前': '{n} h ago',
   '{n} 天前': '{n} d ago',
-  '1 天 {time}': '1 day {time}',
-  '{n} 天 {time}': '{n} days {time}',
   '在终端中搜索': 'Search in terminal',
   '无结果': 'No results',
   '正则无效': 'Invalid regex',

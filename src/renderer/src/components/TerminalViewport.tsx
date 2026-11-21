@@ -493,6 +493,15 @@ const KIRO_LIGHT_TERMINAL_THEME = {
   brightMagenta: '#7138cc', brightCyan: '#086772', brightWhite: '#352f3d',
 };
 
+// One Dark：色值取自 Atom 编辑器的 One Dark 主题（MIT），亮色取自 One Dark Pro 的终端配色
+const ONE_DARK_TERMINAL_THEME = {
+  background: '#282c34', foreground: '#abb2bf', cursor: '#528bff', selectionBackground: '#528bff40',
+  black: '#3f4451', red: '#e06c75', green: '#98c379', yellow: '#e5c07b', blue: '#61afef',
+  magenta: '#c678dd', cyan: '#56b6c2', white: '#d7dae0', brightBlack: '#7f848e',
+  brightRed: '#ff7b86', brightGreen: '#b1e18b', brightYellow: '#efb074', brightBlue: '#67cdff',
+  brightMagenta: '#e48bff', brightCyan: '#63d4e0', brightWhite: '#ffffff',
+};
+
 const TERMINAL_THEMES: Record<ThemeId, typeof DARK_TERMINAL_THEME> = {
   light: LIGHT_TERMINAL_THEME,
   dark: DARK_TERMINAL_THEME,
@@ -518,6 +527,7 @@ const TERMINAL_THEMES: Record<ThemeId, typeof DARK_TERMINAL_THEME> = {
   'idea-contrast': IDEA_CONTRAST_TERMINAL_THEME,
   'kiro-dark': KIRO_DARK_TERMINAL_THEME,
   'kiro-light': KIRO_LIGHT_TERMINAL_THEME,
+  'one-dark': ONE_DARK_TERMINAL_THEME,
 };
 
 /**

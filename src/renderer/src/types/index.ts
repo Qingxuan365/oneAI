@@ -96,9 +96,9 @@ export interface AppSettings {
   onboardingDone: boolean; // 首次引导（选择语言、认识各入口）是否已完成；完成后不再弹出
   theme: 'system' | ThemeId; // 应用主题，默认跟随系统（仅在 light / dark 间切换）
   voiceReminderEnabled: boolean; // 工作满提醒时长时是否语音播报
-  taskDoneSoundEnabled: boolean; // 任务由运行转为空闲（输出停止）时播放提示音，默认 false
+  taskDoneSoundEnabled: boolean; // 任务由运行中转为等待输入（输出停止）时播放提示音，默认 true
   taskDoneSoundVolume: number; // 提示音音量 (0 ~ 100, 默认 60)
-  taskDoneSoundBackgroundOnly: boolean; // 仅当该任务不在当前视窗（非当前任务或窗口失焦）时才响，默认 true
+  taskDoneSoundBackgroundOnly: boolean; // 仅当该任务不在当前视窗（非当前任务或窗口失焦）时才响，默认 false
   workReminderHours: number; // 工作时长提醒的间隔小时数，默认 1（1 ~ 12 的整数）
   terminalFontSize: number;   // 终端代码字体大小 (12 ~ 24, 默认 15)
   terminalLineHeight: number; // 终端行高 (1.2 ~ 1.6, 默认 1.3)
@@ -109,7 +109,7 @@ export interface AppSettings {
   terminalSmoothScroll: boolean; // 终端滚轮 / 翻页滚动带缓动动画（约 120ms），默认 false
   previewMinimap: boolean; // 文件预览面板右侧是否显示代码缩略图（minimap），默认 true
   musicDirectory: string; // 顶栏音乐播放目录，空字符串表示系统「音乐」目录
-  musicPlayerVisible: boolean; // 侧栏底部是否显示音乐播放器，默认 true
+  musicPlayerVisible: boolean; // 侧栏底部是否显示音乐播放器，默认 false
   musicStreams: MusicStream[]; // 用户添加的在线音乐（音频直链、电台流、.m3u / .pls 歌单），默认空；「恢复默认设置」不会清空
   clockOffsetHours: number; // 顶栏时钟相对系统时间增加的小时数，默认 0（-24 ~ 24 的整数）
   topbarDateVisible: boolean; // 窗口最大化时顶栏时钟是否显示年月日（含农历）与星期，默认 true

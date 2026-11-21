@@ -27,6 +27,7 @@ export const THEME_MODE: Record<ThemeId, 'light' | 'dark'> = {
   'idea-contrast': 'dark',
   'kiro-dark': 'dark',
   'kiro-light': 'light',
+  'one-dark': 'dark',
 };
 
 export type ThemeGroup = 'basic' | 'eyecare' | 'editor';
@@ -57,4 +58,5 @@ export const THEME_OPTIONS: ReadonlyArray<{ id: ThemeId; label: string; group: T
   { id: 'idea-contrast', get label() { return t('IDEA 高对比度'); }, group: 'editor', swatch: ['#000000', '#1aebff'] },
   { id: 'kiro-dark', label: 'Kiro Dark', group: 'editor', swatch: ['#211d25', '#b080ff'] },
   { id: 'kiro-light', label: 'Kiro Light', group: 'editor', swatch: ['#f2f1f4', '#7138cc'] },
+  { id: 'one-dark', label: 'One Dark', group: 'editor', swatch: ['#282c34', '#61afef'] },
 ];

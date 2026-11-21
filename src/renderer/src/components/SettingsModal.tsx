@@ -465,18 +465,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </span>
                   <Switch
                     label={t('任务停止输出时播放提示音')}
-                    checked={settings.taskDoneSoundEnabled === true}
+                    checked={settings.taskDoneSoundEnabled !== false}
                     onChange={(checked) => { update({ taskDoneSoundEnabled: checked }); if (checked) playTaskDoneSound(settings.taskDoneSoundVolume); }}
                   />
                 </div>
-                {settings.taskDoneSoundEnabled === true && (
+                {settings.taskDoneSoundEnabled !== false && (
                   <>
                     <div className={row}>
                       <span>
                         <span className="block">{t('仅在后台任务时响')}</span>
                         <span className="block text-xs text-fg-faint">{t('正在查看的任务不响；窗口失焦时所有任务都会响')}</span>
                       </span>
-                      <Switch label={t('仅在后台任务时响')} checked={settings.taskDoneSoundBackgroundOnly !== false} onChange={(checked) => update({ taskDoneSoundBackgroundOnly: checked })} />
+                      <Switch label={t('仅在后台任务时响')} checked={settings.taskDoneSoundBackgroundOnly === true} onChange={(checked) => update({ taskDoneSoundBackgroundOnly: checked })} />
                     </div>
                     <div className={row}>
                       <span className="block">{t('音量')}</span>

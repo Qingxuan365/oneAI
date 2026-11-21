@@ -655,6 +655,33 @@
   --color-violet: 142 71 255;
 }
 
+/* One Dark：色值取自 Atom 编辑器的 One Dark 主题（MIT）；侧栏与顶栏用比编辑区更深的 #21252b，层级与文字梯度按本应用 token 推导。 */
+:root[data-theme='one-dark'] {
+  color-scheme: dark;
+  --color-canvas: 40 44 52;
+  --color-surface: 44 49 58;
+  --color-panel: 33 37 43;
+  --color-elevated: 51 56 66;
+  --color-muted: 44 49 58;
+  --color-control: 58 63 75;
+  --color-control-hover: 75 82 99;
+  --color-hover: 44 49 58;
+  --color-selected: 62 68 81;
+  --color-line: 24 26 31;
+  --color-line-strong: 75 82 99;
+  --color-fg: 215 218 224;
+  --color-fg-muted: 171 178 191;
+  --color-fg-subtle: 157 165 180;
+  --color-fg-faint: 127 132 142;
+  --color-accent: 97 175 239;
+  --color-primary: 64 120 242;
+  --color-primary-hover: 82 139 255;
+  --color-success: 152 195 121;
+  --color-warning: 229 192 123;
+  --color-danger: 224 108 117;
+  --color-violet: 198 120 221;
+}
+
 html, body, #root {
   height: 100%;
   width: 100%;

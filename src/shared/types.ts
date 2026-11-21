@@ -114,7 +114,7 @@ export const THEME_IDS = [
   'light', 'dark', 'bean', 'parchment', 'dusk', 'nord', 'lavender', 'mist', 'forest', 'ink',
   'darcula', 'material', 'monokai', 'mariana', 'breakers', 'solarized-dark', 'solarized-light', 'cobalt',
   'idea-classic-light', 'idea-light', 'idea-dark', 'idea-contrast',
-  'kiro-dark', 'kiro-light',
+  'kiro-dark', 'kiro-light', 'one-dark',
 ] as const;
 
 export type ThemeId = (typeof THEME_IDS)[number];

@@ -266,7 +266,7 @@ app.whenReady().then(async () => {
       await new Promise(r => setTimeout(r, 250));
       check('close visible when task focused', getComputedStyle(document.querySelector('button[aria-label="关闭 Task 1: UI regression"]')).opacity === '1');
       const colors = [];
-      // 全部 24 个主题：正文、次要文字与点缀色在面板 / 画布上的对比度（WCAG 相对亮度）须达到下限
+      // 全部 25 个主题：正文、次要文字与点缀色在面板 / 画布上的对比度（WCAG 相对亮度）须达到下限
       const ALL_THEMES = window.ALL_THEMES;
       const rgbOf = name => getComputedStyle(document.documentElement).getPropertyValue('--color-' + name).trim().split(' ').map(Number);
       const lum = ([r, g, b]) => { const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
@@ -283,7 +283,7 @@ app.whenReady().then(async () => {
         colors.push(panel);
         check(theme + ' header/sidebar same panel', panel === getComputedStyle(document.querySelector('aside > div')).backgroundColor);
       }
-      check('all 24 theme panel colors differ', ALL_THEMES.length === 24 && new Set(colors).size === colors.length);
+      check('all 25 theme panel colors differ', ALL_THEMES.length === 25 && new Set(colors).size === colors.length);
       for (const [status, label] of Object.entries({ starting: '启动中', running: '运行中', idle: '空闲', waiting: '等待输入', stopped: '已停止', error: '启动失败' })) {
         window.draw(status);
         check(status + ' Chinese label in the sidebar row', task().textContent.includes(label));
@@ -666,7 +666,7 @@ app.whenReady().then(async () => {
       [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.includes('外观')).click(); await tick(200);
       const names = label => [...document.querySelectorAll('[aria-label="' + label + '"] button')].map(b => b.textContent.trim()).join('|');
       check('settings lists the eye-care themes', names('护眼主题色') === '豆沙绿|羊皮纸|薰衣草|雾灰|暖夜|北极灰蓝|森夜|墨夜');
-      check('settings lists the editor themes (Darcula, Sublime Material, the Sublime Text built-ins, the IDEA themes and Kiro)', names('编辑器配色主题') === 'Darcula|Sublime Material|Monokai|Mariana|Breakers|Solarized Dark|Solarized Light|Cobalt|IntelliJ Light|IDEA Light|IDEA Dark|IDEA 高对比度|Kiro Dark|Kiro Light');
+      check('settings lists the editor themes (Darcula, Sublime Material, the Sublime Text built-ins, the IDEA themes, Kiro and One Dark)', names('编辑器配色主题') === 'Darcula|Sublime Material|Monokai|Mariana|Breakers|Solarized Dark|Solarized Light|Cobalt|IntelliJ Light|IDEA Light|IDEA Dark|IDEA 高对比度|Kiro Dark|Kiro Light|One Dark');
       const tab =[...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.includes('账号'));
       check('settings has an accounts tab', Boolean(tab));
       tab.click(); await tick(300);

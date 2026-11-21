@@ -24,7 +24,7 @@ OneAI 把 Codex、Claude Code、Kimi Code、OpenCode 等 AI 编程 CLI 放进同
 - **历史会话**：浏览并恢复 Claude Code、Codex、Kimi Code 的历史会话。
 - **文件预览**：在终端里按住 Ctrl 单击路径，即可只读预览文件，支持语法高亮并带代码缩略图。
 - **任意 CLI**：按 `PATH` 自动检测已安装的 CLI，其他命令可添加为自定义 CLI。
-- **简体中文与英文**、24 个主题（浅色、深色、护眼与编辑器配色），以及简短的首次引导。
+- **简体中文与英文**、25 个主题（浅色、深色、护眼与编辑器配色），以及简短的首次引导。
 
 每项功能的详细行为见 [docs/features.zh-CN.md](docs/features.zh-CN.md)。
 
