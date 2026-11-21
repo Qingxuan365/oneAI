@@ -3,7 +3,6 @@ import { FolderOpen, ChevronRight, Search, Eraser, RotateCcw, Download, Copy, Fi
 import { InlineQuotaText } from './InlineQuotaText';
 import { SystemStatsText } from './SystemStatsText';
 import { QuotaData, TaskSession, CliDef } from '../types';
-import { TASK_STATUS_META } from '../taskStatus';
 import { BrandIcon } from './BrandIcon';
 import { getLanguage, t } from '../i18n';
 
@@ -207,7 +206,6 @@ export const Topbar: React.FC<TopbarProps> = React.memo(({
     else if (!result?.canceled) showAction(t('保存失败：{reason}', { reason: result?.error || t('操作未完成') }), false);
   };
 
-  const status = activeTask ? TASK_STATUS_META[activeTask.status] : null;
   const menuItem = 'flex w-full items-center gap-2 px-3 py-2 text-left text-fg-muted transition-colors hover:bg-hover hover:text-fg';
 
   return (
@@ -230,7 +228,7 @@ export const Topbar: React.FC<TopbarProps> = React.memo(({
           <div className="flex min-w-0 items-center gap-1.5">
             <BrandIcon icon={currentGroup.icon} size={16} />
             <span className="topbar-group-name shrink-0 font-medium text-fg">{currentGroup.name}</span>
-            {activeTask && status && (
+            {activeTask && (
               <>
                 <ChevronRight size={13} className="topbar-group-name shrink-0 text-fg-faint" />
                 <span className="min-w-0 max-w-[18rem] truncate text-fg-muted" title={activeTask.title}>
@@ -241,13 +239,6 @@ export const Topbar: React.FC<TopbarProps> = React.memo(({
                     {accountName}
                   </span>
                 )}
-                <span
-                  className={`ml-0.5 inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-2xs ${status.badge}`}
-                  title={status.hint}
-                >
-                  <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} aria-hidden="true" />
-                  <span className="topbar-status-label">{status.label}</span>
-                </span>
               </>
             )}
           </div>

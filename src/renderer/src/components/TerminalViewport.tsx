@@ -1388,12 +1388,12 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
 
     // PTY 可能晚于 xterm 实例创建。任务状态变化（尤其 starting -> running）后
     // 再同步一次真实行列，避免 Kimi 重绘输入框时按默认 120 列发生横向回卷；
-    // 后台其他任务或 running <-> idle 瞬态切换时不重复触发 fit 布局测量。
+    // 后台其他任务或 running / idle / waiting 瞬态切换时不重复触发 fit 布局测量。
     if (activeTaskId) {
       const activeInstance = instancesRef.current.get(activeTaskId);
       if (activeInstance) {
         const rawStatus = tasks.find((task) => task.id === activeTaskId)?.status;
-        const syncBucket = rawStatus === 'idle' ? 'running' : rawStatus;
+        const syncBucket = rawStatus === 'idle' || rawStatus === 'waiting' ? 'running' : rawStatus;
         const preKey = `${activeTaskId}:${syncBucket}`;
         if (!lastSizeSyncRef.current.startsWith(`${preKey}:`)) {
           requestAnimationFrame(() => {

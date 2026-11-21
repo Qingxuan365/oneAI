@@ -763,9 +763,6 @@ html, body, #root {
 @container topbar (max-width: 46rem) {
   .topbar-group-name { display: none; }
 }
-@container topbar (max-width: 38rem) {
-  .topbar-status-label { display: none; }
-}
 @container topbar (max-width: 26rem) {
   .quota-model-info, .quota-model-divider { display: none; }
   #oneai-terminal-tools { gap: 0; }

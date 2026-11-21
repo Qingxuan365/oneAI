@@ -461,7 +461,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div className={row}>
                   <span>
                     <span className="block">{t('任务停止输出时播放提示音')}</span>
-                    <span className="block text-xs text-fg-faint">{t('任务由「运行中」转为「空闲」或进程退出时响一声；无法区分已完成与等待确认')}</span>
+                    <span className="block text-xs text-fg-faint">{t('任务由「运行中」转为「等待输入」或进程退出时响一声；无法区分已完成与等待确认')}</span>
                   </span>
                   <Switch
                     label={t('任务停止输出时播放提示音')}

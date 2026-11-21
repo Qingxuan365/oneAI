@@ -531,7 +531,7 @@ export const App: React.FC = () => {
         }
         if (exited && isTaskAlive(exited.status)) markUnread([id]);
         // 启动中的退出（重启时旧进程退出、启动即失败）不响
-        if (exited && (exited.status === 'running' || exited.status === 'idle')) notifyDoneSound([id]);
+        if (exited && (exited.status === 'running' || exited.status === 'idle' || exited.status === 'waiting')) notifyDoneSound([id]);
         setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, status: 'stopped' } : t)));
       });
       return () => { disposed = true; unsub(); };
@@ -696,9 +696,9 @@ export const App: React.FC = () => {
     };
   }, [summaryKey]);
 
-  // 空闲检测：任务启动后默认「空闲」，有持续输出时为「运行中」，连续 IDLE_AFTER_MS 没有输出回到「空闲」；
-  // 提示音在转空闲的那一刻响；静默满 DONE_NOTIFY_AFTER_MS 才标记未读（期间恢复输出则继续等待）。
-  // 只能判断输出静默，无法区分「已完成」与「在等待确认」。
+  // 状态检测：任务启动后默认「空闲」，有持续输出时为「运行中」，连续 IDLE_AFTER_MS 没有输出转为「等待输入」，再有输出又回到运行中；
+  // 提示音在转等待输入的那一刻响；静默满 DONE_NOTIFY_AFTER_MS 才标记未读（期间恢复输出则继续等待）。
+  // 只能判断输出静默，无法区分「已完成」与「在等待确认」，两者都显示为等待输入。
   useEffect(() => {
     if (!window.electronAPI?.onSessionData) return;
     const lastOutput = lastOutputRef.current;
@@ -714,8 +714,8 @@ export const App: React.FC = () => {
       // 启动阶段（欢迎横幅、会话恢复等）的输出不算运行中
       if (now - (startedAtRef.current.get(id) ?? 0) < STARTUP_GRACE_MS) return;
       const task = tasksRef.current.find((t) => t.id === id);
-      if (task?.status === 'idle') setStatus([id], 'idle', 'running');
-      if (task && (task.status === 'idle' || task.status === 'running')) pendingDone.add(id);
+      if (task?.status === 'idle' || task?.status === 'waiting') setStatus([id], task.status, 'running');
+      if (task && (task.status === 'idle' || task.status === 'waiting' || task.status === 'running')) pendingDone.add(id);
     });
     const timer = window.setInterval(() => {
       const now = Date.now();
@@ -725,17 +725,17 @@ export const App: React.FC = () => {
       }
       for (const id of [...pendingDone]) if (!currentIds.has(id)) pendingDone.delete(id);
       const quietFor = (id: string) => now - (lastOutput.get(id) ?? now);
-      const idleIds = tasksRef.current
+      const waitingIds = tasksRef.current
         .filter((t) => t.status === 'running' && quietFor(t.id) > IDLE_AFTER_MS)
         .map((t) => t.id);
       const doneIds = [...pendingDone].filter((id) => quietFor(id) > DONE_NOTIFY_AFTER_MS);
       // 尚无输出记录的任务从现在开始计时
       tasksRef.current.forEach((t) => { if (!lastOutput.has(t.id)) lastOutput.set(t.id, now); });
-      setStatus(idleIds, 'running', 'idle');
+      setStatus(waitingIds, 'running', 'waiting');
       doneIds.forEach((id) => pendingDone.delete(id));
       markUnread(doneIds);
-      // 提示音与状态点同步：运行中转空闲的那一刻响
-      notifyDoneSound(idleIds);
+      // 提示音与状态点同步：运行中转等待输入的那一刻响
+      notifyDoneSound(waitingIds);
     }, 1000);
     return () => { unsub?.(); window.clearInterval(timer); };
   }, [markUnread, notifyDoneSound]);

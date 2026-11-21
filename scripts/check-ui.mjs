@@ -284,17 +284,21 @@ app.whenReady().then(async () => {
         check(theme + ' header/sidebar same panel', panel === getComputedStyle(document.querySelector('aside > div')).backgroundColor);
       }
       check('all 24 theme panel colors differ', ALL_THEMES.length === 24 && new Set(colors).size === colors.length);
-      for (const [status, label] of Object.entries({ starting: '启动中', running: '运行中', idle: '空闲', stopped: '已停止', error: '启动失败' })) {
+      for (const [status, label] of Object.entries({ starting: '启动中', running: '运行中', idle: '空闲', waiting: '等待输入', stopped: '已停止', error: '启动失败' })) {
         window.draw(status);
-        check(status + ' Chinese label', document.querySelector('header').textContent.includes(label));
+        check(status + ' Chinese label in the sidebar row', task().textContent.includes(label));
+        check(status + ' topbar shows no task status', !document.querySelector('header').textContent.includes(label));
         check(status + ' accessible task button', task().tagName === 'BUTTON');
         check(status + ' restart disabled', [...document.querySelectorAll('header button')].find(b => b.title.includes('当前终端') || b.title.includes('正在启动')).disabled === (status === 'starting'));
-        if (status === 'running') check('running dot spins', getComputedStyle(task().querySelector('span')).animationName === 'spin');
+        const dot = () => task().querySelector('span.rounded-full');
+        if (status === 'running') check('running dot spins', getComputedStyle(dot()).animationName === 'spin');
+        if (status === 'idle') check('idle dot is hollow', getComputedStyle(dot()).backgroundColor === 'rgba(0, 0, 0, 0)' && getComputedStyle(dot()).borderTopWidth !== '0px');
+        if (status === 'waiting') check('waiting dot is solid', getComputedStyle(dot()).backgroundColor !== 'rgba(0, 0, 0, 0)');
         if (status === 'starting') {
           const restart = byTitle('正在启动');
           check('starting restart visibly disabled', restart.disabled && Number(getComputedStyle(restart).opacity) < 1);
         }
-        if (status === 'error') check('error colors match', getComputedStyle(task().querySelector('span')).backgroundColor === getComputedStyle(document.querySelector('header span.border')).color);
+        if (status === 'error') check('error colors match', getComputedStyle(dot()).backgroundColor === getComputedStyle(dot().parentElement).color);
       }
       window.draw();
       task().focus();
@@ -394,7 +398,7 @@ app.whenReady().then(async () => {
       check('badges and the order number stay right-aligned in both single- and two-line rows', ['a', 't'].every(id => { const btn = row(id).querySelector('button'); const num = row(id).querySelector('.font-mono'); return btn.getBoundingClientRect().right - num.getBoundingClientRect().right < 12; }));
       check('second-line text is at least 12px', parseFloat(getComputedStyle(summaryOf('a')).fontSize) >= 12);
       check('two-line rows are taller than single-line rows', row('a').getBoundingClientRect().height > row('t').getBoundingClientRect().height + 8);
-      check('the status dot is still the first span of a two-line task button', getComputedStyle(row('a').querySelector('button span')).borderRadius !== '0px' && row('a').querySelector('button span').className.includes('rounded-full'));
+      check('the status dot and label follow the task title', (() => { const dot = row('a').querySelector('button span.rounded-full'); const title = row('a').querySelector('button span.truncate'); return Boolean(dot && title) && dot.getBoundingClientRect().left > title.getBoundingClientRect().right && /空闲|运行中|启动中|等待输入|已停止|启动失败/.test(dot.parentElement.textContent); })());
       check('three folder rows with names and counts', folderRows().length === 3 && folderRows()[0].textContent.includes('OneAI') && folderRows()[1].textContent.includes('sports') && folderRows()[2].textContent.includes('empty'));
       check('git branch badges on folders that are repos only', folderRows()[0].querySelector('[data-git-branch]')?.textContent === 'main' && folderRows()[1].querySelector('[data-git-branch]')?.textContent === 'feature/x' && !folderRows()[2].querySelector('[data-git-branch]'));
       folderRows()[0].querySelector('button[aria-expanded]').click();

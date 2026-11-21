@@ -732,8 +732,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                             {isActive && <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-accent" aria-hidden="true" />}
                             <div className={`flex min-w-0 flex-1 flex-col justify-center pl-2.5 pr-2 ${hasSummary ? 'min-h-[2.75rem] gap-0.5 py-1' : 'h-8'}`}>
                               <div className="flex w-full min-w-0 items-center gap-2">
-                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusMeta.dot}`} aria-hidden="true" />
-                                <BrandIcon icon={cli?.icon ?? task.groupId} size={14} />
+                                <BrandIcon icon={cli?.icon ?? task.groupId} size={16} />
                                 <input
                                   autoFocus
                                   value={editing.draft}
@@ -749,7 +748,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                                 />
                               </div>
                               {hasSummary && (
-                                <span data-task-summary className="block w-full min-w-0 truncate pl-9 text-xs font-normal text-fg-faint opacity-50">{summaryLine}</span>
+                                <span data-task-summary className="block w-full min-w-0 truncate pl-6 text-xs font-normal text-fg-faint opacity-50">{summaryLine}</span>
                               )}
                             </div>
                           </div>
@@ -832,12 +831,14 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                             className={`flex min-w-0 flex-1 flex-col justify-center rounded-md pl-2.5 pr-1 text-left ${hasSummary ? 'min-h-[2.75rem] gap-0.5 py-1' : 'h-8'}`}
                           >
                             <div className="flex w-full min-w-0 items-center gap-2">
-                            {/* 任务状态指示灯小圆点 */}
-                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusMeta.dot}`} title={statusMeta.hint} aria-hidden="true" />
-                            <BrandIcon icon={cli?.icon ?? task.groupId} size={14} />
+                            <BrandIcon icon={cli?.icon ?? task.groupId} size={16} />
                             <span className="truncate">{task.title}</span>
-                            <span className="sr-only">{t('，')}{cli?.name ?? task.groupId}{t('，')}{statusMeta.label}</span>
-                            {task.status === 'error' && <span className="text-2xs text-danger shrink-0" aria-hidden="true">{t('启动失败')}</span>}
+                            <span className="sr-only">{t('，')}{cli?.name ?? task.groupId}</span>
+                            {/* 任务状态：圆点 + 文字，紧跟在标题后 */}
+                            <span className={`flex shrink-0 items-center gap-1 text-2xs font-normal ${task.status === 'error' ? 'text-danger' : 'text-fg-faint'}`} title={statusMeta.hint}>
+                              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusMeta.dot}`} aria-hidden="true" />
+                              {statusMeta.label}
+                            </span>
                             <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-1">
                               {task.accountId && (
                                 <span
@@ -856,7 +857,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                             </span>
                             </div>
                             {hasSummary && (
-                              <span data-task-summary className="block w-full min-w-0 truncate pl-9 text-xs font-normal text-fg-faint" title={summaryLine.trim() ? summaryLine : undefined}>{summaryLine}</span>
+                              <span data-task-summary className="block w-full min-w-0 truncate pl-6 text-xs font-normal text-fg-faint" title={summaryLine.trim() ? summaryLine : undefined}>{summaryLine}</span>
                             )}
                           </button>
 

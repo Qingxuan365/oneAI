@@ -38,7 +38,7 @@ export type {
   UsageStats,
 };
 
-export type TaskStatus = 'starting' | 'running' | 'idle' | 'stopped' | 'error';
+export type TaskStatus = 'starting' | 'running' | 'idle' | 'waiting' | 'stopped' | 'error';
 
 export interface TaskSession {
   id: string;              // 任务唯一ID（对应底层的 ptyId）
