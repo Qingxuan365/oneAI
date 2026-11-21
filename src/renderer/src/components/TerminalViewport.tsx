@@ -8,7 +8,12 @@ import '@xterm/xterm/css/xterm.css';
 import { RestartSessionOptions, TaskSession, ThemeId } from '../types';
 import { TerminalSearchBar } from './TerminalSearchBar';
 import { t } from '../i18n';
+import { noteUserActivity } from '../taskStatus';
 import { extractPathMatches, PathMatchItem, quoteTerminalPath } from '../../../shared/paths';
+
+// 发给 PTY 的键盘输入与尺寸变化都记一笔，紧随其后的回显 / 重绘输出不算任务在干活（见 taskStatus.ts 的 USER_ECHO_MS）
+const writePty = (id: string, data: string) => { noteUserActivity(id); return window.electronAPI?.writeSession(id, data); };
+const resizePty = (id: string, cols: number, rows: number) => { noteUserActivity(id); return window.electronAPI?.resizeSession(id, cols, rows); };
 
 export { extractPathMatches };
 export type { PathMatchItem };
@@ -605,7 +610,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
   };
   const scrollToTopInCli = () => {
     if (!activeTaskId) return;
-    void window.electronAPI?.writeSession(activeTaskId, '\x1b[1;5H');
+    void writePty(activeTaskId, '\x1b[1;5H');
     instancesRef.current.get(activeTaskId)?.term.focus();
   };
   const scrollToTop = () => {
@@ -1101,7 +1106,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
             lastText = data;
             lastTextAt = now;
           }
-          void window.electronAPI?.writeSession(task.id, data).then((written) => {
+          void writePty(task.id, data)?.then((written) => {
             if (written !== false) { stoppedHintShown = false; return; }
             const status = tasksRef.current.find((item) => item.id === task.id)?.status;
             if (stoppedHintShown || (status !== 'stopped' && status !== 'error')) return;
@@ -1119,7 +1124,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
 
         // 监听终端尺寸变更并同步 PTY
         term.onResize(({ cols, rows }) => {
-          window.electronAPI?.resizeSession(task.id, cols, rows);
+          resizePty(task.id, cols, rows);
         });
 
         // 点击视窗任意位置自动聚焦
@@ -1218,7 +1223,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
           if (task.groupId !== 'terminal' && !task.groupId.startsWith('custom-') && !e.isComposing
             && e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
             e.preventDefault();
-            window.electronAPI?.writeSession(task.id, '\x1b\r');
+            writePty(task.id, '\x1b\r');
             return false;
           }
 
@@ -1413,7 +1418,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
               const key = `${preKey}:${cols}x${rows}`;
               if (lastSizeSyncRef.current === key) return;
               lastSizeSyncRef.current = key;
-              window.electronAPI?.resizeSession(activeTaskId, cols, rows);
+              resizePty(activeTaskId, cols, rows);
             } catch {
               // ignore
             }
@@ -1487,7 +1492,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
             if (!keepOnTarget) instance.term.focus();
             instance.term.refresh(0, instance.term.rows - 1);
             const { cols, rows } = instance.term;
-            window.electronAPI?.resizeSession(id, cols, rows);
+            resizePty(id, cols, rows);
           } catch {
             // ignore
           }
@@ -1584,7 +1589,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
               if (cols !== lastCols || rows !== lastRows) {
                 lastCols = cols;
                 lastRows = rows;
-                window.electronAPI?.resizeSession(activeTaskId, cols, rows);
+                resizePty(activeTaskId, cols, rows);
               }
             } catch {
               // ignore

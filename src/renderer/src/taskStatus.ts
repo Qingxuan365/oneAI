@@ -20,3 +20,12 @@ export const hasVisibleOutput = (data: string) => data.replace(ANSI_SEQUENCE, ''
 
 // 进程仍存活的状态（启动中、运行中、空闲、等待输入）
 export const isTaskAlive = (status: TaskStatus) => status === 'starting' || status === 'running' || status === 'idle' || status === 'waiting';
+
+// 键盘输入或终端尺寸变化后这段时间内的输出视为回显 / 重绘（你打的字、CLI 整屏重画），不算任务在干活，
+// 避免在任务里打几个字或拖动窗口就变成「运行中」、4 秒后又转「等待输入」并响提示音。
+// 提交后 CLI 的回复会持续好几秒，超过这段时间的输出仍正常计入运行中。
+export const USER_ECHO_MS = 1000;
+const lastUserActivity = new Map<string, number>();
+export const noteUserActivity = (id: string) => { lastUserActivity.set(id, Date.now()); };
+export const isUserEcho = (id: string, now = Date.now()) => now - (lastUserActivity.get(id) ?? -Infinity) < USER_ECHO_MS;
+export const forgetUserActivity = (id: string) => { lastUserActivity.delete(id); };

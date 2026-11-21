@@ -87,12 +87,11 @@ function formatDuration(diffMs: number): string {
 
 function formatResetDay(targetMs: number): string {
   if (!targetMs || targetMs <= Date.now()) return t('已重置');
-  const totalMinutes = Math.floor((targetMs - Date.now()) / 60000);
-  const days = Math.floor(totalMinutes / 1440);
-  const hours = String(Math.floor((totalMinutes % 1440) / 60)).padStart(2, '0');
-  const minutes = String(totalMinutes % 60).padStart(2, '0');
-  const time = `${hours}:${minutes}`;
-  return `${days}d ${time}`;
+  // 与 5h 的「3h 55m」同一写法：「4d 2h 47m」，不足一天时省略天数
+  const diffMs = targetMs - Date.now();
+  const days = Math.floor(diffMs / 86_400_000);
+  const rest = formatDuration(diffMs % 86_400_000);
+  return days > 0 ? `${days}d ${rest}` : rest;
 }
 
 export class QuotaService {

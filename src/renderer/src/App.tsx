@@ -15,7 +15,7 @@ import { sanitizeCustomClis, toCliDef } from './customClis';
 import { sanitizeMusicStreams } from './musicStreams';
 import { getLanguage, isLanguage, setLanguage, systemLanguage, t } from './i18n';
 import { THEME_MODE } from './themes';
-import { hasVisibleOutput, isTaskAlive } from './taskStatus';
+import { forgetUserActivity, hasVisibleOutput, isTaskAlive, isUserEcho } from './taskStatus';
 import { playTaskDoneSound } from './taskDoneSound';
 
 // 低频弹窗与代码预览面板（含 highlight.js 词法表）按需异步分包加载，大幅减小首屏主包解析开销
@@ -711,8 +711,8 @@ export const App: React.FC = () => {
       if (!hasVisibleOutput(data)) return;
       const now = Date.now();
       lastOutput.set(id, now);
-      // 启动阶段（欢迎横幅、会话恢复等）的输出不算运行中
-      if (now - (startedAtRef.current.get(id) ?? 0) < STARTUP_GRACE_MS) return;
+      // 启动阶段（欢迎横幅、会话恢复等）的输出、键盘输入的回显与改尺寸后的整屏重绘都不算运行中
+      if (now - (startedAtRef.current.get(id) ?? 0) < STARTUP_GRACE_MS || isUserEcho(id, now)) return;
       const task = tasksRef.current.find((t) => t.id === id);
       if (task?.status === 'idle' || task?.status === 'waiting') setStatus([id], task.status, 'running');
       if (task && (task.status === 'idle' || task.status === 'waiting' || task.status === 'running')) pendingDone.add(id);
@@ -721,7 +721,7 @@ export const App: React.FC = () => {
       const now = Date.now();
       const currentIds = new Set(tasksRef.current.map((t) => t.id));
       for (const id of [...lastOutput.keys()]) {
-        if (!currentIds.has(id)) { lastOutput.delete(id); startedAtRef.current.delete(id); }
+        if (!currentIds.has(id)) { lastOutput.delete(id); startedAtRef.current.delete(id); forgetUserActivity(id); }
       }
       for (const id of [...pendingDone]) if (!currentIds.has(id)) pendingDone.delete(id);
       const quietFor = (id: string) => now - (lastOutput.get(id) ?? now);

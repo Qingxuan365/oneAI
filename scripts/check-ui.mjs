@@ -27,6 +27,8 @@ await build({
     window.ALL_THEMES = [...THEME_IDS];
     import { Terminal } from '@xterm/xterm';
     import { installDropGuard } from './src/renderer/src/dropGuard';
+    import { isUserEcho } from './src/renderer/src/taskStatus';
+    window.isUserEcho = isUserEcho;
     installDropGuard();
     window.electronAPI = { getHomeDir: () => 'C:/Users/tester', onWindowMaximizedChange: callback => { window.setMaximized = callback; return () => {}; }, isWindowMaximized: async () => false,
       onSystemStats: callback => { window.pushStats = callback; return () => {}; },
@@ -999,9 +1001,14 @@ app.whenReady().then(async () => {
 
       window.ptyWrites = [];
       window.electronAPI.writeSession = async (id, text) => { window.ptyWrites.push({ id, text }); return true; };
-      window.drawTerm('custom-shift', 'custom-ab12cd34'); await wait(300);
+      // 初次绘制会连续触发几次终端尺寸同步（也算用户动作），等它们过了回显窗口再按键
+      window.drawTerm('custom-shift', 'custom-ab12cd34'); await wait(1800);
+      const echoBefore = window.isUserEcho('custom-shift');
       press({ key: 'Enter', code: 'Enter', keyCode: 13, shiftKey: true }); await wait(100);
       check('Shift+Enter is left alone in custom CLI tasks', !window.ptyWrites.some(w => w.text === ESC_CR));
+      check('output right after a keystroke counts as echo, not task work', !echoBefore && window.ptyWrites.some(w => w.id === 'custom-shift') && window.isUserEcho('custom-shift'));
+      await wait(1000);
+      check('output more than 1s after the last keystroke counts as task work again', !window.isUserEcho('custom-shift'));
       window.clearRoot(); window.drawTerm('ime-shift'); await wait(300);
       window.ptyWrites = [];
       press({ key: 'Enter', code: 'Enter', keyCode: 229, shiftKey: true, isComposing: true }); await wait(100);
