@@ -1,18 +1,12 @@
 import { BrowserWindow } from 'electron';
 import os from 'node:os';
 import { spawn, ChildProcessWithoutNullStreams } from 'node:child_process';
-
-export interface SystemStats {
-  cpuPercent: number;            // 0-100，两次采样之间的整机 CPU 占用
-  memUsedBytes: number;
-  memTotalBytes: number;
-  netUpBytesPerSec: number | null;   // 取不到网络计数（非 Windows、没有处于 Up 状态的物理网卡、读取失败）时为 null
-  netDownBytesPerSec: number | null;
-}
+import type { SystemStats } from '../shared/types';
 
 const SAMPLE_INTERVAL_MS = 2000;
-const NET_REQUEST_TIMEOUT_MS = 8000;
-const NET_FAILURE_COOLDOWN_MS = 60_000;
+const GPU_SAMPLE_INTERVAL_MS = 5000;
+const COUNTER_REQUEST_TIMEOUT_MS = 8000;
+const COUNTER_FAILURE_COOLDOWN_MS = 60_000;
 
 function cpuTimes(): { idle: number; total: number } {
   let idle = 0;
@@ -40,22 +34,55 @@ while ($null -ne [Console]::In.ReadLine()) {
   [Console]::Out.WriteLine(('{0} {1} {2}' -f [int64]($s | Measure-Object ReceivedBytes -Sum).Sum, [int64]($s | Measure-Object SentBytes -Sum).Sum, ($names -join '|')))
 }`;
 
+// 计数器实例按进程分列。先将运行时间增量按物理引擎汇总，再取最忙引擎。
+// CIM 类名不受 Windows 显示语言影响。仅回传最终百分比，避免跨进程传输全部实例。
+const GPU_SCRIPT = `
+$previous = @{}
+while ($null -ne ($request = [Console]::In.ReadLine())) {
+  if ($request -eq 'reset') { $previous = @{} }
+  try {
+    $rows = Get-CimInstance -ClassName Win32_PerfRawData_GPUPerformanceCounters_GPUEngine -Property Name,RunningTime,Timestamp_Sys100NS -ErrorAction Stop
+    $current = @{}
+    $usage = @{}
+    foreach ($row in $rows) {
+      if ($row.Name -notmatch '^pid_[0-9]+_(luid_.*_phys_[0-9]+_eng_[0-9]+)_engtype_') { continue }
+      $engine = $Matches[1]
+      $current[$row.Name] = $row
+      $old = $previous[$row.Name]
+      if ($null -eq $old -or $row.Timestamp_Sys100NS -le $old.Timestamp_Sys100NS -or $row.RunningTime -lt $old.RunningTime) { continue }
+      $elapsed = $row.Timestamp_Sys100NS - $old.Timestamp_Sys100NS
+      $running = $row.RunningTime - $old.RunningTime
+      $usage[$engine] += 100 * ($running / $elapsed)
+    }
+    $previous = $current
+    if ($usage.Count -eq 0) { [Console]::Out.WriteLine('none'); continue }
+    $peak = ($usage.Values | Measure-Object -Maximum).Maximum
+    [Console]::Out.WriteLine([int][Math]::Min(100, [Math]::Round($peak)))
+  } catch {
+    $previous = @{}
+    [Console]::Out.WriteLine('error')
+  }
+}`;
+
 interface NetCounters { rx: number; tx: number; adapters: string }
 
-class NetCounterReader {
+class CounterReader {
   private child: ChildProcessWithoutNullStreams | null = null;
   private buffer = '';
   private waiter: ((line: string | null) => void) | null = null;
   private failures = 0;
   private cooldownUntil = 0;
 
+  constructor(private readonly script: string) {}
+
   private start(): ChildProcessWithoutNullStreams {
     const child = spawn('powershell.exe', [
-      '-NoProfile', '-NonInteractive', '-NoLogo', '-EncodedCommand', Buffer.from(NET_SCRIPT, 'utf16le').toString('base64'),
+      '-NoProfile', '-NonInteractive', '-NoLogo', '-EncodedCommand', Buffer.from(this.script, 'utf16le').toString('base64'),
     ], { windowsHide: true });
     child.stderr.resume(); // 丢弃错误输出，避免管道写满后阻塞 PowerShell
     child.stdout.setEncoding('latin1');
     child.stdout.on('data', (chunk: string) => {
+      if (this.child !== child) return;
       this.buffer += chunk;
       for (let i = this.buffer.indexOf('\n'); i >= 0; i = this.buffer.indexOf('\n')) {
         const line = this.buffer.slice(0, i).trim();
@@ -80,40 +107,38 @@ class NetCounterReader {
     return child;
   }
 
-  /** 一次只允许一个请求在途；连续失败两次后进入 60 秒冷却期（网速暂显「--」），避免系统休眠唤醒瞬态超时后永久无法恢复。 */
-  async read(): Promise<NetCounters | null> {
-    if (process.platform !== 'win32' || Date.now() < this.cooldownUntil) return null;
+  /** 一次只允许一个请求在途；连续读取失败两次后进入 60 秒冷却期。 */
+  async read(request = ''): Promise<string | null> {
+    if (this.waiter || process.platform !== 'win32' || Date.now() < this.cooldownUntil) return null;
     const child = this.child ?? this.start();
     const line = await new Promise<string | null>((resolve) => {
-      const timer = setTimeout(() => {
-        this.waiter = null;
-        resolve(null);
-        this.dispose();
-      }, NET_REQUEST_TIMEOUT_MS);
+      const timer = setTimeout(() => this.dispose(), COUNTER_REQUEST_TIMEOUT_MS);
       this.waiter = (reply) => {
         clearTimeout(timer);
         resolve(reply);
       };
-      child.stdin.write('\n');
+      child.stdin.write(request + '\n');
     });
-    if (line === null) {
+    if (line === null || line === 'error') {
       this.failures++;
       if (this.failures >= 2) {
         this.failures = 0;
-        this.cooldownUntil = Date.now() + NET_FAILURE_COOLDOWN_MS;
+        this.cooldownUntil = Date.now() + COUNTER_FAILURE_COOLDOWN_MS;
       }
       return null;
     }
     this.failures = 0;
     this.cooldownUntil = 0;
-    const match = line.match(/^(\d+) (\d+) (.*)$/); // 没有处于 Up 状态的物理网卡时回复 none
-    return match ? { rx: Number(match[1]), tx: Number(match[2]), adapters: match[3] } : null;
+    return line;
   }
 
   dispose(): void {
     const child = this.child;
     this.child = null;
     this.buffer = '';
+    const waiter = this.waiter;
+    this.waiter = null;
+    waiter?.(null);
     child?.kill();
   }
 }
@@ -123,7 +148,7 @@ class SystemSampler {
   private lastNet: NetCounters | null = null;
   private lastAt = Date.now();
   private warmed = false;
-  private readonly netReader = new NetCounterReader();
+  private readonly netReader = new CounterReader(NET_SCRIPT);
 
   /** 窗口隐藏期间不采样，恢复后丢弃旧基线，避免把长时间间隔平均进第一个读数 */
   reset(): void {
@@ -134,9 +159,11 @@ class SystemSampler {
     this.netReader.dispose();
   }
 
-  async sample(): Promise<SystemStats | null> {
+  async sample(): Promise<Omit<SystemStats, 'gpuPercent'> | null> {
     const cpu = cpuTimes();
-    const net = await this.netReader.read();
+    // 没有处于 Up 状态的物理网卡时回复 none。
+    const match = (await this.netReader.read())?.match(/^(\d+) (\d+) (.*)$/);
+    const net = match ? { rx: Number(match[1]), tx: Number(match[2]), adapters: match[3] } : null;
     const now = Date.now();
     const seconds = (now - this.lastAt) / 1000;
     const prevCpu = this.lastCpu;
@@ -162,11 +189,39 @@ class SystemSampler {
   }
 }
 
-/** 每 2 秒向渲染进程推送一次整机 CPU / 内存 / 网速；窗口最小化或隐藏时暂停采样。返回停止函数。 */
+/** 每 2 秒推送整机资源，GPU 独立采样。窗口最小化或隐藏时暂停采样。 */
 export function startSystemStats(win: BrowserWindow): () => void {
   const sampler = new SystemSampler();
-  let busy = false;
-  void sampler.sample();
+  const gpuReader = new CounterReader(GPU_SCRIPT);
+  const visible = () => !win.isDestroyed() && win.isVisible() && !win.isMinimized();
+  let stopped = false;
+  let gpuPercent: number | null = null;
+  let gpuNeedsBaseline = true;
+  let gpuBusy = false;
+  const resetGpu = () => {
+    gpuPercent = null;
+    gpuNeedsBaseline = true;
+  };
+  const sampleGpu = async () => {
+    if (!visible()) { resetGpu(); return; }
+    if (gpuBusy) return;
+    gpuBusy = true;
+    try {
+      const reset = gpuNeedsBaseline;
+      gpuNeedsBaseline = false;
+      const line = await gpuReader.read(reset ? 'reset' : '');
+      if (stopped || gpuNeedsBaseline || !visible()) return;
+      gpuPercent = line && /^(?:[0-9]{1,2}|100)$/.test(line) ? Number(line) : null;
+    } finally {
+      gpuBusy = false;
+    }
+  };
+  win.on('hide', resetGpu);
+  win.on('minimize', resetGpu);
+  void sampleGpu();
+  const gpuTimer = process.platform === 'win32' ? setInterval(sampleGpu, GPU_SAMPLE_INTERVAL_MS) : null;
+  let busy = true;
+  void sampler.sample().finally(() => { busy = false; });
   const timer = setInterval(async () => {
     if (busy || win.isDestroyed()) return;
     if (!win.isVisible() || win.isMinimized()) {
@@ -176,13 +231,18 @@ export function startSystemStats(win: BrowserWindow): () => void {
     busy = true;
     try {
       const stats = await sampler.sample();
-      if (stats && !win.isDestroyed()) win.webContents.send('system:stats', stats);
+      if (stats && !stopped && visible()) win.webContents.send('system:stats', { ...stats, gpuPercent });
     } finally {
       busy = false;
     }
   }, SAMPLE_INTERVAL_MS);
   return () => {
+    stopped = true;
     clearInterval(timer);
+    if (gpuTimer !== null) clearInterval(gpuTimer);
+    win.removeListener('hide', resetGpu);
+    win.removeListener('minimize', resetGpu);
+    gpuReader.dispose();
     sampler.dispose();
   };
 }

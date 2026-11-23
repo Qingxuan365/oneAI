@@ -38,7 +38,7 @@ export const ZH_TW: Record<string, string> = {
   '关闭': '關閉',
   '确定': '確定',
   '取消': '取消',
-  '整机 CPU {cpu}%，内存已用 {used} / {total} GiB，网络上行 {up}、下行 {down}': '整機 CPU {cpu}%，記憶體已用 {used} / {total} GiB，網路上行 {up}、下行 {down}',
+  '整机 CPU {cpu}%，GPU {gpu}，内存已用 {used} / {total} GiB，网络上行 {up}、下行 {down}': '整機 CPU {cpu}%，GPU {gpu}，記憶體已用 {used} / {total} GiB，網路上行 {up}、下行 {down}',
   '浅色': '淺色',
   '深色': '深色',
   '豆沙绿': '豆沙綠',

@@ -127,7 +127,7 @@ await build({
       return { generatedAt: Date.now(), weekStart: monday.getTime(), accounts, rows, days };
     };
     // 顶栏系统资源的宽值：CPU 100%、内存 31.9 GiB、上行 999 KiB/s、下行 99.9 MiB/s
-    window.fakeStats = { cpuPercent: 100, memUsedBytes: 31.9 * 1024 ** 3, memTotalBytes: 32 * 1024 ** 3, netUpBytesPerSec: 999 * 1024, netDownBytesPerSec: 99.9 * 1024 ** 2 };
+    window.fakeStats = { cpuPercent: 100, gpuPercent: 100, memUsedBytes: 31.9 * 1024 ** 3, memTotalBytes: 32 * 1024 ** 3, netUpBytesPerSec: 999 * 1024, netDownBytesPerSec: 99.9 * 1024 ** 2 };
     const root = createRoot(document.getElementById('root'));
     window.events = [];
     const CLIS = [
@@ -423,7 +423,7 @@ app.whenReady().then(async () => {
       }
       await new Promise(r => setTimeout(r, 200));
     };
-    for (const width of [900, 1100, 1280, 1440, 1920, 2400, 2800]) {
+    for (const width of [900, 1100, 1280, 1440, 1600, 1750, 1840, 1920, 2400, 2800]) {
       win.setSize(width, 900);
       await win.webContents.executeJavaScript('window.setMaximized(' + (width >= 1920) + ')');
       await settleSize();
@@ -447,6 +447,17 @@ app.whenReady().then(async () => {
       ['#oneai-topbar-clock', '.quota-usage', '.quota-tokens-breakdown', '.topbar-sys-cpu', '.topbar-sys-mem', '.topbar-sys-net'].every(sel => document.querySelector(sel).getClientRects().length > 0)\`) });
     result.push({ name: 'topbar at 2800 maximized shows full date-time clock', ok: await win.webContents.executeJavaScript("(() => { const c = document.getElementById('oneai-topbar-clock'); const t = c.textContent.trim(); return c.getAttribute('data-clock-mode') === 'full' && c.getBoundingClientRect().width > 0 && t.includes('-') && t.includes(':'); })()") });
     result.push({ name: 'topbar clock renders with bold font weight', ok: await win.webContents.executeJavaScript("parseInt(getComputedStyle(document.getElementById('oneai-topbar-clock')).fontWeight, 10) >= 700") });
+    result.push({ name: 'topbar distinguishes unavailable and idle GPU readings', ok: await win.webContents.executeJavaScript(\`(async () => {
+      const update = async gpuPercent => {
+        window.pushStats({ ...window.fakeStats, gpuPercent });
+        await new Promise(resolve => setTimeout(resolve, 40));
+        return document.querySelector('span.topbar-sys-gpu:not([aria-hidden])').textContent;
+      };
+      const unavailable = await update(null);
+      const idle = await update(0);
+      await update(window.fakeStats.gpuPercent);
+      return unavailable === 'GPU: --' && idle === 'GPU: 0%';
+    })()\`) });
     win.setSize(1920, 900);
     await win.webContents.executeJavaScript('window.setMaximized(true)');
     await settleSize();
@@ -473,7 +484,7 @@ app.whenReady().then(async () => {
       const quota = document.getElementById('oneai-topbar-quota').textContent;
       const sys = document.getElementById('oneai-topbar-sys').textContent;
       return quota.includes('Tokens: in 335k, out 167k, cache 321k') && quota.includes('Cache: 99%') && quota.includes('Cost: $0.24') && quota.includes('5h: 82%') && quota.includes('Model: gpt-5-codex') && quota.includes('Ctx: 62%')
-        && sys.includes('CPU: 100%') && sys.includes('Mem: 31.9 GiB') && sys.includes('↑999KiB/s') && sys.includes('↓99.9MiB/s');
+        && sys.includes('CPU: 100%') && sys.includes('GPU: 100%') && sys.includes('Mem: 31.9 GiB') && sys.includes('↑999KiB/s') && sys.includes('↓99.9MiB/s');
     })()\`) });
     result.push({ name: 'topbar renders Ctx 0%, token-only Ctx, and legacy total Tokens fallback', ok: await win.webContents.executeJavaScript(\`(() => {
       window.drawQuota({ ctxPercent: 0 });

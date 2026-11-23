@@ -38,7 +38,7 @@ export const EN: Record<string, string> = {
   '关闭': 'Close',
   '确定': 'OK',
   '取消': 'Cancel',
-  '整机 CPU {cpu}%，内存已用 {used} / {total} GiB，网络上行 {up}、下行 {down}': 'System CPU {cpu}%, memory used {used} / {total} GiB, network up {up}, down {down}',
+  '整机 CPU {cpu}%，GPU {gpu}，内存已用 {used} / {total} GiB，网络上行 {up}、下行 {down}': 'System CPU {cpu}%, GPU {gpu}, memory used {used} / {total} GiB, network up {up}, down {down}',
   '浅色': 'Light',
   '深色': 'Dark',
   '豆沙绿': 'Bean Green',

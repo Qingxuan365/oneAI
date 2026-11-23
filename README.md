@@ -18,7 +18,7 @@ Working with several AI coding CLIs usually means a pile of terminal windows. It
 
 - **Folder tree with many tasks**: tasks are grouped under project folders, each with a status light, a Git branch badge and the latest message of its session. A "Needs review" mark tells you when a background task stopped producing output.
 - **Persistent terminals**: built on xterm.js and Windows ConPTY (`node-pty`). Switching tasks or folders never ends a process.
-- **Live quota in one line**: input / output / cache tokens, cache hit rate, context usage, cost, 5h / 7d limits and the active model in the top bar, with CPU, memory and network speed. Plain text only, no popups.
+- **Live quota in one line**: input / output / cache tokens, cache hit rate, context usage, cost, 5h / 7d limits and the active model in the top bar, with CPU, GPU, memory and network speed. Plain text only, no popups.
 - **Multiple accounts**: run several Codex, Claude Code and Kimi Code accounts in parallel. An account is only a config directory plus environment variables, and OneAI never reads or copies your credentials.
 - **Analytics Dashboard**: sidebar Dashboard (`Ctrl + Shift + D`) with multi-range KPI cards, a rolling 12-month activity heatmap, token / cost / session trends, Top 5 drill-downs, token composition, multi-group live account quotas and a sortable model table (plus the legacy weekly usage panel via `Ctrl + Shift + U`), all read from local session records.
 - **Session history**: browse and resume past Claude Code, Codex and Kimi Code sessions.

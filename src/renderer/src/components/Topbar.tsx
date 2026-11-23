@@ -527,7 +527,7 @@ export const Topbar: React.FC<TopbarProps> = React.memo(({
         </div>
       )}
 
-      {/* 整机 CPU / 内存 / 网速：与活动终端无关，始终显示；空间不足时由 .topbar-sys-* 依次收起 */}
+      {/* 整机资源统计与活动终端无关，空间不足时由 .topbar-sys-* 依次收起 */}
       <SystemStatsText language={language} />
 
       {onOpenHistory && (

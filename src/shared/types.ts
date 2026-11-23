@@ -160,6 +160,7 @@ export interface UsageAccountRef {
 
 export interface SystemStats {
   cpuPercent: number;
+  gpuPercent: number | null;
   memUsedBytes: number;
   memTotalBytes: number;
   netUpBytesPerSec: number | null;
