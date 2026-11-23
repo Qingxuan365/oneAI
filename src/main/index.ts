@@ -188,7 +188,7 @@ function setupIPC() {
     const before = getLanguage();
     setLanguage(language);
     // 额度提示等文案已按旧语言缓存，语言变化后立即重新读取一次
-    if (getLanguage() !== before) void quotaService.refreshAllQuotas();
+    if (getLanguage() !== before) void quotaService.refreshAllQuotas(true);
   });
   ipcMain.on('app:home-dir', (event) => { event.returnValue = app.getPath('home'); });
   ipcMain.handle('cli:known', () => listKnownClis());

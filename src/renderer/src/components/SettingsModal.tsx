@@ -249,9 +249,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {tab === 'appearance' && (
             <>
               <Section title={t('语言')} hint="Language">
-                <div className="grid grid-cols-2 gap-2" role="group" aria-label={t('界面语言')}>
+                <div className="grid grid-cols-3 gap-2" role="group" aria-label={t('界面语言')}>
                   {LANGUAGES.map(({ id, label: name }) => (
-                    <button key={id} type="button" aria-pressed={settings.language === id}
+                    <button key={id} type="button" lang={id} aria-pressed={settings.language === id}
                       onClick={() => update({ language: id })}
                       className={`flex items-center justify-center gap-1.5 py-2 ${optionClass(settings.language === id)}`}>
                       {name}
@@ -576,7 +576,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className={row}>
                 <span>
                   <span className="block">{t('显示年月日')}</span>
-                  <span className="block text-xs text-fg-faint">{t('窗口最大化时，顶栏时钟显示年月日（简体中文界面含农历）与星期；关闭后只显示时间')}</span>
+                  <span className="block text-xs text-fg-faint">{t('窗口最大化时，顶栏时钟显示年月日（中文界面含农历）与星期；关闭后只显示时间')}</span>
                 </span>
                 <Switch label={t('显示年月日')} checked={settings.topbarDateVisible !== false} onChange={(checked) => update({ topbarDateVisible: checked })} />
               </div>

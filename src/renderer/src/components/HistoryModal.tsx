@@ -3,7 +3,7 @@ import { Search, History, Trash2, GitBranch } from 'lucide-react';
 import { BrandIcon } from './BrandIcon';
 import { Modal } from './Modal';
 import { HistoryEntry } from '../types';
-import { folderKey, folderName } from '../workspaceState';
+import { folderKey, folderName, historySessionKey } from '../workspaceState';
 import { formatAgo } from '../taskSummary';
 import { t } from '../i18n';
 
@@ -15,7 +15,7 @@ const CLI_LABELS: Record<string, string> = {
 
 const cliLabel = (cliId: string) => CLI_LABELS[cliId] ?? cliId;
 
-const entryKey = (entry: HistoryEntry) => `${entry.cliId}:${entry.accountId ?? 'default'}:${entry.id}`;
+const entryKey = (entry: HistoryEntry) => historySessionKey(entry.cliId, entry.accountId, entry.id);
 
 function formatTime(timestamp: number): string {
   const date = new Date(timestamp);
@@ -184,7 +184,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onR
           const confirming = pendingKey === key;
           const group = dayGroup(entry.updatedAt);
           const showGroup = index === 0 || dayGroup(visible[index - 1].updatedAt) !== group;
-          const isOpenTask = Boolean(openHistoryIds && (openHistoryIds.has(`${entry.accountId ?? 'default'}:${entry.id}`) || (!entry.accountId && openHistoryIds.has(entry.id))));
+          const isOpenTask = openHistoryIds?.has(key);
           const branch = branches[folderKey(entry.cwd)];
           return (
             <React.Fragment key={key}>

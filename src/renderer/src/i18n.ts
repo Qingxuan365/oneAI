@@ -30,7 +30,7 @@ export function t(key: string, params?: Record<string, string | number>): string
 
 /** 日期时间格式使用的 locale */
 export function dateLocale(): string {
-  return current === 'en' ? 'en-US' : 'zh-CN';
+  return current === 'en' ? 'en-US' : current;
 }
 
 /** 标记「稍后翻译」的文案：模块级常量里先用 T() 登记中文原文，渲染时再用 t() 取译文；scripts/check-i18n.mjs 会一并校验 */

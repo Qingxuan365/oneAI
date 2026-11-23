@@ -6,17 +6,17 @@ import { Modal } from './components/Modal';
 import { ConfirmDialog, ConfirmOptions } from './components/ConfirmDialog';
 import { BrandIcon } from './components/BrandIcon';
 import { AppLogo } from './components/AppLogo';
-import { CliDef, CustomCli, FolderEntry, TaskSession, QuotaData, AppSettings, ThemeId, HistoryEntry, Account } from './types';
+import { CliDef, CustomCli, FolderEntry, TaskSession, QuotaData, AppSettings, ThemeId, HistoryEntry, Account, TaskSummary } from './types';
 import { BUILTIN_CLIS } from './clis';
 import { SUMMARY_CLIS, formatAgo } from './taskSummary';
-import { ensureFolder, folderKey, folderName, groupRecent, loadAppState, moveBefore, nextTaskTitle, orderedTasks, scheduleSaveAppState, tasksInFolder } from './workspaceState';
+import { ensureFolder, folderKey, folderName, groupRecent, historySessionKey, loadAppState, moveBefore, nextTaskTitle, orderedTasks, scheduleSaveAppState, tasksInFolder } from './workspaceState';
 import { accountCli, quotaKey, sanitizeAccounts, toSessionAccount } from './accounts';
 import { sanitizeCustomClis, toCliDef } from './customClis';
 import { sanitizeMusicStreams } from './musicStreams';
-import { getLanguage, isLanguage, setLanguage, systemLanguage, t } from './i18n';
+import { dateLocale, isLanguage, setLanguage, systemLanguage, t } from './i18n';
 import { quoteTerminalPath } from '../../shared/paths';
 import { THEME_MODE } from './themes';
-import { forgetUserActivity, hasVisibleOutput, isTaskAlive, isUserEcho } from './taskStatus';
+import { forgetUserActivity, hasVisibleOutput, isTaskAlive, isUserEcho, startOutcome } from './taskStatus';
 import { playTaskDoneSound } from './taskDoneSound';
 
 // 低频弹窗与代码预览面板（含 highlight.js 词法表）按需异步分包加载，大幅减小首屏主包解析开销
@@ -62,11 +62,6 @@ const IDLE_AFTER_MS = 4_000;
 const DONE_NOTIFY_AFTER_MS = 10_000;
 const STARTUP_GRACE_MS = 5_000;
 const DEFAULT_PREVIEW_WIDTH = 420;
-
-// 启动结果转为任务状态，失败时保留原因供侧栏与终端区显示
-function startOutcome(result?: { success: boolean; error?: string }): Pick<TaskSession, 'status' | 'errorMessage'> {
-  return result?.success ? { status: 'idle', errorMessage: undefined } : { status: 'error', errorMessage: result?.error || t('终端启动失败') };
-}
 
 function sameHistoryEntries(a: HistoryEntry[], b: HistoryEntry[]): boolean {
   return a.length === b.length && a.every((item, i) => {
@@ -256,7 +251,7 @@ export const App: React.FC = () => {
         setWorkReminderVisible(true);
         if (voiceReminderEnabledRef.current && 'speechSynthesis' in window) {
           const utterance = new SpeechSynthesisUtterance(workReminderText(hours));
-          utterance.lang = getLanguage() === 'en' ? 'en-US' : 'zh-CN';
+          utterance.lang = dateLocale();
           window.speechSynthesis.speak(utterance);
         }
         schedule();
@@ -402,12 +397,6 @@ export const App: React.FC = () => {
     if (activeTask) setLastFolder(activeTask.cwd);
   }, [activeTask?.cwd]);
 
-  // 当前选中 CLI 对应的实时配额
-  const currentQuota = useMemo(() => {
-    if (!currentGroup) return null;
-    return quotas[quotaKey(currentGroup.id, activeTask?.accountId)] || null;
-  }, [quotas, currentGroup, activeTask?.accountId]);
-
   // 初始化拉取各 CLI 真实配额与订阅后台推送
   useEffect(() => {
     if (window.electronAPI) {
@@ -547,8 +536,8 @@ export const App: React.FC = () => {
 
   // 历史会话：启动后稍等再读（避开启动高峰），之后每 2 分钟刷新（窗口不可见时跳过），账号配置变化时同步更新；「最近任务」由它按文件夹归类
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const historyAccountsKey = settings.accounts.map((a) => `${a.id}\u0000${a.cliId}\u0000${a.name}\u0000${a.configDir}`).join('\u0001');
-  const prevHistoryAccountsKeyRef = useRef(historyAccountsKey);
+  const historySourceKey = JSON.stringify([settings.language, settings.accounts.map(({ id, cliId, name, configDir }) => [id, cliId, name, configDir])]);
+  const prevHistorySourceKeyRef = useRef(historySourceKey);
   useEffect(() => {
     const list = window.electronAPI?.listSessionHistory;
     if (!list) return;
@@ -577,8 +566,8 @@ export const App: React.FC = () => {
     };
   }, []);
   useEffect(() => {
-    if (prevHistoryAccountsKeyRef.current === historyAccountsKey) return;
-    prevHistoryAccountsKeyRef.current = historyAccountsKey;
+    if (prevHistorySourceKeyRef.current === historySourceKey) return;
+    prevHistorySourceKeyRef.current = historySourceKey;
     const list = window.electronAPI?.listSessionHistory;
     if (!list) return;
     let disposed = false;
@@ -588,7 +577,7 @@ export const App: React.FC = () => {
       }
     }).catch(() => {});
     return () => { disposed = true; };
-  }, [historyAccountsKey, settings.accounts]);
+  }, [historySourceKey, settings.accounts]);
   const recentFolders = useMemo(() => {
     const cliIds = new Set(visibleClis.map((cli) => cli.id));
     return groupRecent(history.filter((entry) => cliIds.has(entry.cliId)), new Set(folders.map((folder) => folderKey(folder.path))));
@@ -636,7 +625,7 @@ export const App: React.FC = () => {
 
   // 任务行第二行：任务对应会话里最近一条用户消息（仅 Claude / Codex / Kimi），每 5 秒与窗口获得焦点时刷新。
   // 使用账号的任务读该账号的配置目录；任务进入停止态后再补读最后一次摘要，收敛后不再每 5 秒重扫
-  const [summaries, setSummaries] = useState<Record<string, { text: string | null }>>({});
+  const [summaries, setSummaries] = useState<Record<string, TaskSummary>>({});
   const settledStoppedIdsRef = useRef(new Set<string>());
   const summaryCandidates = useMemo(() => tasks
     .filter((task) => SUMMARY_CLIS.has(task.groupId))
@@ -645,11 +634,12 @@ export const App: React.FC = () => {
       if (task.accountId && !account) return [];
       return [{ id: task.id, alive: isTaskAlive(task.status), cliId: task.groupId, cwd: task.cwd, createdAt: task.createdAt, historyId: task.historyId, configDir: account?.configDir }];
     }), [tasks, settings.accounts]);
-  const summaryKey = JSON.stringify(summaryCandidates);
+  const summaryKey = JSON.stringify([summaryCandidates, activeTaskId]);
   useEffect(() => {
     const read = window.electronAPI?.getTaskSummaries;
     if (!read || summaryCandidates.length === 0) return;
     let disposed = false;
+    let pending = false;
     const validIds = new Set(summaryCandidates.map((item) => item.id));
     for (const id of [...settledStoppedIdsRef.current]) {
       if (!validIds.has(id)) settledStoppedIdsRef.current.delete(id);
@@ -658,29 +648,35 @@ export const App: React.FC = () => {
       if (item.alive) settledStoppedIdsRef.current.delete(item.id);
     }
     const refresh = () => {
-      if (document.hidden) return;
+      if (document.hidden || pending) return;
       const stoppedFetchIds: string[] = [];
+      const activeCandidate = summaryCandidates.find((item) => item.id === activeTaskId);
       const toFetch = summaryCandidates
         .filter((item) => {
           if (item.alive) return true;
+          // Include peers in the active task's folder when deciding whether its log can be attributed.
+          if ((activeCandidate?.cliId === 'codex' || activeCandidate?.cliId === 'claude')
+            && item.cliId === activeCandidate.cliId && item.configDir === activeCandidate.configDir
+            && folderKey(item.cwd) === folderKey(activeCandidate.cwd)) return true;
           if (settledStoppedIdsRef.current.has(item.id)) return false;
           stoppedFetchIds.push(item.id);
           return true;
         })
-        .map(({ alive: _alive, ...rest }) => rest);
+        .map(({ alive: _alive, ...rest }) => ({ ...rest, includeUsage: rest.id === activeTaskId && rest.cliId === 'codex' }));
       if (toFetch.length === 0) return;
+      pending = true;
       void read(toFetch).then((fetched) => {
         if (disposed) return;
         for (const id of stoppedFetchIds) {
           if (Object.prototype.hasOwnProperty.call(fetched, id)) settledStoppedIdsRef.current.add(id);
         }
         setSummaries((prev) => {
-          const next: Record<string, { text: string | null }> = {};
+          const next: Record<string, TaskSummary> = {};
           let changed = false;
           for (const id of validIds) {
             if (Object.prototype.hasOwnProperty.call(fetched, id)) {
               next[id] = fetched[id];
-              if (prev[id]?.text !== fetched[id]?.text || !Object.prototype.hasOwnProperty.call(prev, id)) changed = true;
+              if (JSON.stringify(prev[id]) !== JSON.stringify(fetched[id])) changed = true;
             } else if (Object.prototype.hasOwnProperty.call(prev, id)) {
               next[id] = prev[id];
             }
@@ -688,7 +684,7 @@ export const App: React.FC = () => {
           if (!changed && Object.keys(prev).length === Object.keys(next).length) return prev;
           return next;
         });
-      }).catch(() => {});
+      }).catch(() => {}).finally(() => { pending = false; });
     };
     refresh();
     const onVisible = () => { if (!document.hidden) refresh(); };
@@ -702,6 +698,24 @@ export const App: React.FC = () => {
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [summaryKey]);
+
+  const currentQuota = useMemo((): QuotaData | null => {
+    if (!currentGroup || !activeTask) return null;
+    const quota = quotas[quotaKey(currentGroup.id, activeTask.accountId)];
+    if (!quota) return null;
+    const summary = summaries[activeTask.id];
+    if (currentGroup.id === 'codex' && summary?.usage) {
+      return { ...quota, ...summary.usage, sessionScope: 'task', ctxEstimated: true };
+    }
+    if (currentGroup.id === 'claude' && !activeTask.accountId && quota.sessionScope === 'latest') {
+      if (quota.sessionId && quota.sessionId === summary?.sessionId) return { ...quota, sessionScope: 'task' };
+      return {
+        ...quota, model: undefined, effort: undefined, tokens: undefined, tokenInput: undefined, tokenOutput: undefined,
+        tokenCache: undefined, cacheHitPercent: undefined, costUsd: undefined, ctxPercent: undefined, ctxTokens: undefined, ctxWindow: undefined,
+      };
+    }
+    return quota;
+  }, [quotas, currentGroup, activeTask, summaries]);
 
   // 状态检测：任务启动后默认「空闲」，有持续输出时为「运行中」，连续 IDLE_AFTER_MS 没有输出转为「等待输入」，再有输出又回到运行中；
   // 提示音在转等待输入的那一刻响；静默满 DONE_NOTIFY_AFTER_MS 才标记未读（期间恢复输出则继续等待）。
@@ -820,8 +834,7 @@ export const App: React.FC = () => {
         setTasks((prev) => prev.map((t) => {
           if (t.id !== taskId) return t;
           if (result?.success && (exitedEarly || t.status === 'stopped')) return { ...t, status: 'stopped', errorMessage: undefined };
-          if (result?.success && t.status === 'idle') return { ...t, errorMessage: undefined };
-          return { ...t, ...startOutcome(result) };
+          return { ...t, ...startOutcome(result, t.status) };
         }));
       }).catch(() => setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, status: 'error' } : t)));
     }
@@ -1104,7 +1117,8 @@ export const App: React.FC = () => {
       return;
     }
     setIsHistoryOpen(false);
-    const existing = tasksRef.current.find((task) => task.historyId === entry.id && (task.accountId ?? undefined) === (entry.accountId ?? undefined));
+    const key = historySessionKey(entry.cliId, entry.accountId, entry.id);
+    const existing = tasksRef.current.find((task) => task.historyId && historySessionKey(task.groupId, task.accountId, task.historyId) === key);
     if (existing) {
       handleSelectTask(existing.id);
       return;
@@ -1253,7 +1267,7 @@ ${entry.cwd}`}
   if (isFileTreeOpen) everOpenedModalsRef.current.fileTree = true;
   if (isDashboardOpen) everOpenedModalsRef.current.dashboard = true;
   const openHistoryIds = useMemo(
-    () => new Set(tasks.flatMap((task) => (task.historyId ? [`${task.accountId ?? 'default'}:${task.historyId}`, ...(!task.accountId ? [task.historyId] : [])] : []))),
+    () => new Set(tasks.flatMap((task) => task.historyId ? [historySessionKey(task.groupId, task.accountId, task.historyId)] : [])),
     [tasks],
   );
   const accountTaskCounts = useMemo(

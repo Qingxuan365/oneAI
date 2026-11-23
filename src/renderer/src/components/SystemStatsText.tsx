@@ -5,8 +5,8 @@ import { t } from '../i18n';
 function formatRate(bytesPerSec: number | null): string {
   if (bytesPerSec === null) return '--';
   if (bytesPerSec < 1024) return `${Math.round(bytesPerSec)}B/s`;
-  if (bytesPerSec < 1024 * 1024) return `${Math.round(bytesPerSec / 1024)}K/s`;
-  return `${(bytesPerSec / 1024 / 1024).toFixed(1)}M/s`;
+  if (bytesPerSec < 1024 * 1024) return `${Math.round(bytesPerSec / 1024)}KiB/s`;
+  return `${(bytesPerSec / 1024 / 1024).toFixed(1)}MiB/s`;
 }
 
 const Dot = ({ className = '' }: { className?: string }) => (
@@ -39,14 +39,14 @@ export const SystemStatsText: React.FC<SystemStatsTextProps> = React.memo(() => 
   }), []);
 
   if (!stats) return null;
-  const memGb = `${(stats.memUsedBytes / 1024 ** 3).toFixed(1)} GB`;
+  const memGiB = (stats.memUsedBytes / 1024 ** 3).toFixed(1);
   const label = (text: string) => <span className="text-fg-subtle">{text} </span>;
 
   return (
     <div
       id="oneai-topbar-sys"
       className="topbar-sys flex shrink-0 items-center gap-1.5 whitespace-nowrap border-l border-line px-2 font-mono text-xs text-fg-muted"
-      title={t('整机 CPU {cpu}%，内存已用 {used} / {total} GB，网络上行 {up}、下行 {down}', { cpu: stats.cpuPercent, used: memGb, total: (stats.memTotalBytes / 1024 ** 3).toFixed(1), up: formatRate(stats.netUpBytesPerSec), down: formatRate(stats.netDownBytesPerSec) })}
+      title={t('整机 CPU {cpu}%，内存已用 {used} / {total} GiB，网络上行 {up}、下行 {down}', { cpu: stats.cpuPercent, used: memGiB, total: (stats.memTotalBytes / 1024 ** 3).toFixed(1), up: formatRate(stats.netUpBytesPerSec), down: formatRate(stats.netDownBytesPerSec) })}
     >
       <span className="topbar-sys-cpu">
         {label('CPU:')}
@@ -55,13 +55,13 @@ export const SystemStatsText: React.FC<SystemStatsTextProps> = React.memo(() => 
       <Dot className="topbar-sys-mem" />
       <span className="topbar-sys-mem">
         {label('Mem:')}
-        <span className="inline-block min-w-[7ch] text-right font-semibold text-fg tabular-nums">{memGb}</span>
+        <span className="inline-block min-w-[8ch] text-right font-semibold text-fg tabular-nums">{memGiB} GiB</span>
       </span>
       <Dot className="topbar-sys-net" />
       <span className="topbar-sys-net">
         {label('Net:')}
-        <span className="inline-block min-w-[7ch] text-right font-semibold text-fg tabular-nums">↑{formatRate(stats.netUpBytesPerSec)}</span>
-        <span className="ml-1 inline-block min-w-[8ch] text-right font-semibold text-fg tabular-nums">↓{formatRate(stats.netDownBytesPerSec)}</span>
+        <span className="inline-block min-w-[9ch] text-right font-semibold text-fg tabular-nums">↑{formatRate(stats.netUpBytesPerSec)}</span>
+        <span className="ml-1 inline-block min-w-[10ch] text-right font-semibold text-fg tabular-nums">↓{formatRate(stats.netDownBytesPerSec)}</span>
       </span>
     </div>
   );

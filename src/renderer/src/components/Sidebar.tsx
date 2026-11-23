@@ -6,7 +6,7 @@ const NO_STREAMS: MusicStream[] = [];
 // 一个文件夹的任务数超过这个值时，侧栏对屏幕外的任务行启用 content-visibility
 const LARGE_FOLDER_TASKS = 30;
 import { TASK_STATUS_META, isTaskAlive } from '../taskStatus';
-import { folderKey, folderName, orderedTasks, RecentFolder } from '../workspaceState';
+import { folderKey, folderName, historySessionKey, orderedTasks, RecentFolder } from '../workspaceState';
 import { SUMMARY_CLIS, formatAgo, formatClock } from '../taskSummary';
 import { BrandIcon } from './BrandIcon';
 import { AppLogo } from './AppLogo';
@@ -92,6 +92,11 @@ const BranchBadge: React.FC<{ branch?: string | null }> = ({ branch }) => (branc
 
 type MenuState = { x: number; y: number; kind: 'new' | 'folder' | 'task' | 'recent-folder'; folderPath?: string; taskId?: string; focusFirst?: boolean };
 
+function clampSidebarWidth(width: number): number {
+  const max = Math.max(240, Math.min(480, Math.floor(window.innerWidth * 0.45)));
+  return Math.max(240, Math.min(max, Math.round(width)));
+}
+
 export const Sidebar: React.FC<SidebarProps> = React.memo(({
   isCollapsed,
   clis,
@@ -133,12 +138,25 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   showMusicPlayer = true,
 }) => {
   const asideRef = useRef<HTMLElement | null>(null);
-  const isCollapsedRef = useRef(isCollapsed);
-  isCollapsedRef.current = isCollapsed;
+  const resizeHandleRef = useRef<HTMLDivElement>(null);
+  const cancelResizeRef = useRef<(() => void) | null>(null);
 
   useLayoutEffect(() => {
     if (asideRef.current) asideRef.current.style.width = !isCollapsed && width ? `${width}px` : '';
   }, [isCollapsed, width]);
+  useLayoutEffect(() => {
+    if (isCollapsed || !asideRef.current || !resizeHandleRef.current) return;
+    const aside = asideRef.current;
+    const handle = resizeHandleRef.current;
+    const updateWidth = () => handle.setAttribute('aria-valuenow', String(Math.round(aside.getBoundingClientRect().width)));
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(aside);
+    return () => {
+      observer.disconnect();
+      cancelResizeRef.current?.();
+    };
+  }, [isCollapsed, onResizeWidth]);
   const [greeting, setGreeting] = useState(() => getGreeting(clockOffsetHours));
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
   const [openRecent, setOpenRecent] = useState<ReadonlySet<string>>(() => new Set());
@@ -221,9 +239,10 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
     const close = () => setMenu(null);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        const trigger = menuTriggerRef.current;
         close();
         requestAnimationFrame(() => {
-          if (menuTriggerRef.current?.isConnected) menuTriggerRef.current.focus();
+          if (trigger?.isConnected) trigger.focus();
         });
       }
     };
@@ -292,26 +311,40 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   };
 
   const startSidebarResize = (e: React.MouseEvent) => {
-    if (!onResizeWidth) return;
+    if (!onResizeWidth || e.button !== 0) return;
     e.preventDefault();
+    cancelResizeRef.current?.();
     const prevCursor = document.body.style.cursor;
     document.body.style.cursor = 'col-resize';
+    const aside = asideRef.current;
+    const previousWidth = aside?.style.width ?? '';
     let latestWidth: number | null = null;
     const onMove = (ev: MouseEvent) => {
-      const max = Math.max(240, Math.min(480, Math.floor(window.innerWidth * 0.45)));
-      const next = Math.max(240, Math.min(max, Math.round(ev.clientX)));
-      latestWidth = next;
-      if (!isCollapsedRef.current && asideRef.current) asideRef.current.style.width = `${next}px`;
+      latestWidth = clampSidebarWidth(ev.clientX);
+      if (aside) aside.style.width = `${latestWidth}px`;
     };
-    const onUp = () => {
+    const cancel = () => {
       document.body.style.cursor = prevCursor;
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
-      if (asideRef.current) asideRef.current.style.width = !isCollapsedRef.current && width ? `${width}px` : '';
+      window.removeEventListener('blur', cancel);
+      window.removeEventListener('keydown', onKey);
+      cancelResizeRef.current = null;
+      if (aside?.isConnected) aside.style.width = previousWidth;
+    };
+    const onUp = (ev: MouseEvent) => {
+      if (ev.button !== 0) return;
+      cancel();
       if (latestWidth !== null) onResizeWidth(latestWidth);
     };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') cancel();
+    };
+    cancelResizeRef.current = cancel;
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
+    window.addEventListener('blur', cancel);
+    window.addEventListener('keydown', onKey);
   };
 
   const newTaskItems = (folderPath: string) => (
@@ -667,7 +700,9 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                 <div
                   onContextMenu={(e) => {
                     e.preventDefault();
-                    menuTriggerRef.current = e.currentTarget;
+                    menuTriggerRef.current = e.target instanceof Element
+                      ? e.target.closest('button') ?? e.currentTarget.querySelector('button[aria-expanded]')
+                      : null;
                     setMenu({ x: e.clientX, y: e.clientY, kind: 'folder', folderPath: folder.path });
                   }}
                   className={`group flex items-center rounded-md pr-1 text-ui transition-colors ${
@@ -809,7 +844,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                           onContextMenu={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            menuTriggerRef.current = e.currentTarget;
+                            menuTriggerRef.current = taskButtons.current.get(task.id) ?? null;
                             setMenu({ x: e.clientX, y: e.clientY, kind: 'task', taskId: task.id });
                           }}
                           // 鼠标中键关闭任务；按下时阻止默认行为，避免出现自动滚动光标
@@ -982,7 +1017,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                         <div className="ml-[1.4rem] mt-0.5 space-y-0.5 border-l border-line pl-1.5">
                           {recent.entries.map((entry) => (
                             <button
-                              key={`${entry.cliId}:${entry.accountId ?? 'default'}:${entry.id}`}
+                              key={historySessionKey(entry.cliId, entry.accountId, entry.id)}
                               type="button"
                               data-history-id={entry.id}
                               onClick={() => onResumeHistory?.(entry)}
@@ -1037,13 +1072,28 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
       {menuNode}
       {onResizeWidth && (
         <div
+          ref={resizeHandleRef}
           role="separator"
+          tabIndex={0}
           aria-orientation="vertical"
           aria-label={t('调整侧栏宽度')}
-          title={t('拖动调整侧栏宽度，双击恢复默认')}
+          aria-valuemin={240}
+          aria-valuemax={480}
+          title={t('拖动或按左右方向键调整侧栏宽度，双击或按 Enter 恢复默认')}
           onMouseDown={startSidebarResize}
           onDoubleClick={() => onResetWidth?.()}
-          className="absolute -right-1 top-0 z-20 h-full w-2 cursor-col-resize transition-colors hover:bg-accent/35 active:bg-accent/50"
+          onKeyDown={(e) => {
+            if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              onResetWidth?.();
+            } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && asideRef.current) {
+              e.preventDefault();
+              const step = e.key === 'ArrowLeft' ? -16 : 16;
+              onResizeWidth(clampSidebarWidth(asideRef.current.getBoundingClientRect().width + step));
+            }
+          }}
+          className="absolute -right-1 top-0 z-20 h-full w-2 cursor-col-resize transition-colors hover:bg-accent/35 focus-visible:bg-accent/50 active:bg-accent/50"
         />
       )}
     </aside>

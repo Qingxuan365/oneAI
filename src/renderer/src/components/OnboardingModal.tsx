@@ -28,7 +28,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, langua
       onClose={() => {}}
       closeDisabled
       titleId="onboarding-title"
-      title={step === 1 ? 'Language / 语言' : t('欢迎使用 OneAI')}
+      title={step === 1 ? t('界面语言') : t('欢迎使用 OneAI')}
       icon={step === 1 ? <Globe size={16} className="text-accent" /> : <Sparkles size={16} className="text-accent" />}
       widthClass="max-w-lg"
       footer={step === 1 ? (
@@ -42,10 +42,10 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, langua
     >
       {step === 1 ? (
         <div className="space-y-4" data-onboarding-step="language">
-          <p className="text-ui text-fg-muted">Choose the language of the interface. You can change it later in Settings → Appearance.<br />选择界面语言，之后可以在「设置 → 外观」里随时切换。</p>
-          <div className="grid grid-cols-2 gap-3" role="group" aria-label="Language / 语言">
+          <p className="text-ui text-fg-muted">{t('选择界面语言，之后可以在「设置 → 外观」里随时切换。')}</p>
+          <div className="grid grid-cols-3 gap-3" role="group" aria-label={t('界面语言')}>
             {LANGUAGES.map(({ id, label }) => (
-              <button key={id} type="button" aria-pressed={language === id} onClick={() => onLanguageChange(id)}
+              <button key={id} type="button" lang={id} aria-pressed={language === id} onClick={() => onLanguageChange(id)}
                 className={`py-3 text-base ${language === id ? 'option-active' : 'option'}`}>
                 {label}
               </button>

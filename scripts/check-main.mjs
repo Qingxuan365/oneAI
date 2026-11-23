@@ -69,15 +69,34 @@ try {
         fs.mkdirSync(path.join(fixtureRoot, 'userData'), { recursive: true });
 
         import { PtyManager, PtyOutputBatcher } from './src/main/pty-manager';
-        import { computeSessionUsage, parseAgyUsage, parseAgyUsageGroups, parseTomlStrings } from './src/main/quota-service';
+        import { computeSessionUsage, parseAgyUsage, parseAgyUsageGroups, parseTomlStrings, readCodexRateWindows } from './src/main/quota-service';
         import { estimateModelCostUsd } from './src/main/model-pricing';
         import { buildDashboardStats } from './src/main/usage-stats';
+        import { computeDashboardView } from './src/renderer/src/dashboardMetrics';
+        import { startOutcome } from './src/renderer/src/taskStatus';
+        import { detectLanguage, isLanguage, translate } from './src/shared/i18n';
+        import { getLanguage, setLanguage, t } from './src/main/i18n';
         import { isLocalOrLinkLocalHost, listTracks, parsePlaylist, readBodyTextCapped, resolveAllowedTrack, serveMusicTrack } from './src/main/music-library';
         import { readTaskSummaries } from './src/main/task-summary';
         import { allowPreviewFilePaths, readPreview, resolveInside } from './src/main/file-preview';
         import { listProjectDirectory } from './src/main/project-tree';
         import { setBoundedMap } from './src/main/fs-utils';
         import { folderKey, quoteTerminalPath, extractPathMatches } from './src/shared/paths';
+
+        test('Traditional Chinese is detected, translated, and accepted by main-process i18n', () => {
+          for (const locale of ['zh-TW', 'zh-HK', 'zh_MO', 'zh-Hant', 'zh-Hant-CN']) assert.equal(detectLanguage(locale), 'zh-TW');
+          for (const locale of ['zh', 'zh-CN', 'zh-SG', 'zh-Hans-TW']) assert.equal(detectLanguage(locale), 'zh-CN');
+          assert.equal(detectLanguage('en-US'), 'en');
+          assert.equal(detectLanguage(undefined), 'en');
+          assert.equal(isLanguage('zh-TW'), true);
+          assert.equal(isLanguage('zh-HK'), false);
+          assert.equal(translate('zh-TW', '工作目录不存在或不是文件夹：{dir}', { dir: 'D:/我的项目' }), '工作目錄不存在或不是資料夾：D:/我的项目');
+          assert.equal(translate('zh-TW', 'constructor'), 'constructor');
+          setLanguage('zh-TW');
+          assert.equal(getLanguage(), 'zh-TW');
+          assert.equal(t('选择工作目录'), '選擇工作目錄');
+          setLanguage('zh-CN');
+        });
 
         test('PtyOutputBatcher emits monotonic seq and preserves surrogate pairs', async () => {
           const events: Array<{ id: string; data: string; seq: number }> = [];
@@ -159,6 +178,7 @@ try {
             account: { cliId: 'codex', configDir: accDir1, env: { CUSTOM_VAR: 'v1' } },
           });
           assert.equal(createRes.success, true);
+          assert.equal(createRes.reused, undefined);
           assert.equal(spawned.length, 1);
           assert.equal(spawned[0].file, 'powershell.exe');
           assert.match(spawned[0].args.at(-1)!, /& "C:\\\\Program Files\\\\Tool\\\\cli\.cmd" --flag/);
@@ -171,6 +191,15 @@ try {
           assert.equal(liveSnap.buffer, 'boot-line\\r\\n');
           assert.equal(liveSnap.seq, 'boot-line\\r\\n'.length);
           assert.equal(liveSnap.exitCode, undefined);
+
+          const selected = mgr.createSession({ id: 'task-1' });
+          assert.equal(selected.reused, true);
+          assert.equal(selected.buffer, liveSnap.buffer);
+          assert.equal(spawned.length, 1);
+          assert.equal(startOutcome(selected, 'running').status, 'running');
+          assert.equal(startOutcome(selected, 'waiting').status, 'waiting');
+          assert.equal(startOutcome(createRes, 'running').status, 'idle');
+          assert.equal(startOutcome(missingRestart, 'waiting').status, 'error');
 
           // Fast exit records exitCode in snapshot
           spawned[0].emitExit(17);
@@ -318,6 +347,11 @@ try {
           const codexLines = [
             JSON.stringify({ type: 'session_meta', payload: { id: 'codex-archived-123', cwd: projectDir, source: 'cli', timestamp: oldTime.toISOString() } }),
             JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'Resume archived Codex work' } }),
+            JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.4', effort: 'medium' } }),
+            JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: {
+              total_token_usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 15, total_tokens: 115 },
+              last_token_usage: { input_tokens: 75 }, model_context_window: 100,
+            } } }),
           ].join('\\n') + '\\n';
           await fsp.writeFile(archivedRollout, codexLines);
           await fsp.utimes(archivedRollout, oldTime, oldTime);
@@ -342,12 +376,17 @@ try {
 
           const now = Date.now();
           const summaries = await readTaskSummaries([
-            { id: 't-codex-resumed', cliId: 'codex', cwd: projectDir, createdAt: now, historyId: 'codex-archived-123', configDir: codexHome },
+            { id: 't-codex-resumed', cliId: 'codex', cwd: projectDir, createdAt: now, historyId: 'codex-archived-123', configDir: codexHome, includeUsage: true },
+            { id: 't-codex-other', cliId: 'codex', cwd: projectDir, createdAt: now, configDir: codexHome, includeUsage: true },
             { id: 't-kimi-resumed', cliId: 'kimi', cwd: projectDir, createdAt: now, historyId: 'kimi-sess-old', configDir: kimiHome },
             { id: 't-kimi-fresh', cliId: 'kimi', cwd: projectDir, createdAt: now, configDir: kimiHome },
           ]);
 
           assert.equal(summaries['t-codex-resumed']?.text, 'Resume archived Codex work');
+          assert.equal(summaries['t-codex-resumed']?.usage?.model, 'gpt-5.4');
+          assert.equal(summaries['t-codex-resumed']?.usage?.ctxPercent, 75);
+          assert.equal(summaries['t-codex-resumed']?.usage?.tokenInput, 20);
+          assert.equal(summaries['t-codex-other']?.usage, undefined);
           assert.equal(summaries['t-kimi-resumed']?.text, 'Resume old Kimi session');
           assert.equal(summaries['t-kimi-fresh']?.text, null);
         });
@@ -514,9 +553,10 @@ try {
           assert.equal(argonOrch.five.pct, -1);
           assert.equal(argonOrch.seven.pct, 100);
 
-          // Expired reset timestamp resets percentage to 100
+          // An expired snapshot does not establish the new window's balance.
           const expiredRaw = 'Gemini Models\\tFive Hour Limit Remaining\\t12%\\t2026-11-21T13:59:00Z';
-          assert.equal(parseAgyUsage(expiredRaw, 'Orchestrator (Neon)', now).five.pct, 100);
+          assert.equal(parseAgyUsage(expiredRaw, 'Orchestrator (Neon)', now).five.pct, -1);
+          assert.equal(parseAgyUsage(raw, 'Auto', now).seven.pct, -1);
 
           // computeSessionUsage breakdown + zero preservation
           const full = computeSessionUsage({
@@ -548,6 +588,21 @@ try {
           assert.equal(agyUsage.cacheHitPercent, 95);
         });
 
+        test('Codex quota uses window duration and keeps missing or expired balances unknown', () => {
+          const now = Date.parse('2026-11-21T14:00:00Z');
+          const future = now / 1000 + 3600;
+          const data = readCodexRateWindows({
+            primary: { window_minutes: 10_080, used_percent: 61, resets_at: future },
+            secondary: { window_minutes: 300, used_percent: 7, resets_at: future },
+          }, now);
+          assert.equal(data.fiveHourPercent, 93);
+          assert.equal(data.sevenDayPercent, 39);
+          assert.equal(data.fiveHourResetsIn, '1h 0m');
+          assert.equal(readCodexRateWindows({ primary: { used_percent: 12 } }, now).fiveHourPercent, -1);
+          assert.equal(readCodexRateWindows({ secondary: { window_minutes: 300, used_percent: 12, resets_at: now / 1000 } }, now).fiveHourPercent, -1);
+          assert.equal(readCodexRateWindows({ primary: { window_minutes: 300, used_percent: 0 } }, now).fiveHourPercent, 100);
+        });
+
         test('model-pricing, parseAgyUsageGroups and buildDashboardStats aggregate multi-day metrics accurately', () => {
           // Public API pricing vs internal/unpriced models
           const sonnetCost = estimateModelCostUsd('Sonnet 4.6', { input: 1_000_000, output: 100_000, cacheRead: 2_000_000, cacheWrite: 0 });
@@ -570,7 +625,7 @@ try {
           const groups = parseAgyUsageGroups(rawGroups, now);
           assert.deepEqual(groups.map((g) => g.group), ['Gemini Models', 'Claude and GPT models', 'Gemini 4 Argon']);
           assert.equal(groups[0].five.pct, 83);
-          assert.equal(groups[1].five.pct, 100);
+          assert.equal(groups[1].five.pct, -1);
           assert.equal(groups[1].seven.pct, 48);
           assert.equal(groups[2].five.pct, -1);
           assert.equal(groups[2].seven.pct, 100);
@@ -623,6 +678,55 @@ try {
           assert.ok(agyRec && !agyRec.costPriced && agyRec.costUsd === 0);
           const piRec = stats.records.find((r) => r.model === 'custom-unlisted');
           assert.ok(piRec && piRec.costPriced && Math.abs(piRec.costUsd - 0.12) < 1e-6);
+        });
+
+        test('Dashboard deduplicates Codex copies and prices Pi requests individually', () => {
+          const now = new Date(2026, 10, 23, 12).getTime();
+          const entry = { ts: now, model: 'gpt-5.4', input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 };
+          const account = { accountId: 'default', accountName: 'Default', fallbackModel: '' };
+          const codex = { ...account, cliId: 'codex' as const, sessionId: 'shared-id', entries: [entry] };
+          const unknown = { ...entry, model: 'custom-unlisted' };
+          const stats = buildDashboardStats([
+            codex,
+            { ...codex, entries: [entry, { ...entry, ts: now - 1000 }] },
+            { ...codex, accountId: 'other' },
+            { ...account, cliId: 'pi', entries: [
+              entry, { ...entry, costUsd: 1 },
+              unknown, { ...unknown, costUsd: 0 },
+            ] },
+          ], now);
+          assert.equal(stats.sessions.filter((s) => s.cliId === 'codex').length, 2);
+          assert.equal(stats.records[0].requests, 2);
+          const pi = computeDashboardView(stats, { range: 'today', cliId: 'pi', projectKey: 'all', accountKey: 'all' }, now);
+          assert.equal(pi.estimatedCostUsd, 3.5);
+          assert.equal(pi.priceCoveragePct, 75);
+        });
+
+        test('Dashboard scopes coverage to matching records and keeps the full monthly trend', () => {
+          const now = new Date(2026, 10, 23, 12).getTime();
+          const entry = { ts: now, model: 'model-a', input: 10, output: 0, cacheRead: 0, cacheWrite: 0 };
+          const account = { accountId: 'default', accountName: 'Default', fallbackModel: '' };
+          const stats = buildDashboardStats([
+            { ...account, cliId: 'claude', entries: [{ ...entry, ts: new Date(2020, 0, 1, 12).getTime() }] },
+            { ...account, cliId: 'codex', entries: [
+              entry,
+              { ...entry, ts: new Date(2026, 10, 15, 12).getTime() },
+              { ...entry, model: 'model-b', input: 20 },
+            ] },
+          ], now);
+          const filter = { range: 'all' as const, cliId: 'all' as const, accountKey: 'all', projectKey: 'all' };
+          const all = computeDashboardView(stats, filter, now);
+          assert.equal(all.trend.buckets.at(-1)?.key, '2026-11');
+          assert.equal(all.trend.buckets.reduce((sum, b) => sum + b.tokens, 0), all.totalTokens);
+          const model = all.breakdowns.model.find((m) => m.key === 'codex:model-a');
+          assert.ok(model?.filterPatch);
+          const modelView = computeDashboardView(stats, { ...filter, ...model.filterPatch }, now);
+          assert.equal(modelView.totalTokens, 20);
+          assert.equal(modelView.modelRows.length, 1);
+          assert.equal(modelView.heatmap.weeks.flat().find((cell) => cell.date === '2026-11-14')?.status, 'missing');
+          const week = computeDashboardView(stats, { ...filter, range: '7d', cliId: 'codex' }, now);
+          assert.equal(week.comparison.prevTokens, 10);
+          assert.equal(week.comparison.deltaPct, null);
         });
       `,
     },

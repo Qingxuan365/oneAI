@@ -182,6 +182,9 @@ export function migrateWorkspaces(input: {
   return { tasks, folders, activeTaskId, lastFolder, extraClis };
 }
 
+export const historySessionKey = (cliId: string, accountId: string | undefined, sessionId: string) =>
+  `${cliId}:${accountId ?? 'default'}:${sessionId}`;
+
 /** 历史会话按文件夹归类为「最近任务」：排除已在侧栏显示的文件夹，按最近使用排序并截断 */
 export function groupRecent(history: HistoryEntry[], excludeKeys: ReadonlySet<string>, folderLimit = 8, perFolder = 5): RecentFolder[] {
   const byFolder = new Map<string, HistoryEntry[]>();

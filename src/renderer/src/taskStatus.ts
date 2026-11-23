@@ -1,4 +1,5 @@
-import { TaskStatus } from './types';
+import { TaskSession, TaskStatus } from './types';
+import type { SessionCreateResult } from '../../shared/types';
 import { t } from './i18n';
 
 // 任务状态的统一文案与圆点样式（侧栏任务行使用）。
@@ -20,6 +21,12 @@ export const hasVisibleOutput = (data: string) => data.replace(ANSI_SEQUENCE, ''
 
 // 进程仍存活的状态（启动中、运行中、空闲、等待输入）
 export const isTaskAlive = (status: TaskStatus) => status === 'starting' || status === 'running' || status === 'idle' || status === 'waiting';
+
+export function startOutcome(result?: SessionCreateResult, currentStatus?: TaskStatus): Pick<TaskSession, 'status' | 'errorMessage'> {
+  if (!result?.success) return { status: 'error', errorMessage: result?.error || t('终端启动失败') };
+  const status = result.reused && (currentStatus === 'running' || currentStatus === 'waiting') ? currentStatus : 'idle';
+  return { status, errorMessage: undefined };
+}
 
 // 键盘输入或终端尺寸变化后这段时间内的输出视为回显 / 重绘（你打的字、CLI 整屏重画），不算任务在干活，
 // 避免在任务里打几个字或拖动窗口就变成「运行中」、4 秒后又转「等待输入」并响提示音。

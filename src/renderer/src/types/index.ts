@@ -13,8 +13,10 @@ import type {
   QuotaData,
   QuotaGroupSnapshot,
   SessionAccount,
+  SessionCreateResult,
   SessionSnapshot,
   SystemStats,
+  TaskSummary,
   ThemeId,
   UsageAccountInfo,
   UsageAccountRef,
@@ -24,6 +26,7 @@ import type {
   UsageStats,
 } from '../../../shared/types';
 import { THEME_IDS } from '../../../shared/types';
+import type { Language } from '../../../shared/i18n';
 
 export { THEME_IDS };
 export type {
@@ -43,6 +46,7 @@ export type {
   SessionAccount,
   SessionSnapshot,
   SystemStats,
+  TaskSummary,
   ThemeId,
   UsageAccountInfo,
   UsageAccountRef,
@@ -106,7 +110,7 @@ export interface FolderEntry {
 }
 
 export interface AppSettings {
-  language: 'zh-CN' | 'en'; // 界面语言：首次启动按系统语言预选，在首次引导里确认，之后可在设置 → 外观 切换
+  language: Language; // 首次启动按系统语言预选，之后可在设置 → 外观切换
   onboardingDone: boolean; // 首次引导（选择语言、认识各入口）是否已完成；完成后不再弹出
   theme: 'system' | ThemeId; // 应用主题，默认跟随系统（仅在 light / dark 间切换）
   voiceReminderEnabled: boolean; // 工作满提醒时长时是否语音播报
@@ -170,7 +174,7 @@ export interface ElectronTerminalAPI {
   getHomeDir?: () => string;
   /** 按 PATH 检测已安装的 CLI；custom 为用户自定义 CLI，检测到的会一并返回（name 为空） */
   detectClis: (custom?: Array<{ id: string; command: string }>) => Promise<Array<{ id: string; name: string; command: string }>>;
-  createSession: (options: { id: string; command?: string; cwd?: string; shell?: boolean; account?: SessionAccount; cols?: number; rows?: number }) => Promise<{ success: boolean; buffer?: string; error?: string }>;
+  createSession: (options: { id: string; command?: string; cwd?: string; shell?: boolean; account?: SessionAccount; cols?: number; rows?: number }) => Promise<SessionCreateResult>;
   getSessionBuffer: (id: string) => Promise<string>;
   getSessionSnapshot?: (id: string) => Promise<SessionSnapshot>;
   /** 会话不存在（已退出或尚未启动）时返回 false */
@@ -199,7 +203,7 @@ export interface ElectronTerminalAPI {
   /** 窗口控件覆盖层的颜色与高度，随主题与界面缩放同步 */
   setTitleBarOverlay?: (opts: { color: string; symbolColor: string; height: number; backgroundColor?: string }) => void;
   /** 读取任务对应会话里最近一条用户消息（仅 Claude / Codex / Kimi）；text 为 null 表示还没有消息 */
-  getTaskSummaries?: (tasks: Array<{ id: string; cliId: string; cwd: string; createdAt: number; historyId?: string; configDir?: string }>) => Promise<Record<string, { text: string | null }>>;
+  getTaskSummaries?: (tasks: Array<{ id: string; cliId: string; cwd: string; createdAt: number; historyId?: string; configDir?: string; includeUsage?: boolean }>) => Promise<Record<string, TaskSummary>>;
   /** 读取各文件夹所在 Git 仓库的当前分支（只读 .git/HEAD）；不在仓库内为 null */
   getGitBranches?: (paths: string[]) => Promise<Record<string, string | null>>;
   /** 在该账号的环境下运行 CLI 的状态命令，判断是否已登录 */

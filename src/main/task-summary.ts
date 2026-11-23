@@ -5,11 +5,8 @@ import { ipcMain } from 'electron';
 import { resolveConfigDir } from './account-env';
 import { normalizePathKey, readSlice, readZstHead, readZstTail, setBoundedMap } from './fs-utils';
 import { folderKey } from '../shared/paths';
-
-/** 侧栏任务行第二行的数据：该任务会话里最近一条用户消息；text 为 null 表示会话里还没有用户消息（新会话） */
-export interface TaskSummary {
-  text: string | null;
-}
+import type { TaskSummary } from '../shared/types';
+import { quotaService } from './quota-service';
 
 interface SummaryTask {
   id: string;
@@ -18,12 +15,15 @@ interface SummaryTask {
   createdAt: number;
   historyId?: string;
   configDir?: string;       // 多账号：该账号的配置目录（CLAUDE_CONFIG_DIR / CODEX_HOME / KIMI_CODE_HOME）
+  includeUsage?: boolean;
 }
 
 interface SessionInfo {
   id: string;
   birth: number;            // 会话开始时间，用来判断它属于哪个任务
   lastPrompt: string | null;
+  file?: string;
+  stat?: fs.Stats;
 }
 
 const MAX_TASKS = 100;
@@ -191,7 +191,7 @@ async function codexSessionsByFolder(
     if (!targetFolders.has(key)) continue;
     const lastPrompt = await cached(file, stat, () => lastCodexPrompt(file).catch(() => null));
     const list = byFolder.get(key) ?? [];
-    list.push({ id: meta.id, birth: meta.birth, lastPrompt });
+    list.push({ id: meta.id, birth: meta.birth, lastPrompt, file, stat });
     byFolder.set(key, list);
     foundIds.add(meta.id);
   }
@@ -221,7 +221,7 @@ async function codexSessionsByFolder(
       if (!targetFolders.has(key)) continue;
       const lastPrompt = await cached(file, stat, () => lastCodexPrompt(file).catch(() => null));
       const list = byFolder.get(key) ?? [];
-      list.push({ id: meta.id, birth: meta.birth, lastPrompt });
+      list.push({ id: meta.id, birth: meta.birth, lastPrompt, file, stat });
       byFolder.set(key, list);
       foundIds.add(meta.id);
     }
@@ -315,11 +315,12 @@ function parseTasks(raw: unknown): SummaryTask[] {
   const tasks: SummaryTask[] = [];
   for (const item of raw.slice(0, MAX_TASKS)) {
     if (typeof item !== 'object' || item === null) continue;
-    const { id, cliId, cwd, createdAt, historyId, configDir } = item as Record<string, unknown>;
+    const { id, cliId, cwd, createdAt, historyId, configDir, includeUsage } = item as Record<string, unknown>;
     if (typeof id !== 'string' || !id || (cliId !== 'claude' && cliId !== 'codex' && cliId !== 'kimi')) continue;
     if (typeof cwd !== 'string' || !path.isAbsolute(cwd) || typeof createdAt !== 'number') continue;
     tasks.push({
       id, cliId, cwd, createdAt,
+      includeUsage: includeUsage === true,
       historyId: typeof historyId === 'string' && historyId ? historyId : undefined,
       configDir: typeof configDir === 'string' && configDir ? (resolveConfigDir(configDir) ?? undefined) : undefined,
     });
@@ -356,7 +357,10 @@ export async function readTaskSummaries(raw: unknown): Promise<Record<string, Ta
         let sessions: SessionInfo[] = [];
         try { sessions = await claudeSessions(home, tasks[0].cwd); } catch {}
         const assigned = assignSessions(tasks, sessions);
-        for (const task of tasks) result[task.id] = { text: assigned.get(task.id)?.lastPrompt ?? null };
+        for (const task of tasks) {
+          const session = assigned.get(task.id);
+          result[task.id] = { text: session?.lastPrompt ?? null, sessionId: canUseSession(task, tasks, sessions, session) ? session?.id : undefined };
+        }
       }));
       return;
     }
@@ -371,11 +375,26 @@ export async function readTaskSummaries(raw: unknown): Promise<Record<string, Ta
         : await kimiSessionsByFolder(home, targetFolders, earliest, wantedHistoryIds);
     } catch { /* 读取失败时按「没有会话」处理 */ }
     for (const [fKey, tasks] of folders) {
-      const assigned = assignSessions(tasks, grouped.get(fKey) ?? []);
-      for (const task of tasks) result[task.id] = { text: assigned.get(task.id)?.lastPrompt ?? null };
+      const sessions = grouped.get(fKey) ?? [];
+      const assigned = assignSessions(tasks, sessions);
+      for (const task of tasks) {
+        const session = assigned.get(task.id);
+        const confident = canUseSession(task, tasks, sessions, session);
+        const usage = task.includeUsage && confident && session?.file && session.stat
+          ? await quotaService.readCodexTaskUsage(session.file, session.stat)
+          : undefined;
+        result[task.id] = { text: session?.lastPrompt ?? null, sessionId: session?.id, usage };
+      }
     }
   }));
   return result;
+}
+
+function canUseSession(task: SummaryTask, tasks: SummaryTask[], sessions: SessionInfo[], session?: SessionInfo): boolean {
+  if (task.historyId) return session?.id === task.historyId;
+  // Keep the sidebar heuristic, but hide task usage if several tasks or logs could match.
+  return tasks.filter((item) => !item.historyId).length === 1
+    && new Set(sessions.filter((item) => item.birth >= task.createdAt - SKEW_MS).map((item) => item.id)).size === 1;
 }
 
 export function setupTaskSummary(): void {

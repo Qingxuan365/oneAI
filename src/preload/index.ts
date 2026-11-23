@@ -137,7 +137,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkAccountLogin: (account: SessionAccount) => ipcRenderer.invoke('account:login-status', account),
   setTitleBarOverlay: (opts: { color: string; symbolColor: string; height: number; backgroundColor?: string }) => ipcRenderer.send('window:set-title-bar-overlay', opts),
   getGitBranches: (paths: string[]) => ipcRenderer.invoke('git:branches', paths),
-  getTaskSummaries: (tasks: Array<{ id: string; cliId: string; cwd: string; createdAt: number; historyId?: string; configDir?: string }>) => ipcRenderer.invoke('task:summaries', tasks),
+  getTaskSummaries: (tasks: Array<{ id: string; cliId: string; cwd: string; createdAt: number; historyId?: string; configDir?: string; includeUsage?: boolean }>) => ipcRenderer.invoke('task:summaries', tasks),
 
   onQuotaUpdate: (callback: (quotas: Record<string, QuotaData>) => void) => {
     const subscription = (_event: Electron.IpcRendererEvent, value: Record<string, QuotaData>) => callback(value);

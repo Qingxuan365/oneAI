@@ -42,21 +42,22 @@ function toChineseDay(n: number): string {
   return '三十';
 }
 
-let lunarFormatter: Intl.DateTimeFormat | null | false = null;
+let lunarFormatter: Intl.DateTimeFormat | undefined;
+let lunarLocale = '';
 let cachedLunarKey = '';
 let cachedLunarValue = '';
 
-function getLunarStr(now: Date): string {
-  const dayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+function getLunarStr(now: Date, locale: string): string {
+  const dayKey = `${locale}:${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
   if (dayKey === cachedLunarKey) return cachedLunarValue;
   try {
-    if (lunarFormatter === null) {
-      lunarFormatter = new Intl.DateTimeFormat('zh-CN-u-ca-chinese', {
+    if (!lunarFormatter || lunarLocale !== locale) {
+      lunarFormatter = new Intl.DateTimeFormat(`${locale}-u-ca-chinese`, {
         month: 'long',
         day: 'numeric',
       });
+      lunarLocale = locale;
     }
-    if (!lunarFormatter) return '';
     const parts = lunarFormatter.formatToParts(now);
     const month = parts.find((p) => p.type === 'month')?.value ?? '';
     const dayNum = parseInt(parts.find((p) => p.type === 'day')?.value ?? '0', 10);
@@ -64,7 +65,8 @@ function getLunarStr(now: Date): string {
     cachedLunarValue = `${month}${toChineseDay(dayNum)}日`;
     return cachedLunarValue;
   } catch {
-    lunarFormatter = false;
+    cachedLunarKey = dayKey;
+    cachedLunarValue = '';
     return '';
   }
 }
@@ -111,8 +113,8 @@ function getFormattedTime(showDate: boolean, offsetHours: number): string {
   const M = String(now.getMonth() + 1).padStart(2, '0');
   const D = String(now.getDate()).padStart(2, '0');
   const w = weekdays[now.getDay()];
-  // 农历只在简体中文界面显示
-  const lunar = getLanguage() === 'zh-CN' ? getLunarStr(now) : '';
+  const language = getLanguage();
+  const lunar = language === 'en' ? '' : getLunarStr(now, language);
   const lunarPart = lunar ? `（${lunar}）` : '';
   return `${Y}-${M}-${D}${lunarPart} ${h}:${m}:${s} ${t('（{weekday}）', { weekday: w })}`;
 }

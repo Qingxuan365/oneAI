@@ -128,6 +128,7 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
   onRefreshQuotas,
   onSelectTask,
   onBackToTerminal,
+  language,
 }) => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(false);
@@ -175,7 +176,7 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
         if (!disposed) setLoading(false);
       });
     return () => { disposed = true; };
-  }, [isActive, refreshSeq, accountsKey]);
+  }, [isActive, refreshSeq, accountsKey, language]);
 
   const handleRefreshAll = useCallback(() => {
     setRefreshSeq((n) => n + 1);
@@ -199,16 +200,17 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
     [stats, filter, unknownProjectLabel],
   );
 
-  const hasActiveFilters = filter.cliId !== 'all' || filter.projectKey !== 'all' || filter.accountKey !== 'all';
-  const clearFilters = () => setFilter((prev) => ({ ...prev, cliId: 'all', projectKey: 'all', accountKey: 'all' }));
+  const hasActiveFilters = filter.cliId !== 'all' || filter.projectKey !== 'all' || filter.accountKey !== 'all' || Boolean(filter.modelKey);
+  const clearFilters = () => setFilter((prev) => ({ ...prev, cliId: 'all', projectKey: 'all', accountKey: 'all', modelKey: undefined }));
 
-  const toggleFilter = (patch?: Partial<Pick<DashboardFilter, 'cliId' | 'projectKey' | 'accountKey'>>) => {
+  const toggleFilter = (patch?: Partial<Pick<DashboardFilter, 'cliId' | 'projectKey' | 'accountKey' | 'modelKey'>>) => {
     if (!patch) return;
     setFilter((prev) => ({
       ...prev,
       ...(patch.cliId !== undefined ? { cliId: prev.cliId === patch.cliId ? 'all' : patch.cliId } : {}),
       ...(patch.projectKey !== undefined ? { projectKey: prev.projectKey === patch.projectKey ? 'all' : patch.projectKey } : {}),
       ...(patch.accountKey !== undefined ? { accountKey: prev.accountKey === patch.accountKey ? 'all' : patch.accountKey } : {}),
+      ...(patch.modelKey !== undefined ? { modelKey: prev.modelKey === patch.modelKey ? undefined : patch.modelKey } : {}),
     }));
   };
 
@@ -254,7 +256,7 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
       }
     }
     return items;
-  }, [quotas, visibleClis, accounts]);
+  }, [quotas, visibleClis, accounts, language]);
 
   const tokenKpiLabel = filter.range === 'today'
     ? t('今日 Token')
@@ -394,6 +396,15 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
                     className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-2xs text-accent hover:bg-accent/20"
                   >
                     {accountOptions.find((a) => a.value === filter.accountKey)?.label ?? filter.accountKey} ×
+                  </button>
+                )}
+                {filter.modelKey && (
+                  <button
+                    type="button"
+                    onClick={() => setFilter((p) => ({ ...p, modelKey: undefined }))}
+                    className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-2xs text-accent hover:bg-accent/20"
+                  >
+                    {view.breakdowns.model[0]?.label ?? filter.modelKey.slice(filter.modelKey.indexOf(':') + 1)} ×
                   </button>
                 )}
                 <button
@@ -708,7 +719,7 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
 
             {/* 第 3 行：趋势柱状图 + Top 5 用量分布 */}
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-              <section aria-label={trendTitle} data-dashboard-trend className={`${cardClass} xl:col-span-7`}>
+              <section aria-label={trendTitle} data-dashboard-trend className={`${cardClass} min-w-0 xl:col-span-7`}>
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <h2 className="text-base font-semibold text-fg">{trendTitle}</h2>
@@ -775,7 +786,7 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
                   </div>
 
                   {/* 柱状图区 */}
-                  <div className="flex min-w-0 flex-1 items-end gap-1" onMouseLeave={() => setHoveredBucketKey(null)}>
+                  <div className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto" onMouseLeave={() => setHoveredBucketKey(null)}>
                     {view.trend.buckets.map((bucket, idx) => {
                       const val = trendMetricValue(bucket);
                       const stackSum = CLI_ORDER.reduce((sum, cliId) => sum + trendMetricValue(bucket.byCli[cliId] ?? { tokens: 0, cost: 0, sessions: 0 }), 0);
@@ -795,7 +806,7 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
                           key={bucket.key}
                           onMouseEnter={() => setHoveredBucketKey(bucket.key)}
                           title={`${bucket.key}: ${formatTrendValue(displayVal)}${tipParts.length ? ` (${tipParts.join(' · ')})` : ''}`}
-                          className="group flex min-w-0 flex-1 flex-col items-center"
+                          className={`group flex flex-1 flex-col items-center ${filter.range === 'all' ? 'min-w-2' : 'min-w-0'}`}
                         >
                           <div className="flex h-[9.75rem] w-full items-end justify-center rounded-sm px-px transition-colors group-hover:bg-hover/40">
                             {trendGrouping === 'total' ? (
@@ -866,7 +877,8 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
                       const isFiltered = Boolean(
                         (item.filterPatch?.cliId && filter.cliId === item.filterPatch.cliId)
                         || (item.filterPatch?.projectKey && filter.projectKey === item.filterPatch.projectKey)
-                        || (item.filterPatch?.accountKey && filter.accountKey === item.filterPatch.accountKey),
+                        || (item.filterPatch?.accountKey && filter.accountKey === item.filterPatch.accountKey)
+                        || (item.filterPatch?.modelKey && filter.modelKey === item.filterPatch.modelKey),
                       );
                       const barCls = item.cliId ? CLI_BAR_CLASSES[item.cliId] : 'bg-accent';
                       return (

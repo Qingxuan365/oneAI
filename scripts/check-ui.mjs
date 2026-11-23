@@ -25,7 +25,7 @@ await build({
     import { SettingsModal } from './src/renderer/src/components/SettingsModal';
     import { OnboardingModal } from './src/renderer/src/components/OnboardingModal';
     import { THEME_IDS } from './src/shared/types';
-    import { setLanguage, t } from './src/renderer/src/i18n';
+    import { dateLocale, getLanguage, setLanguage, t } from './src/renderer/src/i18n';
     window.ALL_THEMES = [...THEME_IDS];
     import { Terminal } from '@xterm/xterm';
     import { installDropGuard } from './src/renderer/src/dropGuard';
@@ -33,11 +33,12 @@ await build({
     window.isUserEcho = isUserEcho;
     installDropGuard();
     window.electronAPI = { getHomeDir: () => 'C:/Users/tester', onWindowMaximizedChange: callback => { window.setMaximized = callback; return () => {}; }, isWindowMaximized: async () => false,
+      setLanguage: async language => { window.mainLanguage = language; },
       onSystemStats: callback => { window.pushStats = callback; return () => {}; },
       // 路径里带 logged 的账号视为已登录；账号相关桩不使用反斜杠，避免外层模板字符串转义
       checkAccountLogin: async account => ({ loggedIn: account.configDir.indexOf('logged') >= 0, detail: account.configDir.indexOf('logged') >= 0 ? 'me@example.com' : undefined }),
       selectWorkspaceDirectory: async () => 'C:/picked/dir',
-      listSessionHistory: async (accounts) => { const h = (id, cliId, title, cwd, ago, extra = {}) => ({ id, cliId, title, cwd, updatedAt: Date.now() - ago, command: 'x', ...extra }); const base = [h('h1', 'codex', 'Today one', 'D:/GitHub/OneAI', 60000), h('h2', 'claude', 'Yesterday one', 'D:/plan', 86400000 + 3600000 * 2), h('h3', 'kimi', 'Old one', 'D:/old', 10 * 86400000)]; return Array.isArray(accounts) && accounts.length ? [h('h-acc', 'codex', 'Account session', 'D:/acc', 30000, { accountId: accounts[0].id, accountName: accounts[0].name }), ...base] : base; },
+      listSessionHistory: async (accounts) => { const h = (id, cliId, title, cwd, ago, extra = {}) => ({ id, cliId, title, cwd, updatedAt: Date.now() - ago, command: 'x', ...extra }); const base = [h('h1', 'codex', 'Today one', 'D:/GitHub/OneAI', 60000), h('h2', 'claude', 'Yesterday one', 'D:/plan', 86400000 + 3600000 * 2), h('h2', 'kimi', 'Old one', 'D:/old', 10 * 86400000)]; return Array.isArray(accounts) && accounts.length ? [h('h-acc', 'codex', 'Account session', 'D:/acc', 30000, { accountId: accounts[0].id, accountName: accounts[0].name }), ...base] : base; },
       getGitBranches: async (dirs) => Object.fromEntries(dirs.map((d) => [d, d === 'D:/GitHub/OneAI' ? 'main' : null])),
       getUsageStats: async () => window.usageFixture(window.usageEmpty),
       getDashboardStats: async () => window.dashboardFixture(window.dashboardEmpty),
@@ -125,7 +126,7 @@ await build({
       if (!empty && window.usageMany) for (let i = 0; i < 17; i++) rows.push({ cliId: 'claude', ...D, model: 'Model ' + i, requests: 5, sessions: 1, input: 1000, output: 2000, cacheRead: 3000, cacheWrite: 0 });
       return { generatedAt: Date.now(), weekStart: monday.getTime(), accounts, rows, days };
     };
-    // 顶栏系统资源的最宽取值：CPU 100%、内存 31.9 GB、上行 999K/s、下行 99.9M/s
+    // 顶栏系统资源的宽值：CPU 100%、内存 31.9 GiB、上行 999 KiB/s、下行 99.9 MiB/s
     window.fakeStats = { cpuPercent: 100, memUsedBytes: 31.9 * 1024 ** 3, memTotalBytes: 32 * 1024 ** 3, netUpBytesPerSec: 999 * 1024, netDownBytesPerSec: 99.9 * 1024 ** 2 };
     const root = createRoot(document.getElementById('root'));
     window.events = [];
@@ -143,7 +144,7 @@ await build({
         <Sidebar isCollapsed={false} clis={CLIS} folders={[{ path: task.cwd, isExpanded: true }]} tasks={[task]} activeTaskId={task.id}
           onAddFolder={() => {}} onSelectTask={() => window.events.push('select')} onToggleFolder={() => window.events.push('toggle')}
           onReorderFolder={() => {}} onNewTask={() => {}} onCloseTask={() => window.events.push('close')} onRenameTask={(_id, title) => window.events.push('rename:' + title)} />
-        <div className="flex-1 min-w-0"><Topbar isSidebarCollapsed={false} onToggleSidebar={() => {}} currentGroup={group} activeTask={task} accountName={accountName}
+        <div className="flex-1 min-w-0"><Topbar isSidebarCollapsed={false} onToggleSidebar={() => {}} currentGroup={group} activeTask={task} accountName={accountName} language={getLanguage()}
           quota={quota} onRefreshQuota={async () => {}} onOpenSearch={() => window.events.push('search')}
           dateVisible={!window.hideDate} onClearScreen={() => {}} onRestartSession={async () => {}} onExportLogs={async () => ({ success: true })} onOpenHistory={() => {}} onToggleFileTree={() => window.events.push('file-tree')} /></div>
       </div>));
@@ -236,6 +237,7 @@ await build({
       return <OnboardingModal isOpen language={language} onLanguageChange={(l) => { window.events.push('lang:' + l); setLang(l); }} detectedClis={clis} defaultFolder="C:/Users/tester" onAddFolder={() => window.events.push('add-folder')} onFinish={() => window.events.push('onboarding-finish')} />;
     }
     window.setUiLanguage = setLanguage;
+    window.getDateLocale = dateLocale;
     window.drawOnboarding = (clis) => flushSync(() => root.render(<div className="workbench-ui h-screen"><OnboardingHarness clis={clis} /></div>));
     window.drawSettings = () => flushSync(() => root.render(<div className="workbench-ui h-screen"><SettingsHarness /></div>));
     window.drawUsage = () => flushSync(() => root.render(<div className="workbench-ui h-screen"><UsageModal key={String(window.usageEmpty) + String(window.usageMany)} isOpen onClose={() => {}} accounts={[]} /></div>));
@@ -471,7 +473,7 @@ app.whenReady().then(async () => {
       const quota = document.getElementById('oneai-topbar-quota').textContent;
       const sys = document.getElementById('oneai-topbar-sys').textContent;
       return quota.includes('Tokens: in 335k, out 167k, cache 321k') && quota.includes('Cache: 99%') && quota.includes('Cost: $0.24') && quota.includes('5h: 82%') && quota.includes('Model: gpt-5-codex') && quota.includes('Ctx: 62%')
-        && sys.includes('CPU: 100%') && sys.includes('Mem: 31.9 GB') && sys.includes('↑999K/s') && sys.includes('↓99.9M/s');
+        && sys.includes('CPU: 100%') && sys.includes('Mem: 31.9 GiB') && sys.includes('↑999KiB/s') && sys.includes('↓99.9MiB/s');
     })()\`) });
     result.push({ name: 'topbar renders Ctx 0%, token-only Ctx, and legacy total Tokens fallback', ok: await win.webContents.executeJavaScript(\`(() => {
       window.drawQuota({ ctxPercent: 0 });
@@ -481,6 +483,12 @@ app.whenReady().then(async () => {
       window.drawQuota({ tokens: 866_000, tokenInput: undefined, tokenOutput: undefined, tokenCache: undefined, cacheHitPercent: undefined });
       const legacyOk = document.getElementById('oneai-topbar-quota').textContent.includes('Tokens: 866k');
       return zeroOk && tokCtxOk && legacyOk;
+    })()\`) });
+    result.push({ name: 'topbar labels latest-session metrics, estimated context, and unknown quota', ok: await win.webContents.executeJavaScript(\`(() => {
+      window.drawQuota({ cliId: 'pi', sessionScope: 'latest', ctxEstimated: true, fiveHourPercent: -1, fiveHourResetsIn: '--', sevenDayPercent: -1, sevenDayResetsOn: '--' });
+      const bar = document.getElementById('oneai-topbar-quota');
+      return bar.textContent.includes('最近') && bar.textContent.includes('5h: --') && bar.textContent.includes('7d: --')
+        && [...bar.querySelectorAll('[title]')].some(el => el.title.includes('最近活跃会话') && el.title.includes('按最近请求估算'));
     })()\`) });
     await win.webContents.executeJavaScript("window.draw(); document.querySelector('button[aria-current]').focus()");
     await key('F2', 'F2', 113);
@@ -620,14 +628,15 @@ app.whenReady().then(async () => {
       const check = (name, ok) => checks.push({ name, ok: Boolean(ok) });
       const tick = (ms = 200) => new Promise(r => setTimeout(r, ms));
       window.events = [];
-      window.drawHistory(['h2']); await tick(400);
+      window.drawHistory(['claude:default:h2']); await tick(400);
       const groups = [...document.querySelectorAll('[data-history-group]')].map(e => e.textContent);
       check('history is split into today / yesterday / earlier', groups.join('|') === '今天|昨天|更早');
       const rows = [...document.querySelectorAll('[data-history-group] ~ div, [data-history-group] + div')];
       const text = document.body.textContent;
       check('rows show folder name and relative time instead of the full path', text.includes('OneAI') && !text.includes('D:/GitHub/OneAI') && text.includes('分钟前'));
       check('git branch badge only on repositories', document.querySelectorAll('[data-git-branch]').length === 1 && document.querySelector('[data-git-branch]').textContent.includes('main'));
-      check('sessions that already have a task are marked as open', document.querySelectorAll('[data-history-open]').length === 1);
+      const openLabels = [...document.querySelectorAll('[data-history-open]')];
+      check('history only marks the open CLI when two sessions share the same id', openLabels.length === 1 && openLabels[0].closest('button')?.textContent.includes('Yesterday one'));
       const historySearch = document.querySelector('input[placeholder="搜索标题或目录"]');
       historySearch.blur(); await tick(50);
       const borderBlurred = getComputedStyle(historySearch.parentElement).borderColor;
@@ -642,9 +651,9 @@ app.whenReady().then(async () => {
       [...document.querySelectorAll('button')].find(b => b.textContent.includes('删除列表中全部')).click(); await tick();
       check('delete-all confirmation says it deletes the local session files', document.body.textContent.includes('同时删除本机会话文件'));
       window.events = [];
-      window.drawHistory(['acc-alt:h-acc'], window.accountsFixture); await tick(250);
+      window.drawHistory(['codex:acc-alt:h-acc'], window.accountsFixture); await tick(250);
       check('history modal displays configured account sessions with CLI and account label', document.body.textContent.includes('Codex（alt）') && document.body.textContent.includes('Account session'));
-      check('history modal marks account-scoped open sessions via accountId:id', document.querySelectorAll('[data-history-open]').length === 1);
+      check('history modal marks open sessions by CLI, account and id', document.querySelectorAll('[data-history-open]').length === 1);
       [...document.querySelectorAll('button')].find(b => b.textContent.includes('Account session')).click();
       check('resuming an account history session preserves its accountId', window.events.includes('resume:h-acc:acc-alt'));
       return checks;
@@ -923,8 +932,10 @@ app.whenReady().then(async () => {
       try {
       const tabLabels = () => [...document.querySelectorAll('[role="tab"]')].map(t => t.textContent.trim()).join('|');
       [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.includes('外观')).click(); await tick();
-      const langBtn = name => [...document.querySelectorAll('[aria-label="界面语言"] button, [aria-label="Interface language"] button')].find(b => b.textContent.trim() === name);
-      check('appearance page offers both languages with the current one pressed', langBtn('简体中文')?.getAttribute('aria-pressed') === 'true' && langBtn('English')?.getAttribute('aria-pressed') === 'false');
+      const langBtn = name => [...document.querySelectorAll('[aria-label="界面语言"] button, [aria-label="介面語言"] button, [aria-label="Interface language"] button')].find(b => b.textContent.trim() === name);
+      check('appearance page offers all three languages with the current one pressed', langBtn('简体中文')?.getAttribute('aria-pressed') === 'true' && langBtn('繁體中文')?.getAttribute('aria-pressed') === 'false' && langBtn('English')?.getAttribute('aria-pressed') === 'false');
+      langBtn('繁體中文').click(); await tick(150);
+      check('Traditional Chinese updates settings, renderer locale, and the main-process bridge', window.currentSettings().language === 'zh-TW' && tabLabels() === '外觀|時間|終端|帳號|CLI|提醒|快速鍵' && document.documentElement.lang === 'zh-TW' && window.mainLanguage === 'zh-TW' && window.getDateLocale() === 'zh-TW');
       langBtn('English').click(); await tick(300);
       check('choosing English stores the language setting', window.currentSettings().language === 'en');
       check('settings tabs switch to English at once', tabLabels() === 'Appearance|Time|Terminal|Account|CLI|Reminders|Shortcuts');
@@ -961,9 +972,11 @@ app.whenReady().then(async () => {
       window.drawOnboarding([{ id: 'codex', name: 'Codex', icon: 'codex' }, { id: 'claude', name: 'Claude Code', icon: 'claude' }]); await tick();
       const dialog = () => document.querySelector('[role="dialog"]');
       const langButtons = () => [...dialog().querySelectorAll('[role="group"] button')];
-      check('onboarding opens on the language step with both languages', dialog().textContent.includes('Language') && langButtons().map(b => b.textContent.trim()).join('|') === '简体中文|English');
+      check('onboarding opens on the language step with all three languages', dialog().textContent.includes('Interface language') && langButtons().map(b => b.textContent.trim()).join('|') === '简体中文|繁體中文|English');
       check('the preselected language is pressed', langButtons().find(b => b.textContent.trim() === 'English').getAttribute('aria-pressed') === 'true');
       check('onboarding cannot be dismissed with the close button', dialog().querySelector('button[aria-label="Close"]')?.disabled === true);
+      langButtons().find(b => b.lang === 'zh-TW').click(); await tick();
+      check('Traditional Chinese is selectable in onboarding and translates the language prompt', window.events.includes('lang:zh-TW') && dialog().textContent.includes('選擇介面語言') && dialog().textContent.includes('設定 → 外觀'));
       langButtons().find(b => b.textContent.trim() === '简体中文').click(); await tick();
       check('picking a language applies it to the dialog straight away', window.events.includes('lang:zh-CN') && dialog().querySelector('[data-onboarding-next]').textContent.trim() === '下一步');
       dialog().querySelector('[data-onboarding-next]').click(); await tick();
@@ -1001,6 +1014,9 @@ app.whenReady().then(async () => {
       window.setMaximized(true); await tick(400);
       const clock = () => document.getElementById('oneai-topbar-clock').textContent.trim();
       check('maximized top bar shows the date by default', clock().indexOf('-') > 0 && clock().indexOf(':') > 0);
+      window.setUiLanguage('zh-TW'); window.drawQuota(lightQuota); await tick(400);
+      check('Traditional Chinese clock shows the lunar month and localized weekday', clock().includes('月') && clock().includes('週'));
+      window.setUiLanguage('zh-CN');
       window.hideDate = true; window.drawQuota(lightQuota); await tick(400);
       check('with the date switched off the top bar shows only the time', clock().indexOf('-') < 0 && clock().split(':').length === 3);
       window.hideDate = false; window.setMaximized(false); window.draw(); await tick();
@@ -1314,6 +1330,15 @@ app.whenReady().then(async () => {
       check('sidebar menu supports ArrowDown keyboard focus navigation', document.activeElement?.getAttribute('role') === 'menuitem');
       plusBtn.click(); await wait(80);
       check('clicking the same folder + button toggles the menu closed', !document.querySelector('[role="menu"]'));
+      const taskButton = document.querySelector('[data-task-id="side-a"] button[data-keep-focus]');
+      taskButton.focus();
+      taskButton.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 100, clientY: 200 }));
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const taskMenu = document.querySelector('[role="menu"]');
+      const menuReceivedFocus = document.activeElement === taskMenu;
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      check('Escape from expanded task menu restores focus to the task button', menuReceivedFocus && !document.querySelector('[role="menu"]') && document.activeElement === taskButton);
 
       document.querySelector('button[aria-label="折叠所有文件夹"]').click(); await wait(50);
       check('collapse-all button requests collapsing all folders', window.events.includes('toggle-all:false'));
@@ -1345,6 +1370,19 @@ app.whenReady().then(async () => {
 
       window.drawSidebar(false, 0, false, 410); await wait(50);
       check('custom sidebar width applies cleanly', document.getElementById('oneai-sidebar').getBoundingClientRect().width === 410);
+      const sidebar = document.getElementById('oneai-sidebar');
+      const keyboardResizer = sidebar.querySelector('[role="separator"]');
+      const initialResizeCount = window.events.filter(e => e.startsWith('resize:')).length;
+      keyboardResizer.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: 410 }));
+      window.dispatchEvent(new MouseEvent('mousemove', { clientX: 380 }));
+      const dragPreview = sidebar.getBoundingClientRect().width === 380;
+      window.dispatchEvent(new Event('blur'));
+      window.dispatchEvent(new MouseEvent('mousemove', { clientX: 420 }));
+      window.dispatchEvent(new MouseEvent('mouseup'));
+      check('sidebar resize blur cancels the preview and clears mouse listeners', dragPreview && sidebar.getBoundingClientRect().width === 410 && window.events.filter(e => e.startsWith('resize:')).length === initialResizeCount);
+      keyboardResizer.focus();
+      keyboardResizer.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true }));
+      check('sidebar resize handle is focusable and supports arrow keys', document.activeElement === keyboardResizer && keyboardResizer.tabIndex === 0 && window.events.includes('resize:394'));
 
       window.events = [];
       window.drawSidebar(true); await wait(80);
@@ -1607,6 +1645,15 @@ app.whenReady().then(async () => {
       dash.querySelector('[aria-label="选择分布维度"]').value = 'project';
       dash.querySelector('[aria-label="选择分布维度"]').dispatchEvent(new Event('change', { bubbles: true })); await wait(80);
       check('breakdown dimension switches to project and lists OneAI', dash.querySelector('[data-dashboard-breakdown]').textContent.includes('OneAI'));
+      const breakdownDimension = dash.querySelector('[aria-label="选择分布维度"]');
+      breakdownDimension.value = 'model';
+      breakdownDimension.dispatchEvent(new Event('change', { bubbles: true })); await wait(80);
+      const modelButton = dash.querySelector('[data-breakdown-item="codex:gpt-5.3-codex"]');
+      modelButton.click(); await wait(80);
+      const modelChip = [...dash.querySelectorAll('button')].find(b => b.textContent.trim() === 'gpt-5.3-codex ×');
+      check('clicking a model selects the model and shows a removable model chip', Boolean(modelChip) && dash.querySelectorAll('[data-dashboard-model-row]').length === 2);
+      modelChip?.click(); await wait(80);
+      check('removing the model chip restores all model rows', dash.querySelectorAll('[data-dashboard-model-row]').length === 5);
       check('Account quotas panel renders multi-group Antigravity and Codex accounts', dash.querySelector('[data-dashboard-quotas]').textContent.includes('Gemini Models') && dash.querySelector('[data-dashboard-quotas]').textContent.includes('Claude and GPT models') && dash.querySelector('[data-dashboard-quotas]').textContent.includes('Gemini 4 Argon') && dash.querySelector('[data-dashboard-quotas]').textContent.includes('alt'));
       check('Model details table renders rows including unpriced label', dash.querySelectorAll('[data-dashboard-model-row]').length === 5 && dash.querySelector('#dashboard-model-details').textContent.includes('未定价'));
       dash.querySelector('[data-dashboard-task="dash-t1"]').click();

@@ -41,6 +41,7 @@ interface Entry {
 
 interface ParsedFile {
   cwd?: string;
+  sessionId?: string;
   entries: Entry[];
 }
 
@@ -58,7 +59,8 @@ const AGY_ROOT = path.join(home, '.gemini', 'antigravity-cli');
 const PI_SESSIONS = path.join(home, '.pi', 'agent', 'sessions');
 
 // 单个会话文件的解析结果，按 mtime + 大小判断是否过期；持久化到 userData 下避免重启后重复解压全部历史归档会话
-const fileCache = new Map<string, { mtimeMs: number; size: number; cwd?: string; entries: Entry[] }>();
+type CachedFile = ParsedFile & { mtimeMs: number; size: number };
+const fileCache = new Map<string, CachedFile>();
 const PARSE_CONCURRENCY = 6;
 let diskCacheLoaded = false;
 let savingDiskCache = false;
@@ -72,7 +74,7 @@ function usageCachePath(): string | null {
   }
 }
 
-const DISK_CACHE_VERSION = 4;
+const DISK_CACHE_VERSION = 5;
 
 async function ensureDiskCacheLoaded(): Promise<void> {
   if (diskCacheLoaded) return;
@@ -88,6 +90,7 @@ async function ensureDiskCacheLoaded(): Promise<void> {
             mtimeMs: val.mtimeMs,
             size: val.size,
             ...(typeof val.cwd === 'string' && val.cwd ? { cwd: val.cwd } : {}),
+            ...(typeof val.sessionId === 'string' && val.sessionId ? { sessionId: val.sessionId } : {}),
             entries: val.entries,
           });
         }
@@ -108,7 +111,7 @@ function scheduleSaveDiskCache(): void {
     try {
       do {
         pendingDiskCacheSave = false;
-        const files: Record<string, { mtimeMs: number; size: number; cwd?: string; entries: Entry[] }> = {};
+        const files: Record<string, CachedFile> = {};
         for (const [file, value] of fileCache) files[file] = value;
         const tmp = `${cacheFile}.tmp`;
         await fs.promises.mkdir(path.dirname(cacheFile), { recursive: true });
@@ -215,16 +218,18 @@ const modelLabel = (model: string) => (model === AUTO_REVIEW_MODEL ? t('自动�
 async function parseCodex(file: string): Promise<ParsedFile> {
   const entries: Entry[] = [];
   let cwd: string | undefined;
+  let sessionId: string | undefined;
   let model = '';
   let lastTotal = -1;
   await readLines(file, (line) => {
-    const isMeta = !cwd && line.includes('"session_meta"');
+    const isMeta = (!cwd || !sessionId) && line.includes('"session_meta"');
     const isContext = line.includes('"turn_context"');
     if (!isMeta && !isContext && !line.includes('"token_count"')) return;
     try {
       const e = JSON.parse(line);
       if (e.type === 'session_meta') {
         if (!cwd && typeof e.payload?.cwd === 'string' && e.payload.cwd.trim()) cwd = e.payload.cwd.trim();
+        if (!sessionId && typeof e.payload?.id === 'string' && e.payload.id.trim()) sessionId = e.payload.id.trim();
         return;
       }
       if (isContext && e.type === 'turn_context') {
@@ -250,7 +255,7 @@ async function parseCodex(file: string): Promise<ParsedFile> {
       });
     } catch { /* 忽略坏行 */ }
   });
-  return { cwd, entries };
+  return { cwd, sessionId, entries };
 }
 
 // Antigravity：PLANNER_RESPONSE 步骤带 token；记录里没有模型字段，只能从 USER_INPUT 末尾的 <USER_SETTINGS_CHANGE> 块中跟踪。
@@ -346,7 +351,7 @@ async function parsePi(file: string): Promise<ParsedFile> {
       const usage = message?.usage;
       const ts = Date.parse(e.timestamp);
       if (e.type !== 'message' || message?.role !== 'assistant' || !usage || typeof message.model !== 'string' || !message.model || !Number.isFinite(ts)) return;
-      const costTotal = typeof usage.cost?.total === 'number' && Number.isFinite(usage.cost.total) && usage.cost.total > 0 ? usage.cost.total : undefined;
+      const costTotal = typeof usage.cost?.total === 'number' && Number.isFinite(usage.cost.total) && usage.cost.total >= 0 ? usage.cost.total : undefined;
       const entry: Entry = {
         ts,
         model: message.model,
@@ -438,7 +443,7 @@ async function collectSources(accounts: UsageAccountRef[]): Promise<FileSource[]
   return [...claudeSources, ...codexSources, ...agySources, ...piSources];
 }
 
-async function loadEntries(source: FileSource, rangeStart: number): Promise<{ cwd?: string; entries: Entry[]; dirty: boolean }> {
+async function loadEntries(source: FileSource, rangeStart: number): Promise<ParsedFile & { dirty: boolean }> {
   let stat: fs.Stats;
   try { stat = await fs.promises.stat(source.file); } catch { return { entries: [], dirty: false }; }
   if (rangeStart > 0 && stat.mtimeMs < rangeStart) {
@@ -446,7 +451,7 @@ async function loadEntries(source: FileSource, rangeStart: number): Promise<{ cw
   }
   const cached = fileCache.get(source.file);
   if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
-    return { cwd: cached.cwd, entries: cached.entries, dirty: false };
+    return { cwd: cached.cwd, sessionId: cached.sessionId, entries: cached.entries, dirty: false };
   }
   let parsed: ParsedFile;
   try {
@@ -455,7 +460,7 @@ async function loadEntries(source: FileSource, rangeStart: number): Promise<{ cw
         : source.cliId === 'pi' ? await parsePi(source.file)
           : await parseAgy(source.file);
   } catch { return { entries: [], dirty: false }; }
-  fileCache.set(source.file, { mtimeMs: stat.mtimeMs, size: stat.size, ...(parsed.cwd ? { cwd: parsed.cwd } : {}), entries: parsed.entries });
+  fileCache.set(source.file, { mtimeMs: stat.mtimeMs, size: stat.size, ...parsed });
   return { cwd: parsed.cwd, entries: parsed.entries, dirty: true };
 }
 
@@ -484,8 +489,8 @@ async function loadSourcesConcurrently(sources: FileSource[], rangeStart: number
   await Promise.all(Array.from({ length: workerCount }, async () => {
     while (nextIdx < sources.length) {
       const i = nextIdx++;
-      const { cwd, entries, dirty } = await loadEntries(sources[i], rangeStart);
-      loaded[i] = { cwd, entries };
+      const { dirty, ...parsed } = await loadEntries(sources[i], rangeStart);
+      loaded[i] = parsed;
       if (dirty) cacheDirty = true;
     }
   }));
@@ -560,6 +565,7 @@ export async function getUsageStats(accounts: unknown): Promise<UsageStats> {
 }
 
 export interface DashboardBuildItem {
+  sessionId?: string;
   cliId: UsageCli;
   accountId: string;
   accountName: string;
@@ -585,7 +591,23 @@ export function buildDashboardStats(items: DashboardBuildItem[], now = Date.now(
   const records: DashboardDailyRecord[] = [];
   let earliestDate: string | null = null;
 
-  for (const item of items) {
+  // The same Codex session can exist in both the active and archived directories.
+  const codexCopies = new Map<string, number>();
+  const duplicates = new Set<number>();
+  for (const [index, item] of items.entries()) {
+    if (item.cliId !== 'codex' || !item.sessionId) continue;
+    const key = `${item.accountId}\t${item.sessionId}`;
+    const previous = codexCopies.get(key);
+    if (previous === undefined || item.entries.length > items[previous].entries.length) {
+      if (previous !== undefined) duplicates.add(previous);
+      codexCopies.set(key, index);
+    } else {
+      duplicates.add(index);
+    }
+  }
+
+  for (const [index, item] of items.entries()) {
+    if (duplicates.has(index)) continue;
     const buckets = new Map<string, {
       date: string;
       resolvedModel: string;
@@ -594,8 +616,9 @@ export function buildDashboardStats(items: DashboardBuildItem[], now = Date.now(
       output: number;
       cacheRead: number;
       cacheWrite: number;
-      nativeCostUsd: number;
-      hasNativeCost: boolean;
+      costUsd: number;
+      costPriced: boolean;
+      pricedTokens: number;
     }>();
 
     for (const entry of item.entries) {
@@ -618,8 +641,9 @@ export function buildDashboardStats(items: DashboardBuildItem[], now = Date.now(
           output: 0,
           cacheRead: 0,
           cacheWrite: 0,
-          nativeCostUsd: 0,
-          hasNativeCost: false,
+          costUsd: 0,
+          costPriced: false,
+          pricedTokens: 0,
         };
         buckets.set(key, bucket);
       }
@@ -628,9 +652,13 @@ export function buildDashboardStats(items: DashboardBuildItem[], now = Date.now(
       bucket.output += entry.output;
       bucket.cacheRead += entry.cacheRead;
       bucket.cacheWrite += entry.cacheWrite;
-      if (typeof entry.costUsd === 'number' && Number.isFinite(entry.costUsd) && entry.costUsd > 0) {
-        bucket.nativeCostUsd += entry.costUsd;
-        bucket.hasNativeCost = true;
+      const cost = typeof entry.costUsd === 'number' && Number.isFinite(entry.costUsd) && entry.costUsd >= 0
+        ? entry.costUsd
+        : estimateModelCostUsd(resolvedModel, entry);
+      if (cost !== null) {
+        bucket.costUsd += cost;
+        bucket.costPriced = true;
+        bucket.pricedTokens += entry.input + entry.output + entry.cacheRead + entry.cacheWrite;
       }
     }
 
@@ -657,30 +685,20 @@ export function buildDashboardStats(items: DashboardBuildItem[], now = Date.now(
     });
 
     for (const b of buckets.values()) {
-      let costUsd = 0;
-      let costPriced = false;
-      if (b.hasNativeCost) {
-        costUsd = b.nativeCostUsd;
-        costPriced = true;
-      } else {
-        const estimated = estimateModelCostUsd(b.resolvedModel, b);
-        if (estimated !== null) {
-          costUsd = estimated;
-          costPriced = true;
-        }
-      }
       records.push({
         s: sessionId,
         date: b.date,
         model: modelLabel(b.resolvedModel),
+        modelId: b.resolvedModel,
         ...(b.resolvedModel === AUTO_REVIEW_MODEL ? { subagent: true } : {}),
         requests: b.requests,
         input: b.input,
         output: b.output,
         cacheRead: b.cacheRead,
         cacheWrite: b.cacheWrite,
-        costUsd,
-        costPriced,
+        costUsd: b.costUsd,
+        costPriced: b.costPriced,
+        pricedTokens: b.pricedTokens,
       });
     }
   }
@@ -710,6 +728,7 @@ export async function getDashboardStats(accounts: unknown): Promise<DashboardSta
     accountId: source.accountId,
     accountName: source.accountName,
     cwd: loaded[i].cwd,
+    sessionId: loaded[i].sessionId,
     fallbackModel: source.fallbackModel(),
     entries: loaded[i].entries,
   }));

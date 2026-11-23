@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import { execFile, execFileSync } from 'node:child_process';
 import { buildAccountEnv, SessionAccount } from './account-env';
 import { setBoundedMap } from './fs-utils';
-import { SessionSnapshot } from '../shared/types';
+import { SessionCreateResult, SessionSnapshot } from '../shared/types';
 import { t } from './i18n';
 
 export interface CreateSessionOptions {
@@ -221,7 +221,7 @@ export class PtyManager {
     this.dataBuffers.set(id, buffer);
   }
 
-  public createSession(options: CreateSessionOptions): { success: boolean; buffer?: string; error?: string } {
+  public createSession(options: CreateSessionOptions): SessionCreateResult {
     const remembered = this.sessionOptions.get(options.id);
     const resolvedOptions: CreateSessionOptions = {
       ...remembered,
@@ -235,7 +235,7 @@ export class PtyManager {
 
     // 如果该 session 已经存在，则返回当前缓冲区
     if (this.sessions.has(id)) {
-      return { success: true, buffer: this.getSessionBuffer(id) };
+      return { success: true, reused: true, buffer: this.getSessionBuffer(id) };
     }
 
     try {

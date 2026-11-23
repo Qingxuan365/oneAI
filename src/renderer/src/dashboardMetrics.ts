@@ -16,6 +16,7 @@ export interface DashboardFilter {
   cliId: UsageCli | 'all';
   projectKey: string; // 'all' 或 normalized project key
   accountKey: string; // 'all' 或 `${cliId}:${accountId}`
+  modelKey?: string;
 }
 
 export interface HeatmapCell {
@@ -46,7 +47,7 @@ export interface BreakdownItem {
   costUsd: number;
   requests: number;
   sharePct: number;
-  filterPatch?: Partial<Pick<DashboardFilter, 'cliId' | 'projectKey' | 'accountKey'>>;
+  filterPatch?: Partial<Pick<DashboardFilter, 'cliId' | 'projectKey' | 'accountKey' | 'modelKey'>>;
 }
 
 export interface ModelDetailRow {
@@ -203,7 +204,6 @@ function monthRange(startStr: string, endStr: string): string[] {
     months.push(`${y}-${pad(m)}`);
     m += 1;
     if (m > 12) { m = 1; y += 1; }
-    if (months.length > 60) break;
   }
   return months;
 }
@@ -215,7 +215,6 @@ export function computeDashboardView(
   unknownProjectLabel = '未记录项目',
 ): DashboardViewModel {
   const todayStr = dateKeyFromDate(new Date(now));
-  const { startDate, endDate, prevStart, prevEnd } = resolveWindows(filter.range, todayStr, stats.earliestDate);
 
   const sessionMap = new Map<number, DashboardSessionMeta>();
   for (const s of stats.sessions) sessionMap.set(s.id, s);
@@ -227,6 +226,17 @@ export function computeDashboardView(
     if (filter.accountKey !== 'all' && `${s.cliId}:${s.accountId}` !== filter.accountKey) return false;
     return true;
   };
+
+  const modelKeyOf = (cliId: UsageCli, r: DashboardDailyRecord) => `${cliId}:${r.modelId ?? r.model}`;
+  const matchingRecord = (cliId: UsageCli, r: DashboardDailyRecord) =>
+    !filter.modelKey || filter.modelKey === modelKeyOf(cliId, r);
+  let earliestDate: string | null = null;
+  for (const r of stats.records) {
+    const session = sessionMap.get(r.s);
+    if (!matchingSession(session) || !matchingRecord(session.cliId, r) || r.date > todayStr) continue;
+    if (!earliestDate || r.date < earliestDate) earliestDate = r.date;
+  }
+  const { startDate, endDate, prevStart, prevEnd } = resolveWindows(filter.range, todayStr, earliestDate);
 
   // 热力图始终展示最近 12 个月（365 天），并受 Agent / 项目 / 账号过滤
   const hmWindowStart = addDaysStr(todayStr, -364);
@@ -301,7 +311,7 @@ export function computeDashboardView(
 
   for (const r of stats.records) {
     const sess = sessionMap.get(r.s);
-    if (!matchingSession(sess)) continue;
+    if (!matchingSession(sess) || !matchingRecord(sess.cliId, r)) continue;
     const tok = recordTotalTokens(r);
 
     // 12 个月热力图归集
@@ -334,7 +344,7 @@ export function computeDashboardView(
 
     if (r.costPriced) {
       estimatedCostUsd += r.costUsd;
-      pricedTokens += tok;
+      pricedTokens += r.pricedTokens ?? tok;
     }
 
     const rowInputTotal = r.input + r.cacheRead + r.cacheWrite;
@@ -374,7 +384,7 @@ export function computeDashboardView(
       aggAgent.set(sess.cliId, cur);
     }
     {
-      const mk = `${sess.cliId}\t${r.model}`;
+      const mk = modelKeyOf(sess.cliId, r);
       const cur = aggModel.get(mk) ?? { label: r.model, cliId: sess.cliId, tokens: 0, costUsd: 0, requests: 0 };
       cur.tokens += tok;
       cur.requests += r.requests;
@@ -462,7 +472,7 @@ export function computeDashboardView(
         hmMaxTokens = info.tokens;
         peakDay = { date: d, tokens: info.tokens, requests: info.requests };
       }
-    } else if (!stats.earliestDate || d < stats.earliestDate) {
+    } else if (!earliestDate || d < earliestDate) {
       hmMissingDays += 1;
     }
   }
@@ -480,7 +490,7 @@ export function computeDashboardView(
       let level: HeatmapCell['level'] = 0;
       if (curDate > todayStr) {
         status = 'future';
-      } else if (curDate < hmWindowStart || !stats.earliestDate || curDate < stats.earliestDate) {
+      } else if (curDate < hmWindowStart || !earliestDate || curDate < earliestDate) {
         status = tokens > 0 ? 'active' : 'missing';
       } else if (tokens > 0) {
         status = 'active';
@@ -510,11 +520,11 @@ export function computeDashboardView(
   let rangeMissingDays = 0;
   for (let d = startDate; d <= endDate; d = addDaysStr(d, 1)) {
     if ((rangeDayTokens.get(d) ?? 0) > 0) rangeActiveDays += 1;
-    else if (!stats.earliestDate || d < stats.earliestDate) rangeMissingDays += 1;
+    else if (!earliestDate || d < earliestDate) rangeMissingDays += 1;
   }
 
   // 同比 / 环比：仅当数据最早日期覆盖到上一周期起始日且上期 Token > 0 时才可比
-  const comparable = Boolean(prevStart && prevEnd && stats.earliestDate && stats.earliestDate <= prevStart && prevTokens > 0);
+  const comparable = Boolean(prevStart && prevEnd && earliestDate && earliestDate <= prevStart && prevTokens > 0);
   const deltaPct = comparable ? ((totalTokens - prevTokens) / prevTokens) * 100 : null;
 
   // KPI 卡片 1 的迷你趋势柱（最多 16 柱）
@@ -561,18 +571,18 @@ export function computeDashboardView(
         sharePct: shareOf(a.tokens),
         filterPatch: { cliId: a.cliId },
       })),
-    model: [...aggModel.values()]
-      .sort((a, b) => b.tokens - a.tokens)
+    model: [...aggModel.entries()]
+      .sort(([, a], [, b]) => b.tokens - a.tokens)
       .slice(0, 5)
-      .map((m) => ({
-        key: `${m.cliId}:${m.label}`,
+      .map(([key, m]) => ({
+        key,
         label: m.label,
         cliId: m.cliId,
         tokens: m.tokens,
         costUsd: m.costUsd,
         requests: m.requests,
         sharePct: shareOf(m.tokens),
-        filterPatch: { cliId: m.cliId },
+        filterPatch: { modelKey: key },
       })),
     project: [...aggProject.values()]
       .sort((a, b) => b.tokens - a.tokens)

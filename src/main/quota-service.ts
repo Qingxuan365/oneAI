@@ -5,9 +5,9 @@ import os from 'node:os';
 import https from 'node:https';
 import { execFile } from 'node:child_process';
 import { isAccountCli, resolveConfigDir, AccountCliId } from './account-env';
-import { isSamePath, normalizePathKey, setBoundedMap } from './fs-utils';
-import type { QuotaData, QuotaGroupSnapshot } from '../shared/types';
-import { t } from './i18n';
+import { isSamePath, normalizePathKey, readSlice, readZstTail, setBoundedMap } from './fs-utils';
+import type { QuotaData, QuotaGroupSnapshot, TaskSessionUsage } from '../shared/types';
+import { getLanguage, t } from './i18n';
 import { formatClaudeModel } from './model-format';
 
 export type { QuotaData };
@@ -162,7 +162,7 @@ function pickAgyWindow(rows: AgyUsageRow[], targetGroup: string, re: RegExp, now
   const hit = rows.find((r) => r.group.toLowerCase() === targetLower && re.test(r.label));
   if (!hit) return { pct: -1, resetMs: 0 };
   const expired = hit.pct >= 0 && hit.resetMs > 0 && hit.resetMs <= now;
-  return { pct: expired ? 100 : hit.pct, resetMs: hit.resetMs };
+  return { pct: expired ? -1 : hit.pct, resetMs: hit.resetMs };
 }
 
 /**
@@ -200,7 +200,7 @@ export function parseAgyUsage(raw: string, modelName: string, now = Date.now()):
 } {
   const rows = parseAgyRows(raw);
 
-  let targetGroup = 'Gemini Models';
+  let targetGroup = /gemini|orchestrator\s*\(neon\)/i.test(modelName) && !/argon/i.test(modelName) ? 'Gemini Models' : '';
   if (/claude|gpt/i.test(modelName)) {
     targetGroup = 'Claude and GPT models';
   } else {
@@ -245,6 +245,36 @@ function formatResetDay(targetMs: number): string {
   return days > 0 ? `${days}d ${rest}` : rest;
 }
 
+interface CodexRateWindow {
+  window_minutes?: number | null;
+  used_percent?: number;
+  resets_at?: number;
+}
+
+export function readCodexRateWindows(limits: { primary?: CodexRateWindow; secondary?: CodexRateWindow }, now: number) {
+  const windows = [limits.primary, limits.secondary];
+  const read = (minutes: number) => {
+    const window = windows.find((item) => item?.window_minutes === minutes);
+    if (!window || typeof window.used_percent !== 'number' || !Number.isFinite(window.used_percent)) {
+      return { percent: -1, reset: '--' };
+    }
+    const resetMs = typeof window.resets_at === 'number' && Number.isFinite(window.resets_at) && window.resets_at > 0
+      ? window.resets_at * 1000
+      : undefined;
+    if (resetMs !== undefined && resetMs <= now) return { percent: -1, reset: t('等待新额度记录') };
+    return {
+      percent: Math.max(0, Math.min(100, Math.round(100 - window.used_percent))),
+      reset: resetMs === undefined ? '--' : formatDuration(resetMs - now),
+    };
+  };
+  const five = read(300);
+  const seven = read(10_080);
+  return {
+    fiveHourPercent: five.percent, fiveHourResetsIn: five.reset,
+    sevenDayPercent: seven.percent, sevenDayResetsOn: seven.reset,
+  };
+}
+
 export class QuotaService {
   private mainWindow: BrowserWindow | null = null;
   private intervalTimer: NodeJS.Timeout | null = null;
@@ -267,10 +297,8 @@ export class QuotaService {
   private accounts = new Map<string, { cliId: AccountCliId; dir: string }>();
 
   constructor() {
-    const kimiInfo: { model: string; effort?: string } = { model: 'K3' };
     const codexInfo: { model: string; effort?: string } = { model: 'Auto' };
     const claudeInfo: { model: string; effort?: string } = { model: 'Claude' };
-    const grokInfo: { model: string; effort?: string } = { model: 'Grok 4.7' };
     const opencodeInfo: { model: string; effort?: string } = { model: 'Auto' };
     const agyInfo: { model: string; effort?: string } = { model: 'Auto' };
     const piInfo: { model: string; effort?: string } = { model: 'Auto' };
@@ -279,8 +307,6 @@ export class QuotaService {
       kimi: {
         cliId: 'kimi',
         cliName: 'Kimi Code',
-        model: kimiInfo.model,
-        effort: kimiInfo.effort,
         planType: 'Kimi Coding',
         fiveHourPercent: -1,
         fiveHourResetsIn: '--',
@@ -357,24 +383,22 @@ export class QuotaService {
       grok: {
         cliId: 'grok',
         cliName: 'Grok Build',
-        model: grokInfo.model,
-        effort: grokInfo.effort,
-        planType: 'xAI Premium',
-        fiveHourPercent: 100,
+        fiveHourPercent: -1,
         fiveHourResetsIn: '--',
-        sevenDayPercent: 100,
+        sevenDayPercent: -1,
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'normal',
+        message: t('无额度接口'),
       },
       terminal: {
         cliId: 'terminal',
         cliName: t('系统终端'),
         model: 'PowerShell / CMD',
         planType: 'Local Shell',
-        fiveHourPercent: 100,
+        fiveHourPercent: -1,
         fiveHourResetsIn: '--',
-        sevenDayPercent: 100,
+        sevenDayPercent: -1,
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'normal',
@@ -389,9 +413,9 @@ export class QuotaService {
       cliName: t('系统终端'),
       model: 'PowerShell / CMD',
       planType: 'Local Shell',
-      fiveHourPercent: 100,
+      fiveHourPercent: -1,
       fiveHourResetsIn: '--',
-      sevenDayPercent: 100,
+      sevenDayPercent: -1,
       sevenDayResetsOn: '--',
       lastUpdated: Date.now(),
       status: 'normal',
@@ -616,7 +640,8 @@ export class QuotaService {
     return this.refreshAllQuotas();
   }
 
-  public async refreshAllQuotas(): Promise<Record<string, QuotaData>> {
+  public async refreshAllQuotas(ignoreCache = false): Promise<Record<string, QuotaData>> {
+    if (ignoreCache) this.cacheExpiry = {};
     if (this.pollingActive) {
       void this.ensureBaseWatchers();
       this.syncAccountWatchers();
@@ -633,12 +658,13 @@ export class QuotaService {
       return;
     }
 
+    const language = getLanguage();
     try {
       let data: QuotaData | null = null;
       const account = this.accounts.get(cliId);
       switch (account ? account.cliId : cliId) {
         case 'kimi':
-          data = await this.fetchKimiQuota(cliId, account?.dir);
+          data = await this.fetchKimiQuota(account?.dir);
           break;
         case 'codex':
           data = await this.fetchCodexQuota(cliId, account?.dir);
@@ -663,7 +689,7 @@ export class QuotaService {
           break;
       }
 
-      if (data) {
+      if (data && language === getLanguage()) {
         this.quotasCache[cliId] = data;
         this.cacheExpiry[cliId] = now + this.CACHE_TTL_MS;
       }
@@ -675,10 +701,10 @@ export class QuotaService {
   public async getKimiInfo(home: string = KIMI_HOME_DEFAULT): Promise<{ model: string; effort?: string }> {
     const configPath = path.join(home, 'config.toml');
     if (!await exists(configPath)) {
-      return { model: 'K3', effort: undefined };
+      return { model: '', effort: process.env.KIMI_EFFORT };
     }
 
-    let model = 'K3';
+    let model = '';
     let effort: string | undefined = undefined;
 
     try {
@@ -696,12 +722,7 @@ export class QuotaService {
           if (modelEffort) effort = modelEffort;
         }
 
-        if (model === 'K3') {
-          if (defaultModelKey.includes('highspeed')) model = 'K2.7 Highspeed';
-          else if (defaultModelKey.includes('kimi-for-coding')) model = 'K2.8 Preview';
-          else if (defaultModelKey.includes('k3')) model = 'K3';
-          else model = defaultModelKey.split('/').pop() || defaultModelKey;
-        }
+        if (!model) model = defaultModelKey;
       }
 
       // 优先从 [thinking] 块中提取全局设置的 effort（如 effort = "high"）
@@ -741,7 +762,7 @@ export class QuotaService {
     return { model, effort };
   }
 
-  public async getClaudeInfo(configDir?: string): Promise<{ model: string; effort?: string }> {
+  private async getClaudeInfo(configDir?: string, snapshot?: { model?: { id?: string; display_name?: string }; effort?: { level?: string } }): Promise<{ model: string; effort?: string }> {
     let modelId = '';
     let settings: any = null;
 
@@ -752,14 +773,8 @@ export class QuotaService {
     }
 
     // 1. statusLine 落盘文件：会话内 /model、推理等级切换后立即更新，是唯一实时来源
-    let statusEffort: string | undefined;
-    if (!configDir) {
-      try {
-        const d = JSON.parse(await fs.promises.readFile(CLAUDE_STATUS_FILE, 'utf8'));
-        modelId = d.model?.id || d.model?.display_name || '';
-        if (typeof d.effort?.level === 'string') statusEffort = d.effort.level;
-      } catch {}
-    }
+    modelId = snapshot?.model?.id || snapshot?.model?.display_name || '';
+    const statusEffort = typeof snapshot?.effort?.level === 'string' ? snapshot.effort.level : undefined;
 
     // 2. settings.json / 环境变量
     if (!modelId && settings) {
@@ -768,28 +783,13 @@ export class QuotaService {
     }
     if (!modelId && !configDir) modelId = process.env.ANTHROPIC_MODEL || process.env.CLAUDE_MODEL || '';
 
-    // 3. 兜底：~/.claude.json 中最近启动项目的 lastModelUsage。它是上一个已结束会话的用量统计，不随 /model 变化
-    if (!modelId && !configDir) {
-      try {
-        const c = JSON.parse(await fs.promises.readFile(path.join(os.homedir(), '.claude.json'), 'utf8'));
-        const projs = Object.values(c.projects || {})
-          .filter((v: any) => v && v.lastModelUsage && Object.keys(v.lastModelUsage).length > 0)
-          .sort((x: any, y: any) => (y.lastStartTime || 0) - (x.lastStartTime || 0));
-        if (projs.length > 0) {
-          const keys = Object.keys((projs[0] as any).lastModelUsage).filter((k) => !/haiku/i.test(k));
-          if (keys.length > 0) modelId = keys[keys.length - 1];
-        }
-      } catch {}
-    }
-
     let effort: string | undefined = statusEffort || settings?.modelSettings?.[modelId]?.effortLevel;
     if (!effort) effort = settings?.effortLevel || settings?.effort;
 
-    return { model: modelId ? formatClaudeModel(modelId) : 'Claude', effort };
+    return { model: modelId ? formatClaudeModel(modelId) : '', effort };
   }
 
   public async getGrokInfo(): Promise<{ model: string; effort?: string }> {
-    let model = 'Grok 4.7';
     let effort: string | undefined = undefined;
 
     // 1. 优先读取 ~/.grok/config.toml 中用户的自定义配置与推理等级
@@ -812,7 +812,7 @@ export class QuotaService {
 
     // 2. 读取 ~/.grok/settings_cache.json
     const grokSettings = path.join(os.homedir(), '.grok', 'settings_cache.json');
-    let defaultModelId = configDefaultModel || 'grok-4.7';
+    let defaultModelId = configDefaultModel || '';
     if (await exists(grokSettings)) {
       try {
         const raw = JSON.parse(await fs.promises.readFile(grokSettings, 'utf8'));
@@ -825,23 +825,21 @@ export class QuotaService {
       }
     }
 
+    defaultModelId = process.env.XAI_MODEL || process.env.GROK_MODEL || defaultModelId;
+    let model = defaultModelId;
     // 3. 查看 models_cache.json 获取友好名称与兜底 reasoning_effort
     const modelsCache = path.join(os.homedir(), '.grok', 'models_cache.json');
-    if (await exists(modelsCache)) {
+    if (defaultModelId && await exists(modelsCache)) {
       try {
         const mc = JSON.parse(await fs.promises.readFile(modelsCache, 'utf8'));
-        const targetModel = mc.models?.[defaultModelId] || Object.values(mc.models || {})[0];
+        const targetModel = mc.models?.[defaultModelId];
         if (targetModel?.info) {
           if (targetModel.info.name) model = targetModel.info.name;
           if (!effort && targetModel.info.reasoning_effort) effort = targetModel.info.reasoning_effort;
         }
       } catch {}
-    } else {
-      model = defaultModelId;
     }
 
-    if (process.env.GROK_MODEL) model = process.env.GROK_MODEL;
-    if (process.env.XAI_MODEL) model = process.env.XAI_MODEL;
     if (process.env.GROK_REASONING_EFFORT) effort = process.env.GROK_REASONING_EFFORT;
 
     return { model, effort };
@@ -1023,8 +1021,8 @@ export class QuotaService {
     return { model, effort, rawModel };
   }
 
-  /** key 为缓存键（默认账号是 'kimi'），home 为该账号的 KIMI_CODE_HOME；账号读取失败时额度记为未知，不借用默认账号的缓存 */
-  private async fetchKimiQuota(key: string = 'kimi', home: string = KIMI_HOME_DEFAULT): Promise<QuotaData> {
+  /** home 为该账号的 KIMI_CODE_HOME；读取失败时额度记为未知 */
+  private async fetchKimiQuota(home: string = KIMI_HOME_DEFAULT): Promise<QuotaData> {
     const credPath = path.join(home, 'credentials', 'kimi-code.json');
     const kimiInfo = await this.getKimiInfo(home);
     const currentModel = kimiInfo.model;
@@ -1036,9 +1034,9 @@ export class QuotaService {
         cliName: 'Kimi Code',
         model: currentModel,
         effort: currentEffort,
-        fiveHourPercent: 0,
+        fiveHourPercent: -1,
         fiveHourResetsIn: '--',
-        sevenDayPercent: 0,
+        sevenDayPercent: -1,
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
         status: 'offline',
@@ -1089,23 +1087,16 @@ export class QuotaService {
       const limit7d = usages.limit_7d || {};
 
       // 接口未返回对应窗口时记为 -1，界面显示 "--"，避免把缺失数据误显示为 100%
+      const now = Date.now();
+      const resetAt = (w: any) => new Date(w.reset_time ?? '').getTime();
       const toRemaining = (w: any): number =>
-        typeof w.used_ratio === 'number' ? Math.max(0, Math.min(100, Math.round((1 - w.used_ratio) * 100))) : -1;
+        typeof w.used_ratio === 'number' && Number.isFinite(w.used_ratio) && !(resetAt(w) <= now)
+          ? Math.max(0, Math.min(100, Math.round((1 - w.used_ratio) * 100))) : -1;
       const fiveHourPercent = toRemaining(limit5h);
       const sevenDayPercent = toRemaining(limit7d);
 
-      let fiveHourResetsIn = fiveHourPercent < 0 ? '--' : t('已就绪');
-      if (limit5h.reset_time) {
-        const resetMs = new Date(limit5h.reset_time).getTime();
-        const diff = resetMs - Date.now();
-        if (diff > 0) fiveHourResetsIn = formatDuration(diff);
-      }
-
-      let sevenDayResetsOn = sevenDayPercent < 0 ? '--' : t('近期重置');
-      if (limit7d.reset_time) {
-        const resetMs = new Date(limit7d.reset_time).getTime();
-        sevenDayResetsOn = formatResetDay(resetMs);
-      }
+      const fiveHourResetsIn = fiveHourPercent >= 0 && resetAt(limit5h) > now ? formatDuration(resetAt(limit5h) - now) : '--';
+      const sevenDayResetsOn = sevenDayPercent >= 0 && resetAt(limit7d) > now ? formatResetDay(resetAt(limit7d)) : '--';
 
       const known = [fiveHourPercent, sevenDayPercent].filter((p) => p >= 0);
       const minPct = known.length ? Math.min(...known) : 100;
@@ -1126,16 +1117,6 @@ export class QuotaService {
       };
     } catch (err: any) {
       console.warn('[QuotaService] Kimi fetch fallback:', err.message);
-      const prev = this.quotasCache[key];
-      const hasRealPrev = Boolean(prev && (prev.fiveHourResetsIn !== '--' || prev.sevenDayResetsOn !== '--'));
-      if (hasRealPrev) {
-        return {
-          ...prev,
-          model: currentModel,
-          effort: currentEffort,
-          lastUpdated: Date.now(),
-        };
-      }
       return {
         cliId: 'kimi',
         cliName: 'Kimi Code',
@@ -1156,7 +1137,7 @@ export class QuotaService {
   /** key 为缓存键（默认账号是 'codex'），home 为该账号的 CODEX_HOME；账号没有会话记录时额度记为未知而不是 100% */
   private async fetchCodexQuota(key: string = 'codex', home: string = CODEX_HOME_DEFAULT): Promise<QuotaData> {
     const isAccount = !isSamePath(home, CODEX_HOME_DEFAULT);
-    const unknownPct = isAccount ? -1 : 100;
+    const unknownPct = -1;
     const codexInfo = await this.getCodexInfo(home);
     const currentModel = codexInfo.model;
     const currentEffort = codexInfo.effort;
@@ -1208,81 +1189,32 @@ export class QuotaService {
       }))).sort((a, b) => b.mtime - a.mtime);
 
       let foundRateLimits: any = null;
-      let turnContext: { model?: string; effort?: string; at: number } | null = null;
       let planType = 'Plus';
-      let foundMainSession = false;
-      let sessionUsage: SessionTokenUsage | undefined;
 
       for (const item of filesWithStats.slice(0, 10)) {
         try {
           const tail = await this.readCodexTail(item.path, item.mtime, item.size);
-          if (!tail.isSubagent && !foundMainSession) {
-            foundMainSession = true;
-            sessionUsage = tail.usage;
-          }
-          if (!turnContext && tail.context) turnContext = tail.context;
-          if (!foundRateLimits && tail.rateLimits) {
+          if (tail.rateLimits) {
             foundRateLimits = tail.rateLimits;
             if (foundRateLimits.plan_type) planType = foundRateLimits.plan_type.toUpperCase();
+            break;
           }
-          if (foundRateLimits && turnContext && foundMainSession) break;
         } catch {}
       }
 
-      // 会话内切换的模型与推理等级只记录在会话日志里：最近一轮比 config.toml 的修改时间新时以它为准，
-      // 配置未写模型时也采用；之后又改过配置则仍以配置为准
-      let model = currentModel;
-      let effort = currentEffort;
-      if (turnContext) {
-        let configMtime = 0;
-        try { configMtime = (await fs.promises.stat(path.join(home, 'config.toml'))).mtimeMs; } catch {}
-        if (turnContext.at > configMtime || model === 'Auto') {
-          model = turnContext.model || model;
-          effort = turnContext.effort || effort;
-        }
-      }
-
       if (foundRateLimits) {
-        const primary = foundRateLimits.primary || {};
-        const secondary = foundRateLimits.secondary || {};
-
-        // 窗口已过重置时间说明额度已恢复，不再沿用日志里的旧占用；缺失窗口返回 -1
-        const remaining = (w: any): number => {
-          if (!w || typeof w.used_percent !== 'number') return -1;
-          if (w.resets_at && w.resets_at * 1000 <= Date.now()) return 100;
-          return Math.max(0, Math.min(100, Math.round(100 - w.used_percent)));
-        };
-        const fiveHourPercent = remaining(primary);
-        const sevenDayPercent = remaining(secondary);
-
-        let fiveHourResetsIn = fiveHourPercent < 0 ? '--' : t('已就绪');
-        if (fiveHourPercent >= 0 && primary.resets_at) {
-          const resetMs = primary.resets_at * 1000;
-          const diff = resetMs - Date.now();
-          if (diff > 0) fiveHourResetsIn = formatDuration(diff);
-        }
-
-        let sevenDayResetsOn = sevenDayPercent < 0 ? '--' : t('近期重置');
-        if (sevenDayPercent >= 0 && secondary.resets_at) {
-          const resetMs = secondary.resets_at * 1000;
-          sevenDayResetsOn = formatResetDay(resetMs);
-        }
-
-        const known = [fiveHourPercent, sevenDayPercent].filter((p) => p >= 0);
+        const windows = readCodexRateWindows(foundRateLimits, Date.now());
+        const known = [windows.fiveHourPercent, windows.sevenDayPercent].filter((p) => p >= 0);
         const minPct = known.length ? Math.min(...known) : 100;
         const status = minPct < 15 ? 'critical' : minPct < 40 ? 'warning' : 'normal';
 
         return {
           cliId: 'codex',
           cliName: 'Codex',
-          model,
-          effort,
+          model: currentModel,
+          effort: currentEffort,
           planType,
-          ...sessionUsage,
-          fiveHourPercent,
-          fiveHourResetsIn,
-          sevenDayPercent,
-          sevenDayResetsOn,
+          ...windows,
           lastUpdated: Date.now(),
           status,
         };
@@ -1291,10 +1223,9 @@ export class QuotaService {
       return {
         cliId: 'codex',
         cliName: 'Codex',
-        model,
-        effort,
+        model: currentModel,
+        effort: currentEffort,
         planType,
-        ...sessionUsage,
         fiveHourPercent: unknownPct,
         fiveHourResetsIn: '--',
         sevenDayPercent: unknownPct,
@@ -1315,6 +1246,16 @@ export class QuotaService {
     isSubagent: boolean;
   }>();
 
+  async readCodexTaskUsage(file: string, stat: fs.Stats): Promise<TaskSessionUsage | undefined> {
+    try {
+      const tail = await this.readCodexTail(file, stat.mtimeMs, stat.size);
+      if (tail.isSubagent) return undefined;
+      return { ...tail.usage, model: tail.context?.model, effort: tail.context?.effort };
+    } catch {
+      return undefined;
+    }
+  }
+
   private async readCodexTail(file: string, mtimeMs: number, size: number) {
     const cached = this.codexTailCache.get(file);
     if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
@@ -1323,14 +1264,7 @@ export class QuotaService {
       return cached;
     }
     const result: NonNullable<typeof cached> = { mtimeMs, size, rateLimits: null, context: null, isSubagent: false };
-    const handle = await fs.promises.open(file, 'r');
-    let content: string;
-    try {
-      const length = Math.min(size, 256 * 1024);
-      const buffer = Buffer.alloc(length);
-      const { bytesRead } = await handle.read(buffer, 0, length, size - length);
-      content = buffer.subarray(0, bytesRead).toString('utf8');
-    } finally { await handle.close(); }
+    const content = file.endsWith('.zst') ? await readZstTail(file, 256 * 1024) : await readSlice(file, 'tail', 256 * 1024);
     for (const line of content.split('\n').reverse()) {
       if (!line.includes('"turn_context"') && !line.includes('"rate_limits"') && !line.includes('"total_token_usage"')) continue;
       try {
@@ -1343,7 +1277,7 @@ export class QuotaService {
           }
         }
         const limits = parsed?.payload?.rate_limits;
-        if (!result.rateLimits && limits && (limits.primary || limits.secondary)) result.rateLimits = limits;
+        if (!result.rateLimits && limits && (!limits.limit_id || limits.limit_id === 'codex') && (limits.primary || limits.secondary)) result.rateLimits = limits;
         const info = parsed?.payload?.info;
         const total = info?.total_token_usage;
         if (!result.usage && total && typeof total.total_tokens === 'number') {
@@ -1480,7 +1414,12 @@ export class QuotaService {
 
   /** configDir 缺省为默认账号；非默认账号只显示模型与推理等级，额度来自共用的 statusLine 快照，无法区分账号，故显示「--」 */
   private async fetchClaudeQuota(configDir?: string): Promise<QuotaData> {
-    const { model, effort } = await this.getClaudeInfo(configDir);
+    // 额度与会话字段使用同一次 statusLine 快照，避免同时运行的任务写入不同值。
+    let data: any;
+    if (!configDir) {
+      try { data = JSON.parse(await fs.promises.readFile(CLAUDE_STATUS_FILE, 'utf8')); } catch {}
+    }
+    const { model, effort } = await this.getClaudeInfo(configDir, data);
     const base: QuotaData = {
       cliId: 'claude',
       cliName: 'Claude Code',
@@ -1496,24 +1435,22 @@ export class QuotaService {
 
     if (configDir) return { ...base, message: t('非默认账号暂无额度数据') };
 
-    // 额度来源：~/.claude/oneai-statusline.js 通过 Claude Code statusLine 写入的快照
-    let data: any;
-    try {
-      data = JSON.parse(await fs.promises.readFile(CLAUDE_STATUS_FILE, 'utf8'));
-    } catch {
-      return { ...base, message: t('等待 Claude Code 会话数据') };
-    }
+    if (!data) return { ...base, message: t('等待 Claude Code 会话数据') };
 
     if (data.rate_limits && (data.rate_limits.five_hour || data.rate_limits.seven_day)) {
-      this.claudeLastRateLimits = data.rate_limits;
+      const { five_hour, seven_day } = data.rate_limits;
+      this.claudeLastRateLimits = {
+        ...this.claudeLastRateLimits,
+        ...(five_hour ? { five_hour } : {}),
+        ...(seven_day ? { seven_day } : {}),
+      };
     }
-    const rl = (data.rate_limits && (data.rate_limits.five_hour || data.rate_limits.seven_day) ? data.rate_limits : this.claudeLastRateLimits) || {};
+    const rl = this.claudeLastRateLimits ?? {};
     const now = Date.now();
     const calc = (w: any): { pct: number; resetMs?: number } => {
-      if (!w || typeof w.used_percentage !== 'number') return { pct: -1 };
-      const resetMs = w.resets_at ? w.resets_at * 1000 : undefined;
-      // 窗口已过期说明已重置
-      if (resetMs && resetMs < now) return { pct: 100 };
+      if (!w || typeof w.used_percentage !== 'number' || !Number.isFinite(w.used_percentage)) return { pct: -1 };
+      const resetMs = typeof w.resets_at === 'number' && Number.isFinite(w.resets_at) && w.resets_at > 0 ? w.resets_at * 1000 : undefined;
+      if (resetMs !== undefined && resetMs <= now) return { pct: -1 };
       return { pct: Math.max(0, Math.min(100, Math.round(100 - w.used_percentage))), resetMs };
     };
     const five = calc(rl.five_hour);
@@ -1523,7 +1460,8 @@ export class QuotaService {
     const cw = data.context_window;
     const ctxWindow = typeof cw?.context_window_size === 'number' && cw.context_window_size > 0 ? cw.context_window_size : undefined;
     const curUsage = cw?.current_usage;
-    const statusCtxTokens = curUsage && typeof curUsage === 'object'
+    const statusCtxTokens = curUsage && ['input_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens']
+      .some((key) => typeof curUsage[key] === 'number' && Number.isFinite(curUsage[key]))
       ? cleanNonNeg(curUsage.input_tokens) + cleanNonNeg(curUsage.cache_read_input_tokens) + cleanNonNeg(curUsage.cache_creation_input_tokens)
       : undefined;
     const ctxTokens = statusCtxTokens ?? sessionUsage?.ctxTokens;
@@ -1532,7 +1470,7 @@ export class QuotaService {
       ? explicitCtxPct
       : (ctxTokens !== undefined && ctxWindow !== undefined
         ? (ctxTokens / ctxWindow) * 100
-        : (ctxWindow !== undefined ? 0 : undefined));
+        : undefined);
     const ctxPercent = ctxPctFromCalc !== undefined ? Math.max(0, Math.min(100, Math.round(ctxPctFromCalc))) : undefined;
     const known = [five.pct, seven.pct].filter((p) => p >= 0);
     const minPct = known.length ? Math.min(...known) : 100;
@@ -1541,10 +1479,15 @@ export class QuotaService {
     return {
       ...base,
       ...sessionUsage,
+      sessionScope: 'latest',
+      sessionId: typeof data.session_id === 'string' && data.session_id
+        ? data.session_id
+        : (typeof data.transcript_path === 'string' ? path.basename(data.transcript_path, '.jsonl') : undefined),
+      ctxEstimated: explicitCtxPct === undefined && ctxTokens !== undefined,
       ...(ctxPercent !== undefined ? { ctxPercent } : {}),
       ...(ctxTokens !== undefined ? { ctxTokens } : {}),
       ...(ctxWindow !== undefined ? { ctxWindow } : {}),
-      costUsd: typeof data.cost?.total_cost_usd === 'number' ? data.cost.total_cost_usd : undefined,
+      costUsd: typeof data.cost?.total_cost_usd === 'number' && Number.isFinite(data.cost.total_cost_usd) && data.cost.total_cost_usd >= 0 ? data.cost.total_cost_usd : undefined,
       fiveHourPercent: five.pct,
       fiveHourResetsIn: five.resetMs ? formatDuration(five.resetMs - now) : '--',
       sevenDayPercent: seven.pct,
@@ -1590,6 +1533,8 @@ export class QuotaService {
       model,
       effort,
       ...sessionUsage,
+      sessionScope: session.hasUsage ? 'latest' : undefined,
+      ctxEstimated: sessionUsage?.ctxTokens !== undefined,
       fiveHourPercent: -1,
       fiveHourResetsIn: '--',
       sevenDayPercent: -1,
@@ -1736,6 +1681,8 @@ export class QuotaService {
       model: agyInfo.model,
       effort: agyInfo.effort,
       ...sessionUsage,
+      sessionScope: sessionUsage?.tokens !== undefined ? 'latest' as const : undefined,
+      ctxEstimated: sessionUsage?.ctxTokens !== undefined,
     };
     if (shouldRunUsage && !this.agyMissing && (this.agyUsageRaw === null || now - this.agyUsageAt >= this.AGY_USAGE_TTL_MS)) {
       if (!this.agyUsagePending) {
@@ -1820,24 +1767,18 @@ export class QuotaService {
   private async fetchGrokQuota(): Promise<QuotaData> {
     try {
       const grokInfo = await this.getGrokInfo();
-      const hasApiKey = !!(process.env.XAI_API_KEY || process.env.GROK_API_KEY);
-      const xaiDir = path.join(os.homedir(), '.xai');
-      const grokDir = path.join(os.homedir(), '.grok');
-      const hasConfig = await exists(xaiDir) || await exists(grokDir);
-
       return {
         cliId: 'grok',
         cliName: 'Grok Build',
         model: grokInfo.model,
         effort: grokInfo.effort,
-        planType: 'xAI Premium',
-        fiveHourPercent: 100,
+        fiveHourPercent: -1,
         fiveHourResetsIn: '--',
-        sevenDayPercent: 100,
+        sevenDayPercent: -1,
         sevenDayResetsOn: '--',
         lastUpdated: Date.now(),
-        status: hasApiKey || hasConfig ? 'normal' : 'normal',
-        message: hasApiKey ? 'API Key Active' : 'Ready',
+        status: 'normal',
+        message: t('无额度接口'),
       };
     } catch {
       return this.quotasCache['grok'];

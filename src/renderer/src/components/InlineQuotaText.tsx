@@ -104,33 +104,41 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = React.memo(({ quo
   const hasUsage = hasTokens || hasCache || hasCost;
   const hasCtx = quota.ctxPercent !== undefined || quota.ctxTokens !== undefined;
 
+  const sessionLabel = quota.sessionScope === 'task' ? t('当前任务会话') : t('最近活跃会话');
   const tokensTitle = hasBreakdown
-    ? t('最近活跃会话累计 token（输入 {input} · 输出 {output} · 缓存 {cache} · 合计 {total}）', {
+    ? t('{session}累计 token（输入 {input} · 输出 {output} · 缓存 {cache} · 合计 {total}）', {
+      session: sessionLabel,
       input: (quota.tokenInput ?? 0).toLocaleString('en-US'),
       output: (quota.tokenOutput ?? 0).toLocaleString('en-US'),
       cache: (quota.tokenCache ?? 0).toLocaleString('en-US'),
       total: totalTokens.toLocaleString('en-US'),
     })
     : (quota.tokens !== undefined
-      ? t('最近活跃会话累计 token（输入 + 输出 + 缓存读写）：{tokens}', { tokens: quota.tokens.toLocaleString('en-US') })
+      ? t('{session}累计 token（输入 + 输出 + 缓存读写）：{tokens}', { session: sessionLabel, tokens: quota.tokens.toLocaleString('en-US') })
       : undefined);
 
   const ctxValue = quota.ctxPercent !== undefined
     ? `${quota.ctxPercent}%`
     : (quota.ctxTokens !== undefined ? formatTokens(quota.ctxTokens) : '');
-  const ctxTitle = quota.ctxPercent !== undefined && quota.ctxTokens !== undefined && quota.ctxWindow !== undefined
+  const ctxDetail = quota.ctxPercent !== undefined && quota.ctxTokens !== undefined && quota.ctxWindow !== undefined
     ? t('当前上下文占用：{percent}%（{used} / {limit}）', { percent: quota.ctxPercent, used: formatTokens(quota.ctxTokens), limit: formatTokens(quota.ctxWindow) })
     : quota.ctxPercent !== undefined
       ? t('当前上下文占用：{percent}%', { percent: quota.ctxPercent })
       : quota.ctxTokens !== undefined
         ? t('当前上下文已用：{used} tokens', { used: formatTokens(quota.ctxTokens) })
         : undefined;
+  const ctxTitle = ctxDetail && `${sessionLabel} · ${ctxDetail}${quota.ctxEstimated ? ` · ${t('按最近请求估算')}` : ''}`;
+  const modelTitle = quota.model && [
+    quota.cliId === 'agy' || !quota.sessionScope ? t('配置模型') : sessionLabel,
+    quota.effort ? t('{model} · 推理思考等级: {effort}', { model: quota.model, effort: quota.effort }) : quota.model,
+  ].join(' · ');
 
   return (
-    <div className="flex items-center gap-1 font-mono text-ui text-fg-muted" title={quota.model ? (quota.effort ? t('{model} · 推理思考等级: {effort}', { model: quota.model, effort: quota.effort }) : quota.model) : undefined}>
+    <div className="flex items-center gap-1 font-mono text-ui text-fg-muted" title={modelTitle}>
       {/* 最近活跃会话的累计用量；没有数据的 CLI 不显示。空间不足时先将明细折为总计，再整段由 .quota-usage 收起 */}
       {hasUsage && (
         <span className="quota-usage flex items-center gap-1 whitespace-nowrap text-xs">
+          {quota.sessionScope === 'latest' && <span className="quota-detail text-fg-subtle" title={sessionLabel}>{t('最近')}</span>}
           {hasTokens && (
             <span title={tokensTitle}>
               <span className="text-fg-subtle">Tokens: </span>
@@ -148,14 +156,14 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = React.memo(({ quo
           )}
           {hasTokens && hasCache && <Divider />}
           {hasCache && (
-            <span title={t('最近活跃会话缓存命中率：{percent}%', { percent: quota.cacheHitPercent! })}>
+            <span title={t('{session}缓存命中率：{percent}%', { session: sessionLabel, percent: quota.cacheHitPercent! })}>
               <span className="text-fg-subtle">Cache: </span>
               <span className="font-semibold text-fg">{quota.cacheHitPercent}%</span>
             </span>
           )}
           {(hasTokens || hasCache) && hasCost && <Divider />}
           {hasCost && (
-            <span title={t('最近活跃会话累计费用（美元）')}>
+            <span title={t('{session}累计费用（美元）', { session: sessionLabel })}>
               <span className="text-fg-subtle">Cost: </span>
               <span className="font-semibold text-fg">${quota.costUsd!.toFixed(2)}</span>
             </span>

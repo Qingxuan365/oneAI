@@ -52,6 +52,9 @@ export interface QuotaData {
   ctxTokens?: number;        // 最近活跃会话当前上下文 token 数，无数据时缺省
   ctxWindow?: number;        // 当前模型上下文窗口上限（token），仅在 CLI 明确提供时填写
   costUsd?: number;          // 最近活跃会话累计费用（美元），Claude Code / Pi 提供
+  sessionId?: string;        // 提供会话级字段的日志或快照标识
+  sessionScope?: 'task' | 'latest';
+  ctxEstimated?: boolean;
   fiveHourPercent: number;   // 5h remaining pct (0-100)，未知为 -1
   fiveHourResetsIn: string;  // e.g. "2h 45m"
   sevenDayPercent: number;   // 7d remaining pct (0-100)，未知为 -1
@@ -60,6 +63,14 @@ export interface QuotaData {
   lastUpdated: number;
   status: 'normal' | 'warning' | 'critical' | 'offline';
   message?: string;
+}
+
+export type TaskSessionUsage = Pick<QuotaData, 'model' | 'effort' | 'tokens' | 'tokenInput' | 'tokenOutput' | 'tokenCache' | 'cacheHitPercent' | 'ctxPercent' | 'ctxTokens' | 'ctxWindow' | 'costUsd'>;
+
+export interface TaskSummary {
+  text: string | null;
+  sessionId?: string;
+  usage?: TaskSessionUsage;
 }
 
 export type UsageCli = 'claude' | 'codex' | 'agy' | 'pi';
@@ -112,6 +123,7 @@ export interface DashboardDailyRecord {
   s: number;                 // 对应 sessions 中的 id
   date: string;              // 本地日期 YYYY-MM-DD
   model: string;
+  modelId?: string;
   subagent?: boolean;
   requests: number;
   input: number;
@@ -120,6 +132,7 @@ export interface DashboardDailyRecord {
   cacheWrite: number;
   costUsd: number;
   costPriced: boolean;
+  pricedTokens?: number;
 }
 
 export interface DashboardProjectInfo {
@@ -173,6 +186,13 @@ export interface DirectoryListResult {
   entries: DirectoryTreeEntry[];
   truncated?: boolean;
   totalCount?: number;
+  error?: string;
+}
+
+export interface SessionCreateResult {
+  success: boolean;
+  reused?: boolean;
+  buffer?: string;
   error?: string;
 }
 
