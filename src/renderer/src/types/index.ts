@@ -177,6 +177,7 @@ export interface ElectronTerminalAPI {
   detectClis: (custom?: Array<{ id: string; command: string }>) => Promise<Array<{ id: string; name: string; command: string }>>;
   createSession: (options: { id: string; command?: string; cwd?: string; shell?: boolean; account?: SessionAccount; cols?: number; rows?: number }) => Promise<SessionCreateResult>;
   getSessionBuffer: (id: string) => Promise<string>;
+  acknowledgeSession?: (id: string, seq: number) => void;
   getSessionSnapshot?: (id: string) => Promise<SessionSnapshot>;
   /** 会话不存在（已退出或尚未启动）时返回 false */
   writeSession: (id: string, data: string) => Promise<boolean>;

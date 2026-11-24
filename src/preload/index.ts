@@ -63,6 +63,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createSession: (options: CreateSessionOptions) =>
     ipcRenderer.invoke('terminal:create', options),
 
+  acknowledgeSession: (id: string, seq: number) => ipcRenderer.send('terminal:acknowledge', { id, seq }),
   getSessionBuffer: (id: string) =>
     ipcRenderer.invoke('terminal:get-buffer', { id }),
 

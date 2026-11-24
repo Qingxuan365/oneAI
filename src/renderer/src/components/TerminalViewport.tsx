@@ -1364,7 +1364,8 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
             if (instance.pendingData) {
               const sanitized = sanitizeTerminalData(instance.pendingData);
               instance.pendingData = '';
-              instance.term.write(sanitized);
+              const consumedSeq = instance.lastSeq;
+              instance.term.write(sanitized, () => window.electronAPI?.acknowledgeSession?.(task.id, consumedSeq));
             }
           },
         };
@@ -1386,7 +1387,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
             if (snap) {
               instance.lastSeq = snap.seq;
               if (snap.buffer) {
-                term.write(sanitizeTerminalData(snap.buffer));
+                term.write(sanitizeTerminalData(snap.buffer), () => window.electronAPI?.acknowledgeSession?.(task.id, snap.seq));
               }
             }
             const chunks = instance.earlyChunks.splice(0);

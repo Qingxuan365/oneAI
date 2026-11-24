@@ -37,6 +37,7 @@ d:/GitHub/OneAI/
 │   │   ├── diagnostics.ts     # 卡顿诊断日志：主进程事件循环阻塞、慢 IPC、渲染进程无响应 / 崩溃，写入 userData/logs/oneai-diag.log
 │   │   ├── fs-utils.ts        # 路径大小写归一化、目录包含判断、文件切片与 .zst 流式解压、LRU 容量上限 Map
 │   │   ├── pty-manager.ts     # node-pty 进程池管理器；按任务账号注入 CODEX_HOME / CLAUDE_CONFIG_DIR / KIMI_CODE_HOME
+│   │   ├── pty-worker.ts      # 共享线程持有原生 PTY、处理输出背压；真实 Windows 回归：node scripts/check-pty.mjs
 │   │   ├── quota-service.ts   # 大模型配额、模型与推理等级、会话累计 Tokens / Cost 读取及配置热监听
 │   │   ├── system-stats.ts    # 整机 CPU / 内存 / 网速采样（网速读物理网卡，常驻 PowerShell），每 2 秒推送给底部状态栏
 │   │   ├── task-summary.ts    # 读取任务对应会话（Claude / Codex / Kimi 的本机会话文件）里最近一条用户消息，供侧栏任务行第二行

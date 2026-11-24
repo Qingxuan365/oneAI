@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return cachedHomeDir;
   },
   createSession: (options) => ipcRenderer.invoke('terminal:create', options),
+  acknowledgeSession: (id, seq) => ipcRenderer.send('terminal:acknowledge', { id, seq }),
   getSessionBuffer: (id) => ipcRenderer.invoke('terminal:get-buffer', { id }),
   getSessionSnapshot: (id) => ipcRenderer.invoke('terminal:get-snapshot', { id }),
   writeSession: (id, data) => ipcRenderer.invoke('terminal:write', { id, data }),

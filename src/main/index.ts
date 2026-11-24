@@ -217,6 +217,8 @@ function setupIPC() {
     return ptyManager.getSessionSnapshot(id);
   });
 
+  ipcMain.on('terminal:acknowledge', (_event, { id, seq }) => ptyManager.acknowledge(id, seq));
+
   ipcMain.handle('terminal:write', async (_event, { id, data }) => ptyManager.writeSession(id, data));
 
   ipcMain.handle('terminal:resize', async (_event, { id, cols, rows }) => {

@@ -1,5 +1,6 @@
 // 英文对照表：键是代码里的中文原文（含 {name} 占位符），值是英文。新增界面文案时在这里补一条，scripts/check-i18n.mjs 会校验是否遗漏。
 export const EN: Record<string, string> = {
+  '终端创建已取消': 'Terminal creation cancelled',
   '选择工作目录': 'Select working directory',
   '导出终端会话完整日志': 'Export full terminal session log',
   'Markdown 文档 (*.md)': 'Markdown document (*.md)',

@@ -1,4 +1,4 @@
-import * as pty from 'node-pty';
+import { spawnPty, shutdownPtyWorker, PtyProcess } from './pty-worker';
 import { BrowserWindow } from 'electron';
 import * as os from 'node:os';
 import fs from 'node:fs';
@@ -36,7 +36,7 @@ const BACKGROUND_BATCH_WINDOW_MS = 120;
  * 2. useConptyDll（Pi 会话）及 CLI 以 windowsHide 拉起的后台子进程（如 MCP Server）不在控制台进程枚举内；
  * 因此通过 taskkill /T /F 按根 PID 兜底清理整棵进程树。退出阶段使用同步短超时确保子进程不残留。
  */
-function killProcessTree(session: pty.IPty, sync = false): void {
+function killProcessTree(session: PtyProcess, sync = false): void {
   const pid = session.pid;
   try {
     session.kill();
@@ -140,7 +140,7 @@ export class PtyOutputBatcher {
 }
 
 export class PtyManager {
-  private sessions: Map<string, pty.IPty> = new Map();
+  private sessions: Map<string, PtyProcess> = new Map();
   private sessionOptions: Map<string, CreateSessionOptions> = new Map();
   private dataBuffers: Map<string, SessionBuffer> = new Map();
   private sessionSeq: Map<string, number> = new Map();
@@ -152,7 +152,21 @@ export class PtyManager {
     }
   });
 
-  constructor() {}
+  private consumers = new Set<string>();
+  private acknowledged = new Map<string, number>();
+
+  public acknowledge(id: string, seq: number) {
+    const end = this.sessionSeq.get(id) ?? 0;
+    const previous = this.acknowledged.get(id) ?? 0;
+    if (!Number.isSafeInteger(seq) || seq <= previous || seq > end) return;
+    this.acknowledged.set(id, seq);
+    this.sessions.get(id)?.acknowledge?.(seq - previous);
+  }
+
+  private starting = new Map<string, Promise<SessionCreateResult>>();
+  private generations = new Map<string, object>();
+
+  constructor(private spawn = spawnPty) {}
 
   public setWindow(win: BrowserWindow) {
     this.mainWindow = win;
@@ -164,7 +178,7 @@ export class PtyManager {
 
   /** 仍在运行的终端进程数量 */
   public aliveCount(): number {
-    return this.sessions.size;
+    return new Set([...this.sessions.keys(), ...this.starting.keys()]).size;
   }
 
   public getSessionBuffer(id: string): string {
@@ -173,6 +187,7 @@ export class PtyManager {
 
   /** 原子读取会话当前缓冲、输出序号及存活/退出状态，消除挂载回放与实时输出竞态 */
   public getSessionSnapshot(id: string): SessionSnapshot {
+    this.consumers.add(id);
     const alive = this.sessions.has(id);
     return {
       buffer: this.getSessionBuffer(id),
@@ -184,6 +199,7 @@ export class PtyManager {
 
   public clearSessionBuffer(id: string) {
     this.output.discard(id);
+    this.acknowledge(id, this.sessionSeq.get(id) ?? 0);
     this.dataBuffers.set(id, { chunks: [], length: 0 });
   }
 
@@ -221,7 +237,19 @@ export class PtyManager {
     this.dataBuffers.set(id, buffer);
   }
 
-  public createSession(options: CreateSessionOptions): SessionCreateResult {
+  public createSession(options: CreateSessionOptions): Promise<SessionCreateResult> {
+    const pending = this.starting.get(options.id);
+    if (pending) return pending;
+    const generation = {};
+    this.generations.set(options.id, generation);
+    const result = this.createSessionAsync(options, generation).finally(() => {
+      if (this.starting.get(options.id) === result) this.starting.delete(options.id);
+    });
+    this.starting.set(options.id, result);
+    return result;
+  }
+
+  private async createSessionAsync(options: CreateSessionOptions, generation: object): Promise<SessionCreateResult> {
     const remembered = this.sessionOptions.get(options.id);
     const resolvedOptions: CreateSessionOptions = {
       ...remembered,
@@ -243,7 +271,7 @@ export class PtyManager {
       const defaultShell = isWindows ? 'powershell.exe' : (process.env.SHELL || '/bin/bash');
       const rawCommand = (command || defaultShell).trim();
       const workDir = cwd || process.env.USERPROFILE || process.cwd();
-      if (!fs.existsSync(workDir) || !fs.statSync(workDir).isDirectory()) {
+      if (!(await fs.promises.stat(workDir).catch(() => null))?.isDirectory()) {
         return { success: false, error: t('工作目录不存在或不是文件夹：{dir}', { dir: workDir }) };
       }
 
@@ -314,7 +342,8 @@ export class PtyManager {
 
       console.log(`[PTY] Spawning session ${id}: file=${file}, args=${JSON.stringify(args)}, cwd=${workDir}`);
 
-      const ptyProcess = pty.spawn(file, args, {
+      if (this.generations.get(id) !== generation) return { success: false, error: t('终端创建已取消') };
+      const ptyProcess = await this.spawn(file, args, {
         name: 'xterm-256color',
         cols: Math.max(20, resolvedOptions.cols || 120),
         rows: Math.max(10, resolvedOptions.rows || 32),
@@ -331,6 +360,12 @@ export class PtyManager {
         useConptyDll: isWindows && /^pi(\s|$)/i.test(rawCommand),
       });
 
+      if (this.generations.get(id) !== generation) {
+        killProcessTree(ptyProcess);
+        return { success: false, error: t('终端创建已取消') };
+      }
+      const latestSize = this.sessionOptions.get(id);
+      if (latestSize?.cols && latestSize?.rows) ptyProcess.resize(latestSize.cols, latestSize.rows);
       this.exitedCodes.delete(id);
       this.clearSessionBuffer(id);
       this.sessions.set(id, ptyProcess);
@@ -342,6 +377,7 @@ export class PtyManager {
         this.sessionSeq.set(id, baseSeq + data.length);
         this.appendSessionBuffer(id, data);
         this.output.push(id, data, baseSeq);
+        if (!this.consumers.has(id)) this.acknowledge(id, baseSeq + data.length);
       });
 
       // 监听进程退出
@@ -388,6 +424,8 @@ export class PtyManager {
   }
 
   public killSession(id: string) {
+    this.generations.delete(id);
+    this.starting.delete(id);
     this.output.discard(id);
     const session = this.sessions.get(id);
     this.sessions.delete(id);
@@ -398,9 +436,13 @@ export class PtyManager {
     this.dataBuffers.delete(id);
     this.exitedCodes.delete(id);
     this.sessionSeq.delete(id);
+    this.acknowledged.delete(id);
+    this.consumers.delete(id);
   }
 
-  public restartSession(id: string, freshOptions?: Partial<CreateSessionOptions>): { success: boolean; buffer?: string; error?: string } {
+  public async restartSession(id: string, freshOptions?: Partial<CreateSessionOptions>): Promise<SessionCreateResult> {
+    this.generations.delete(id);
+    this.starting.delete(id);
     this.output.discard(id);
     const remembered = this.sessionOptions.get(id);
     const session = this.sessions.get(id);
@@ -432,15 +474,20 @@ export class PtyManager {
   }
 
   public destroyAll() {
+    this.generations.clear();
+    this.starting.clear();
     for (const [id, session] of this.sessions) {
       this.output.discard(id);
-      killProcessTree(session, true);
+      if (this.spawn !== spawnPty) killProcessTree(session, true);
     }
     this.sessions.clear();
     this.sessionOptions.clear();
     this.dataBuffers.clear();
     this.exitedCodes.clear();
     this.sessionSeq.clear();
+    this.acknowledged.clear();
+    this.consumers.clear();
+    shutdownPtyWorker();
   }
 }
 

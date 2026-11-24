@@ -40,6 +40,24 @@ function clip(text: string): string {
 
 // ---------- 按文件签名缓存解析结果（LRU 容量淘汰），轮询时只重新解析有变化的文件 ----------
 const cache = new Map<string, { sig: string; value: unknown }>();
+const directoryCache = new Map<string, { signature: string; entries: fs.Dirent[]; checkedAt: number }>();
+
+// Directory timestamps change on entry creation/removal, not on appending a session log.
+// Keep file stat/parse checks live while avoiding repeated directory enumeration.
+export async function readSessionDirectory(dir: string): Promise<fs.Dirent[]> {
+  try {
+    const stat = await fs.promises.stat(dir);
+    const signature = `${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`;
+    const previous = directoryCache.get(dir);
+    if (previous?.signature === signature && Date.now() - previous.checkedAt < 30_000) return previous.entries;
+    const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    setBoundedMap(directoryCache, dir, { signature, entries, checkedAt: Date.now() }, MAX_SUMMARY_CACHE);
+    return entries;
+  } catch {
+    directoryCache.delete(dir);
+    return [];
+  }
+}
 async function cached<T>(file: string, stat: fs.Stats, parse: () => Promise<T>): Promise<T> {
   const sig = `${stat.mtimeMs}:${stat.size}`;
   const hit = cache.get(file);
@@ -141,7 +159,7 @@ async function readCodexMeta(file: string, stat: fs.Stats): Promise<{ id: string
 
 async function listCodexArchiveOrOldFiles(dir: string, depth: number): Promise<string[]> {
   let entries: fs.Dirent[];
-  try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return []; }
+  try { entries = await readSessionDirectory(dir); } catch { return []; }
   const plainNames = new Set(entries.filter((e) => e.isFile() && e.name.endsWith('.jsonl')).map((e) => e.name));
   const files: string[] = [];
   for (const entry of entries) {
@@ -168,14 +186,14 @@ async function codexSessionsByFolder(
   const cutoff = new Date(cutoffDay.getFullYear(), cutoffDay.getMonth(), cutoffDay.getDate()).getTime();
   const files: string[] = [];
   const numericDirs = async (dir: string) => {
-    try { return (await fs.promises.readdir(dir, { withFileTypes: true })).filter((e) => e.isDirectory() && /^\d+$/.test(e.name)).map((e) => e.name).sort().reverse(); } catch { return []; }
+    try { return (await readSessionDirectory(dir)).filter((e) => e.isDirectory() && /^\d+$/.test(e.name)).map((e) => e.name).sort().reverse(); } catch { return []; }
   };
   for (const year of await numericDirs(root)) {
     for (const month of await numericDirs(path.join(root, year))) {
       for (const day of await numericDirs(path.join(root, year, month))) {
         if (new Date(Number(year), Number(month) - 1, Number(day)).getTime() < cutoff) continue;
         const dayDir = path.join(root, year, month, day);
-        try { files.push(...(await fs.promises.readdir(dayDir)).filter((n) => n.endsWith('.jsonl')).map((n) => path.join(dayDir, n))); } catch { /* 跳过 */ }
+        try { files.push(...(await readSessionDirectory(dayDir)).filter((e) => e.isFile() && e.name.endsWith('.jsonl')).map((e) => path.join(dayDir, e.name))); } catch { /* 跳过 */ }
       }
     }
   }

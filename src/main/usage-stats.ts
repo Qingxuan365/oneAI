@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { Decompress as ZstdDecompress } from 'fzstd';
@@ -62,65 +63,68 @@ const PI_SESSIONS = path.join(home, '.pi', 'agent', 'sessions');
 type CachedFile = ParsedFile & { mtimeMs: number; size: number };
 const fileCache = new Map<string, CachedFile>();
 const PARSE_CONCURRENCY = 6;
-let diskCacheLoaded = false;
-let savingDiskCache = false;
-let pendingDiskCacheSave = false;
+// Separate cache files avoid serializing every session when one active log changes.
+const pendingCacheWrites = new Map<string, CachedFile>();
+let writingCache = false;
 
-function usageCachePath(): string | null {
+function usageCachePath(file: string): string | null {
   try {
-    return app?.isReady?.() ? path.join(app.getPath('userData'), 'usage-cache-v1.json') : null;
-  } catch {
-    return null;
-  }
+    if (!app?.isReady?.()) return null;
+    const key = createHash('sha256').update(normalizePathKey(file)).digest('hex');
+    return path.join(app.getPath('userData'), 'usage-cache-v6', `${key}.jsonl`);
+  } catch { return null; }
 }
 
-const DISK_CACHE_VERSION = 5;
-
-async function ensureDiskCacheLoaded(): Promise<void> {
-  if (diskCacheLoaded) return;
-  diskCacheLoaded = true;
-  const cacheFile = usageCachePath();
+export async function readDiskCache(file: string, stat: fs.Stats): Promise<CachedFile | undefined> {
+  const cacheFile = usageCachePath(file);
   if (!cacheFile) return;
+  let header: Omit<CachedFile, 'entries'> | undefined;
+  const entries: Entry[] = [];
+  let complete = false;
   try {
-    const parsed = JSON.parse(await fs.promises.readFile(cacheFile, 'utf8'));
-    if (parsed && typeof parsed === 'object' && parsed.version === DISK_CACHE_VERSION && parsed.files && typeof parsed.files === 'object') {
-      for (const [file, val] of Object.entries(parsed.files as Record<string, any>)) {
-        if (val && typeof val.mtimeMs === 'number' && typeof val.size === 'number' && Array.isArray(val.entries)) {
-          fileCache.set(file, {
-            mtimeMs: val.mtimeMs,
-            size: val.size,
-            ...(typeof val.cwd === 'string' && val.cwd ? { cwd: val.cwd } : {}),
-            ...(typeof val.sessionId === 'string' && val.sessionId ? { sessionId: val.sessionId } : {}),
-            entries: val.entries,
-          });
-        }
+    await readLines(cacheFile, (line) => {
+      const item = JSON.parse(line);
+      if (!header) {
+        if (item.mtimeMs !== stat.mtimeMs || item.size !== stat.size) throw new Error('stale cache');
+        header = item;
+      } else if (item.complete === true) complete = item.count === entries.length;
+      else {
+        if (complete || typeof item.model !== 'string' || !['ts', 'input', 'output', 'cacheRead', 'cacheWrite'].every((key) => Number.isFinite(item[key]))) throw new Error('invalid cache');
+        entries.push(item);
       }
-    }
-  } catch { /* 首次运行或缓存损坏时忽略，自动重建 */ }
+    });
+    if (header && complete) return { ...header, entries };
+  } catch { /* Rebuild incomplete, stale or unreadable cache from the original log. */ }
 }
 
-function scheduleSaveDiskCache(): void {
-  const cacheFile = usageCachePath();
+export function scheduleSaveDiskCache(file: string, value: CachedFile): void {
+  const cacheFile = usageCachePath(file);
   if (!cacheFile) return;
-  if (savingDiskCache) {
-    pendingDiskCacheSave = true;
-    return;
-  }
-  savingDiskCache = true;
+  pendingCacheWrites.set(cacheFile, value);
+  if (writingCache) return;
+  writingCache = true;
   void (async () => {
     try {
-      do {
-        pendingDiskCacheSave = false;
-        const files: Record<string, CachedFile> = {};
-        for (const [file, value] of fileCache) files[file] = value;
-        const tmp = `${cacheFile}.tmp`;
-        await fs.promises.mkdir(path.dirname(cacheFile), { recursive: true });
-        await fs.promises.writeFile(tmp, JSON.stringify({ version: DISK_CACHE_VERSION, files }), 'utf8');
-        await fs.promises.rename(tmp, cacheFile);
-      } while (pendingDiskCacheSave);
-    } catch { /* 缓存落盘失败不影响统计结果 */ } finally {
-      savingDiskCache = false;
-    }
+      while (pendingCacheWrites.size) {
+        const [target, cached] = pendingCacheWrites.entries().next().value!;
+        pendingCacheWrites.delete(target);
+        let handle: fs.promises.FileHandle | undefined;
+        try {
+          await fs.promises.mkdir(path.dirname(target), { recursive: true });
+          handle = await fs.promises.open(`${target}.tmp`, 'w');
+          const { entries, ...header } = cached;
+          await handle.writeFile(JSON.stringify(header) + '\n');
+          for (let offset = 0; offset < entries.length; offset += 256) {
+            await handle.writeFile(entries.slice(offset, offset + 256).map((entry) => JSON.stringify(entry)).join('\n') + '\n');
+          }
+          await handle.writeFile(JSON.stringify({ complete: true, count: entries.length }) + '\n');
+          await handle.close();
+          handle = undefined;
+          await fs.promises.rename(`${target}.tmp`, target);
+        } catch { /* Optional cache never prevents displaying statistics. */ }
+        finally { await handle?.close().catch(() => {}); }
+      }
+    } finally { writingCache = false; }
   })();
 }
 
@@ -449,8 +453,9 @@ async function loadEntries(source: FileSource, rangeStart: number): Promise<Pars
   if (rangeStart > 0 && stat.mtimeMs < rangeStart) {
     return { entries: [], dirty: false };
   }
-  const cached = fileCache.get(source.file);
+  const cached = fileCache.get(source.file) ?? await readDiskCache(source.file, stat);
   if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    fileCache.set(source.file, cached);
     return { cwd: cached.cwd, sessionId: cached.sessionId, entries: cached.entries, dirty: false };
   }
   let parsed: ParsedFile;
@@ -460,8 +465,10 @@ async function loadEntries(source: FileSource, rangeStart: number): Promise<Pars
         : source.cliId === 'pi' ? await parsePi(source.file)
           : await parseAgy(source.file);
   } catch { return { entries: [], dirty: false }; }
-  fileCache.set(source.file, { mtimeMs: stat.mtimeMs, size: stat.size, ...parsed });
-  return { cwd: parsed.cwd, entries: parsed.entries, dirty: true };
+  const updated = { mtimeMs: stat.mtimeMs, size: stat.size, ...parsed };
+  fileCache.set(source.file, updated);
+  scheduleSaveDiskCache(source.file, updated);
+  return { ...parsed, dirty: true };
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -475,12 +482,10 @@ function mondayOf(date: Date): Date {
 }
 
 async function loadSourcesConcurrently(sources: FileSource[], rangeStart: number): Promise<ParsedFile[]> {
-  let cacheDirty = false;
   const liveFiles = new Set(sources.map((source) => source.file));
   for (const file of fileCache.keys()) {
     if (!liveFiles.has(file)) {
       fileCache.delete(file);
-      cacheDirty = true;
     }
   }
   const loaded: ParsedFile[] = new Array(sources.length);
@@ -489,12 +494,10 @@ async function loadSourcesConcurrently(sources: FileSource[], rangeStart: number
   await Promise.all(Array.from({ length: workerCount }, async () => {
     while (nextIdx < sources.length) {
       const i = nextIdx++;
-      const { dirty, ...parsed } = await loadEntries(sources[i], rangeStart);
+      const { dirty: _dirty, ...parsed } = await loadEntries(sources[i], rangeStart);
       loaded[i] = parsed;
-      if (dirty) cacheDirty = true;
     }
   }));
-  if (cacheDirty) scheduleSaveDiskCache();
   return loaded;
 }
 
@@ -513,7 +516,6 @@ export async function getUsageStats(accounts: unknown): Promise<UsageStats> {
     days.set(dateKey(day), { date: dateKey(day), requests: 0, by: {} });
   }
 
-  await ensureDiskCacheLoaded();
   const sources = await collectSources(Array.isArray(accounts) ? accounts as UsageAccountRef[] : []);
   const rows = new Map<string, UsageRow>();
   const accountsSeen = new Map<string, UsageAccountInfo>();
@@ -720,7 +722,6 @@ export function buildDashboardStats(items: DashboardBuildItem[], now = Date.now(
 }
 
 export async function getDashboardStats(accounts: unknown): Promise<DashboardStats> {
-  await ensureDiskCacheLoaded();
   const sources = await collectSources(Array.isArray(accounts) ? accounts as UsageAccountRef[] : []);
   const loaded = await loadSourcesConcurrently(sources, 0);
   const items: DashboardBuildItem[] = sources.map((source, i) => ({

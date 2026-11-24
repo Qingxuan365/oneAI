@@ -16,10 +16,13 @@ const stubPlugin = {
     b.onLoad({ filter: /^electron$/, namespace: 'stub' }, () => ({
       contents: `
         const path = require('node:path');
-        const paths = globalThis.__ONEAI_TEST_PATHS__ || {};
         module.exports = {
           app: {
-            getPath: (name) => paths[name] || path.join(paths.root || process.cwd(), name),
+            isReady: () => true,
+            getPath: (name) => {
+              const paths = globalThis.__ONEAI_TEST_PATHS__ || {};
+              return paths[name] || path.join(paths.root || process.cwd(), name);
+            },
           },
           ipcMain: { handle() {}, on() {} },
           protocol: { handle() {}, registerSchemesAsPrivileged() {} },
@@ -71,13 +74,13 @@ try {
         import { PtyManager, PtyOutputBatcher } from './src/main/pty-manager';
         import { computeSessionUsage, parseAgyUsage, parseAgyUsageGroups, parseTomlStrings, readCodexRateWindows } from './src/main/quota-service';
         import { estimateModelCostUsd } from './src/main/model-pricing';
-        import { buildDashboardStats } from './src/main/usage-stats';
+        import { buildDashboardStats, readDiskCache, scheduleSaveDiskCache } from './src/main/usage-stats';
         import { computeDashboardView } from './src/renderer/src/dashboardMetrics';
         import { startOutcome } from './src/renderer/src/taskStatus';
         import { detectLanguage, isLanguage, translate } from './src/shared/i18n';
         import { getLanguage, setLanguage, t } from './src/main/i18n';
         import { isLocalOrLinkLocalHost, listTracks, parsePlaylist, readBodyTextCapped, resolveAllowedTrack, serveMusicTrack } from './src/main/music-library';
-        import { readTaskSummaries } from './src/main/task-summary';
+        import { readTaskSummaries, readSessionDirectory } from './src/main/task-summary';
         import { allowPreviewFilePaths, readPreview, resolveInside } from './src/main/file-preview';
         import { listProjectDirectory } from './src/main/project-tree';
         import { setBoundedMap } from './src/main/fs-utils';
@@ -129,7 +132,7 @@ try {
           assert.equal(s2LastSeq, 100 + big.length);
         });
 
-        test('PtyManager snapshot, fast-exit tracking, restart fresh options and command wrapping', () => {
+        test('PtyManager snapshot, fast-exit tracking, restart fresh options and command wrapping', async () => {
           const spawned: Array<{ file: string; args: string[]; options: any; emitData: (d: string) => void; emitExit: (code: number) => void }> = [];
           let nextPid = 900000; // non-existent high PID
           (globalThis as any).__ONEAI_MOCK_PTY_SPAWN__ = (file: string, args: string[], options: any) => {
@@ -158,7 +161,7 @@ try {
           const accDir2 = path.join(fixtureRoot, 'acc-codex-2');
           fs.mkdirSync(workDir, { recursive: true });
 
-          const mgr = new PtyManager();
+          const mgr = new PtyManager(async (...args) => (globalThis as any).__ONEAI_MOCK_PTY_SPAWN__(...args));
           const sent: Array<{ channel: string; payload: any }> = [];
           mgr.setWindow({
             isDestroyed: () => false,
@@ -166,12 +169,12 @@ try {
           } as any);
 
           // Unconfigured restart fails cleanly instead of falling back to plain PowerShell in OneAI cwd
-          const missingRestart = mgr.restartSession('never-seen');
+          const missingRestart = await mgr.restartSession('never-seen');
           assert.equal(missingRestart.success, false);
           assert.ok(missingRestart.error);
 
           // Quoted executable path gets PowerShell call operator (&) and account env
-          const createRes = mgr.createSession({
+          const createRes = await mgr.createSession({
             id: 'task-1',
             command: '"C:\\\\Program Files\\\\Tool\\\\cli.cmd" --flag',
             cwd: workDir,
@@ -192,7 +195,7 @@ try {
           assert.equal(liveSnap.seq, 'boot-line\\r\\n'.length);
           assert.equal(liveSnap.exitCode, undefined);
 
-          const selected = mgr.createSession({ id: 'task-1' });
+          const selected = await mgr.createSession({ id: 'task-1' });
           assert.equal(selected.reused, true);
           assert.equal(selected.buffer, liveSnap.buffer);
           assert.equal(spawned.length, 1);
@@ -209,7 +212,7 @@ try {
           assert.equal(deadSnap.buffer, 'boot-line\\r\\n');
 
           // Restart with updated account env refreshes env and keeps seq monotonic
-          const restartRes = mgr.restartSession('task-1', {
+          const restartRes = await mgr.restartSession('task-1', {
             account: { cliId: 'codex', configDir: accDir2, env: { CUSTOM_VAR: 'v2' } },
           });
           assert.equal(restartRes.success, true);
@@ -220,16 +223,103 @@ try {
           assert.ok(mgr.getSessionSnapshot('task-1').seq > deadSnap.seq);
 
           // Pi uses useConptyDll while pwsh / wsl open interactive shells directly
-          mgr.createSession({ id: 'task-pi', command: 'pi --continue', cwd: workDir });
+          await mgr.createSession({ id: 'task-pi', command: 'pi --continue', cwd: workDir });
           assert.equal(spawned.at(-1)!.options.useConptyDll, true);
-          mgr.createSession({ id: 'task-pwsh', command: 'pwsh', cwd: workDir });
+          await mgr.createSession({ id: 'task-pwsh', command: 'pwsh', cwd: workDir });
           assert.equal(spawned.at(-1)!.file, 'pwsh.exe');
           assert.deepEqual(spawned.at(-1)!.args, ['-NoExit', '-ExecutionPolicy', 'Bypass']);
-          mgr.createSession({ id: 'task-wsl', command: 'wsl', cwd: workDir });
+          await mgr.createSession({ id: 'task-wsl', command: 'wsl', cwd: workDir });
           assert.equal(spawned.at(-1)!.file, 'wsl.exe');
-          mgr.createSession({ id: 'task-comment', command: 'mycli --fast # trailing comment', cwd: workDir, shell: true });
+          await mgr.createSession({ id: 'task-comment', command: 'mycli --fast # trailing comment', cwd: workDir, shell: true });
           assert.match(spawned.at(-1)!.args.at(-1)!, /mycli --fast # trailing comment\\nif \\(\\$null -ne \\$LASTEXITCODE\\)/);
           mgr.destroyAll();
+        });
+
+        test('PTY acknowledgements ignore invalid values and survive clear and restart', async () => {
+          const processes: any[] = [];
+          const mgr = new PtyManager(async () => {
+            const state: any = { ack: [], emit: null };
+            processes.push(state);
+            return { pid: 0, onData(cb: any) { state.emit = cb; }, onExit() {}, resize() {}, kill() {}, acknowledge(n: number) { state.ack.push(n); } } as any;
+          });
+          await mgr.createSession({ id: 'flow', cwd: fixtureRoot });
+          processes[0].emit('abc');
+          assert.deepEqual(processes[0].ack, [3]);
+          mgr.getSessionSnapshot('flow');
+          processes[0].emit('def');
+          for (const n of [-1, NaN, Infinity, 7, 3.5]) mgr.acknowledge('flow', n);
+          assert.deepEqual(processes[0].ack, [3]);
+          mgr.acknowledge('flow', 6);
+          mgr.acknowledge('flow', 6);
+          assert.deepEqual(processes[0].ack, [3, 3]);
+          processes[0].emit('ghi');
+          mgr.clearSessionBuffer('flow');
+          assert.deepEqual(processes[0].ack, [3, 3, 3]);
+          assert.equal(mgr.getSessionSnapshot('flow').buffer, '');
+          await mgr.restartSession('flow');
+          processes[0].emit('stale');
+          processes[1].emit('new');
+          assert.equal(mgr.getSessionSnapshot('flow').buffer, 'new');
+          mgr.acknowledge('flow', 9);
+          assert.deepEqual(processes[1].ack, []);
+          mgr.acknowledge('flow', 12);
+          assert.deepEqual(processes[1].ack, [3]);
+          mgr.destroyAll();
+        });
+
+        test('PTY creation cancellation and duplicate requests preserve lifecycle', async () => {
+          let finish: any;
+          let killed = false;
+          const mgr = new PtyManager(() => new Promise(resolve => { finish = resolve; }));
+          const first = mgr.createSession({ id: 'pending', cwd: fixtureRoot });
+          assert.equal(mgr.createSession({ id: 'pending', cwd: fixtureRoot }), first);
+          while (!finish) await new Promise(resolve => setTimeout(resolve, 1));
+          mgr.killSession('pending');
+          finish({ pid: 0, kill() { killed = true; } } as any);
+          assert.equal((await first).success, false);
+          assert.equal(killed, true);
+          assert.equal(mgr.aliveCount(), 0);
+        });
+
+        test('Usage cache isolates changed files and rejects incomplete or stale data', async () => {
+          const file = path.join(fixtureRoot, 'cache-source.jsonl');
+          await fsp.writeFile(file, 'fixture');
+          const stat = await fsp.stat(file);
+          const value = { mtimeMs: stat.mtimeMs, size: stat.size, sessionId: 'cached-session', entries: Array.from({ length: 600 }, (_, ts) => ({ ts, model: 'test', input: 1, output: 2, cacheRead: 0, cacheWrite: 0 })) };
+          scheduleSaveDiskCache(file, value);
+          let read;
+          for (let i = 0; i < 100 && !read; i++) {
+            await new Promise(resolve => setTimeout(resolve, 10));
+            read = await readDiskCache(file, stat);
+          }
+          assert.deepEqual(read, value);
+          assert.equal(await readDiskCache(file, { ...stat, size: stat.size + 1 } as any), undefined);
+          const cacheDir = path.join(fixtureRoot, 'userData', 'usage-cache-v6');
+          const cacheFiles = await fsp.readdir(cacheDir);
+          assert.equal(cacheFiles.length, 1);
+          const target = path.join(cacheDir, cacheFiles[0]);
+          await fsp.writeFile(target, JSON.stringify({ mtimeMs: stat.mtimeMs, size: stat.size }) + '\\n');
+          assert.equal(await readDiskCache(file, stat), undefined);
+          scheduleSaveDiskCache(file, value);
+          for (let i = 0; i < 100; i++) {
+            await new Promise(resolve => setTimeout(resolve, 10));
+            if (await readDiskCache(file, stat)) break;
+          }
+          assert.deepEqual(await readDiskCache(file, stat), value);
+        });
+
+        test('Summary directory cache reuses enumeration and detects entry changes', async () => {
+          const dir = path.join(fixtureRoot, 'directory-cache');
+          await fsp.mkdir(dir);
+          await fsp.writeFile(path.join(dir, 'a.jsonl'), 'a');
+          const first = await readSessionDirectory(dir);
+          assert.equal(await readSessionDirectory(dir), first);
+          await fsp.appendFile(path.join(dir, 'a.jsonl'), 'more');
+          assert.deepEqual((await readSessionDirectory(dir)).map(e => e.name), ['a.jsonl']);
+          await fsp.writeFile(path.join(dir, 'b.jsonl'), 'b');
+          const future = new Date(Date.now() + 1000);
+          await fsp.utimes(dir, future, future);
+          assert.equal((await readSessionDirectory(dir)).length, 2);
         });
 
         test('parseTomlStrings strips comments and isolates sections accurately', () => {
