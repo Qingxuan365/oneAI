@@ -129,8 +129,9 @@ export interface AppSettings {
   musicDirectory: string; // 顶栏音乐播放目录，空字符串表示系统「音乐」目录
   musicPlayerVisible: boolean; // 侧栏底部是否显示音乐播放器，默认 false
   musicStreams: MusicStream[]; // 用户添加的在线音乐（音频直链、电台流、.m3u / .pls 歌单），默认空；「恢复默认设置」不会清空
-  clockOffsetHours: number; // 顶栏时钟相对系统时间增加的小时数，默认 0（-24 ~ 24 的整数）
-  topbarDateVisible: boolean; // 窗口最大化时顶栏时钟是否显示年月日（含农历）与星期，默认 true
+  clockOffsetHours: number; // 状态栏时钟相对系统时间增加的小时数，默认 0（-24 ~ 24 的整数）
+  topbarDateVisible: boolean; // 状态栏时钟是否显示年月日（含农历）与星期，默认 true（字段名沿用旧版以保留已有设置）
+  statusBarVisible: boolean; // 是否显示终端下方的两行状态栏，默认 true
   accounts: Account[]; // 多账号配置（Codex / Claude Code / Kimi Code），默认空；「恢复默认设置」不会清空
   customClis: CustomCli[]; // 用户自定义的 CLI，默认空；「恢复默认设置」不会清空
 }
@@ -209,6 +210,8 @@ export interface ElectronTerminalAPI {
   /** 在该账号的环境下运行 CLI 的状态命令，判断是否已登录 */
   checkAccountLogin?: (account: SessionAccount) => Promise<LoginStatus | { error: string }>;
   onQuotaUpdate: (callback: (quotas: Record<string, QuotaData>) => void) => () => void;
+  /** 状态栏关闭时停止整机资源采样，重新打开后恢复 */
+  setSystemStatsEnabled?: (enabled: boolean) => void;
   onSystemStats: (callback: (stats: SystemStats) => void) => () => void;
 }
 

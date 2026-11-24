@@ -15,6 +15,7 @@ await build({
     import { flushSync } from 'react-dom';
     import { Sidebar } from './src/renderer/src/components/Sidebar';
     import { Topbar } from './src/renderer/src/components/Topbar';
+    import { StatusBar } from './src/renderer/src/components/StatusBar';
     import { TerminalViewport, attachImeAnchor, IME_ANCHOR_FINDERS, getLogicalLine, matchToLinkRange } from './src/renderer/src/components/TerminalViewport';
     import { FilePreviewPanel } from './src/renderer/src/components/FilePreviewPanel';
     import { NewTaskModal } from './src/renderer/src/components/NewTaskModal';
@@ -32,7 +33,7 @@ await build({
     import { isUserEcho } from './src/renderer/src/taskStatus';
     window.isUserEcho = isUserEcho;
     installDropGuard();
-    window.electronAPI = { getHomeDir: () => 'C:/Users/tester', onWindowMaximizedChange: callback => { window.setMaximized = callback; return () => {}; }, isWindowMaximized: async () => false,
+    window.setMaximized = () => {}; window.electronAPI = { getHomeDir: () => 'C:/Users/tester', onWindowMaximizedChange: callback => { window.setMaximized = callback; return () => {}; }, isWindowMaximized: async () => false,
       setLanguage: async language => { window.mainLanguage = language; },
       onSystemStats: callback => { window.pushStats = callback; return () => {}; },
       // 路径里带 logged 的账号视为已登录；账号相关桩不使用反斜杠，避免外层模板字符串转义
@@ -126,7 +127,7 @@ await build({
       if (!empty && window.usageMany) for (let i = 0; i < 17; i++) rows.push({ cliId: 'claude', ...D, model: 'Model ' + i, requests: 5, sessions: 1, input: 1000, output: 2000, cacheRead: 3000, cacheWrite: 0 });
       return { generatedAt: Date.now(), weekStart: monday.getTime(), accounts, rows, days };
     };
-    // 顶栏系统资源的宽值：CPU 100%、内存 31.9 GiB、上行 999 KiB/s、下行 99.9 MiB/s
+    // 状态栏系统资源的宽值：CPU 100%、内存 31.9 GiB、上行 999 KiB/s、下行 99.9 MiB/s
     window.fakeStats = { cpuPercent: 100, gpuPercent: 100, memUsedBytes: 31.9 * 1024 ** 3, memTotalBytes: 32 * 1024 ** 3, netUpBytesPerSec: 999 * 1024, netDownBytesPerSec: 99.9 * 1024 ** 2 };
     const root = createRoot(document.getElementById('root'));
     window.events = [];
@@ -144,9 +145,11 @@ await build({
         <Sidebar isCollapsed={false} clis={CLIS} folders={[{ path: task.cwd, isExpanded: true }]} tasks={[task]} activeTaskId={task.id}
           onAddFolder={() => {}} onSelectTask={() => window.events.push('select')} onToggleFolder={() => window.events.push('toggle')}
           onReorderFolder={() => {}} onNewTask={() => {}} onCloseTask={() => window.events.push('close')} onRenameTask={(_id, title) => window.events.push('rename:' + title)} />
-        <div className="flex-1 min-w-0"><Topbar isSidebarCollapsed={false} onToggleSidebar={() => {}} currentGroup={group} activeTask={task} accountName={accountName} language={getLanguage()}
-          quota={quota} onRefreshQuota={async () => {}} onOpenSearch={() => window.events.push('search')}
-          dateVisible={!window.hideDate} onClearScreen={() => {}} onRestartSession={async () => {}} onExportLogs={async () => ({ success: true })} onOpenHistory={() => {}} onToggleFileTree={() => window.events.push('file-tree')} /></div>
+        <div className="flex flex-1 min-w-0 flex-col"><Topbar isSidebarCollapsed={false} onToggleSidebar={() => {}} currentGroup={group} activeTask={task} accountName={accountName} language={getLanguage()}
+          onOpenSearch={() => window.events.push('search')}
+          onClearScreen={() => {}} onRestartSession={async () => {}} onExportLogs={async () => ({ success: true })} onOpenHistory={() => {}} onToggleFileTree={() => window.events.push('file-tree')} />
+          <div className="flex-1" />
+          <StatusBar quota={quota} showQuota taskStatus={status} dateVisible={!window.hideDate} onRefreshQuota={async () => {}} language={getLanguage()} /></div>
       </div>));
       window.pushStats?.(window.fakeStats);
     };
@@ -264,7 +267,7 @@ await build({
           onToggleFolder={() => {}} onReorderFolder={() => {}} onNewTask={() => {}} onCloseTask={() => {}} />
         <div className="flex flex-1 flex-col min-w-0 h-full overflow-hidden">
           <Topbar isSidebarCollapsed={false} onToggleSidebar={() => {}} currentGroup={clis[0]} activeTask={tasks[0] ?? null}
-            isDashboardOpen quota={quotas.codex} onRefreshQuota={async () => {}} onOpenHistory={() => {}} onToggleFileTree={() => {}} />
+            isDashboardOpen onOpenHistory={() => {}} onToggleFileTree={() => {}} />
           <div className="flex-1 min-h-0 overflow-hidden">
             <DashboardView key={String(window.dashboardEmpty)} isActive accounts={window.accountsFixture} quotas={quotas} visibleClis={clis} tasks={tasks}
               onRefreshQuotas={async () => { window.events.push('dashboard-refresh-quotas'); }}
@@ -381,10 +384,12 @@ app.whenReady().then(async () => {
         window.draw(status);
         check(status + ' Chinese label in the sidebar row', task().textContent.includes(label));
         check(status + ' topbar shows no task status', !document.querySelector('header').textContent.includes(label));
+        check(status + ' status bar shows the task status', document.getElementById('oneai-statusbar-status').textContent.includes(label) && document.getElementById('oneai-statusbar-status').dataset.taskStatus === status);
         check(status + ' accessible task button', task().tagName === 'BUTTON');
         check(status + ' restart disabled', [...document.querySelectorAll('header button')].find(b => b.title.includes('当前终端') || b.title.includes('正在启动')).disabled === (status === 'starting'));
         const dot = () => task().querySelector('span.rounded-full');
-        if (status === 'running') check('running dot spins', getComputedStyle(dot()).animationName === 'spin');
+        // 运行中是静态空心圆：持续动画会让窗口以 60 fps 重绘，多任务时 CPU / GPU 占用明显上升
+        if (status === 'running') check('running dot is a static hollow ring', getComputedStyle(dot()).animationName === 'none' && getComputedStyle(dot()).backgroundColor === 'rgba(0, 0, 0, 0)' && getComputedStyle(dot()).borderTopWidth !== '0px');
         if (status === 'idle') check('idle dot is hollow', getComputedStyle(dot()).backgroundColor === 'rgba(0, 0, 0, 0)' && getComputedStyle(dot()).borderTopWidth !== '0px');
         if (status === 'waiting') check('waiting dot is solid', getComputedStyle(dot()).backgroundColor !== 'rgba(0, 0, 0, 0)');
         if (status === 'starting') {
@@ -427,31 +432,41 @@ app.whenReady().then(async () => {
       win.setSize(width, 900);
       await win.webContents.executeJavaScript('window.setMaximized(' + (width >= 1920) + ')');
       await settleSize();
-      // 工具、时钟、额度、系统资源、历史按钮中仍然可见的块必须依次排开且不超出顶栏；任务名至少保留 48px（最窄 900 的窗口除外）
+      // 顶栏的工具、历史、目录树按钮必须依次排开且不超出顶栏
       result.push({ name: width + ' topbar blocks do not overlap', ok: await win.webContents.executeJavaScript(\`(() => {
         const header = document.querySelector('header').getBoundingClientRect();
-        const rects = ['oneai-terminal-tools', 'oneai-topbar-clock', 'oneai-topbar-quota', 'oneai-topbar-sys']
-          .map(id => document.getElementById(id).getBoundingClientRect()).filter(rect => rect.width > 0);
+        const rects = [document.getElementById('oneai-terminal-tools')].map(el => el.getBoundingClientRect()).filter(rect => rect.width > 0);
         rects.push(document.querySelector('header button[aria-label="查看历史会话"]').getBoundingClientRect());
         rects.push(document.querySelector('header button[aria-label="项目目录树"]').getBoundingClientRect());
-        const quota = document.getElementById('oneai-topbar-quota');
-        return rects.length >= 3 && rects.every((rect, i) => rect.left >= header.left && rect.right <= (rects[i + 1]?.left ?? header.right))
-          && quota.scrollWidth <= quota.clientWidth;
+        return rects.length >= 3 && rects.every((rect, i) => rect.left >= header.left && rect.right <= (rects[i + 1]?.left ?? header.right));
       })()\`) });
-      if (width === 900) result.push({ name: '900 topbar automatically hides clock when space runs out', ok: await win.webContents.executeJavaScript("(() => { const c = document.getElementById('oneai-topbar-clock'); return c.getAttribute('data-clock-mode') === 'hidden' && c.getBoundingClientRect().width === 0; })()") });
-      if (width === 1280 || width === 1440) result.push({ name: width + ' topbar still shows the account badge and Ctx (visible, not just in the DOM)', ok: await win.webContents.executeJavaScript("document.querySelector('.topbar-account').getClientRects().length > 0 && document.querySelector('.quota-ctx').getClientRects().length > 0") });
+      // 状态栏两行：仍然可见的块依次排开，行内容不被裁剪，状态与时间始终可见
+      result.push({ name: width + ' status bar rows do not overflow or overlap', ok: await win.webContents.executeJavaScript(\`(() => {
+        const bar = document.getElementById('oneai-statusbar');
+        const rowOk = row => {
+          const rect = row.getBoundingClientRect();
+          const kids = [...row.children].filter(c => c.getBoundingClientRect().width > 0);
+          return row.scrollWidth <= row.clientWidth + 1 && kids.every((k, i) => k.getBoundingClientRect().left >= rect.left - 1 && k.getBoundingClientRect().right <= (kids[i + 1]?.getBoundingClientRect().left ?? rect.right) + 1);
+        };
+        return bar.children.length === 2 && [...bar.children].every(rowOk)
+          && ['oneai-statusbar-quota', 'oneai-statusbar-usage'].every(id => { const el = document.getElementById(id); return el.scrollWidth <= el.clientWidth + 1; })
+          && document.getElementById('oneai-statusbar-status').getClientRects().length > 0
+          && document.getElementById('oneai-statusbar-clock').getBoundingClientRect().width > 0;
+      })()\`) });
+      if (width === 900) result.push({ name: '900 status bar collapses the clock date but keeps the time', ok: await win.webContents.executeJavaScript("(() => { const c = document.getElementById('oneai-statusbar-clock'); return [...c.querySelectorAll('.statusbar-clock-date')].every(el => el.getClientRects().length === 0) && c.getBoundingClientRect().width > 0; })()") });
+      if (width === 1280 || width === 1440) result.push({ name: width + ' topbar keeps the account badge and status bar keeps Ctx (visible, not just in the DOM)', ok: await win.webContents.executeJavaScript("document.querySelector('.topbar-account').getClientRects().length > 0 && document.querySelector('.quota-ctx').getClientRects().length > 0") });
       if (width > 900) result.push({ name: width + ' task title keeps at least 48px', ok: await win.webContents.executeJavaScript("document.querySelector('header .truncate[title]').getBoundingClientRect().width >= 48") });
     }
-    result.push({ name: 'topbar no longer renders the weekly usage button', ok: await win.webContents.executeJavaScript(\`!document.querySelector('header button[aria-label="查看本周用量"]')\`) });
-    result.push({ name: 'topbar at 2800 shows clock, usage and all system stats', ok: await win.webContents.executeJavaScript(\`
-      ['#oneai-topbar-clock', '.quota-usage', '.quota-tokens-breakdown', '.topbar-sys-cpu', '.topbar-sys-mem', '.topbar-sys-net'].every(sel => document.querySelector(sel).getClientRects().length > 0)\`) });
-    result.push({ name: 'topbar at 2800 maximized shows full date-time clock', ok: await win.webContents.executeJavaScript("(() => { const c = document.getElementById('oneai-topbar-clock'); const t = c.textContent.trim(); return c.getAttribute('data-clock-mode') === 'full' && c.getBoundingClientRect().width > 0 && t.includes('-') && t.includes(':'); })()") });
-    result.push({ name: 'topbar clock renders with bold font weight', ok: await win.webContents.executeJavaScript("parseInt(getComputedStyle(document.getElementById('oneai-topbar-clock')).fontWeight, 10) >= 700") });
-    result.push({ name: 'topbar distinguishes unavailable and idle GPU readings', ok: await win.webContents.executeJavaScript(\`(async () => {
+    result.push({ name: 'topbar no longer renders the weekly usage button, quota or clock', ok: await win.webContents.executeJavaScript(\`!document.querySelector('header button[aria-label="查看本周用量"]') && !document.querySelector('header .quota-bar') && !document.querySelector('header #oneai-statusbar-clock')\`) });
+    result.push({ name: 'status bar at 2800 shows clock, usage and all system stats', ok: await win.webContents.executeJavaScript(\`
+      ['#oneai-statusbar-clock', '.quota-usage', '.quota-tokens-breakdown', '.statusbar-sys-cpu', '.statusbar-sys-mem', '.statusbar-sys-net'].every(sel => document.querySelector(sel).getClientRects().length > 0)\`) });
+    result.push({ name: 'status bar at 2800 maximized shows full date-time clock', ok: await win.webContents.executeJavaScript("(() => { const c = document.getElementById('oneai-statusbar-clock'); const t = c.textContent.trim(); return c.getAttribute('data-clock-mode') === 'full' && c.getBoundingClientRect().width > 0 && t.includes('-') && t.includes(':'); })()") });
+    result.push({ name: 'status bar clock renders in regular font weight', ok: await win.webContents.executeJavaScript("parseInt(getComputedStyle(document.getElementById('oneai-statusbar-clock')).fontWeight, 10) < 600") });
+    result.push({ name: 'status bar distinguishes unavailable and idle GPU readings', ok: await win.webContents.executeJavaScript(\`(async () => {
       const update = async gpuPercent => {
         window.pushStats({ ...window.fakeStats, gpuPercent });
         await new Promise(resolve => setTimeout(resolve, 40));
-        return document.querySelector('span.topbar-sys-gpu:not([aria-hidden])').textContent;
+        return document.querySelector('span.statusbar-sys-gpu:not([aria-hidden])').textContent;
       };
       const unavailable = await update(null);
       const idle = await update(0);
@@ -461,43 +476,40 @@ app.whenReady().then(async () => {
     win.setSize(1920, 900);
     await win.webContents.executeJavaScript('window.setMaximized(true)');
     await settleSize();
-    result.push({ name: 'maximized 1920 topbar keeps usage breakdown, Ctx, system stats and reset time', ok: await win.webContents.executeJavaScript(\`
-      ['#oneai-topbar-sys', '.quota-usage', '.quota-tokens-breakdown', '.quota-detail', '.quota-ctx', '.topbar-account'].every(sel => document.querySelector(sel).getClientRects().length > 0)\`) });
-    result.push({ name: 'maximized 1920 topbar hides clock when full stress-test quota leaves no room', ok: await win.webContents.executeJavaScript("(() => { const c = document.getElementById('oneai-topbar-clock'); const title = document.querySelector('header .truncate[title]'); return c.getAttribute('data-clock-mode') === 'hidden' && c.getBoundingClientRect().width === 0 && title.getBoundingClientRect().width >= 48; })()") });
-    result.push({ name: 'maximized 1920 topbar adapts clock across time, full and hidden modes as free space changes', ok: await win.webContents.executeJavaScript(\`(async () => {
-      const tick = (ms = 80) => new Promise(r => setTimeout(r, ms));
-      const c = document.getElementById('oneai-topbar-clock');
-      const title = document.querySelector('header .truncate[title]');
-      window.draw('running', undefined, { costUsd: undefined, sevenDayResetsOn: '--' });
-      await tick();
-      const timeText = c.textContent.trim();
-      const timeOk = c.getAttribute('data-clock-mode') === 'time' && c.getBoundingClientRect().width > 0 && !timeText.includes('-') && timeText.split(':').length === 3 && title.getBoundingClientRect().width >= 48;
-      window.draw('running', undefined, { tokens: undefined, tokenInput: undefined, tokenOutput: undefined, tokenCache: undefined, cacheHitPercent: undefined, costUsd: undefined, sevenDayPercent: -1, sevenDayResetsOn: '--', ctxPercent: undefined, ctxTokens: undefined });
-      await tick();
-      const fullOk = c.getAttribute('data-clock-mode') === 'full' && c.getBoundingClientRect().width > 0 && c.textContent.includes('-') && c.textContent.includes(':');
-      window.draw('running', '工作账号');
-      await tick();
-      const hiddenOk = c.getAttribute('data-clock-mode') === 'hidden' && c.getBoundingClientRect().width === 0;
-      return timeOk && fullOk && hiddenOk;
+    result.push({ name: 'maximized 1920 status bar keeps the date clock, usage breakdown, Ctx, system stats and reset time', ok: await win.webContents.executeJavaScript(\`
+      ['#oneai-statusbar-sys', '.quota-usage', '.quota-tokens-breakdown', '.quota-detail', '.quota-ctx', '.topbar-account', '.statusbar-clock-date'].every(sel => document.querySelector(sel).getClientRects().length > 0)\`) });
+    result.push({ name: 'status bar shows usage, limits and system text content', ok: await win.webContents.executeJavaScript(\`(() => {
+      const limits = document.getElementById('oneai-statusbar-quota').textContent;
+      const usage = document.getElementById('oneai-statusbar-usage').textContent;
+      const sys = document.getElementById('oneai-statusbar-sys').textContent;
+      return usage.includes('Tokens: in 335k, out 167k, cache 321k') && usage.includes('Cache: 99%') && usage.includes('Cost: $0.24') && limits.includes('5h: ') && limits.includes('18%') && limits.includes('7d: ') && limits.includes('35%') && limits.includes('Model: gpt-5-codex') && usage.includes('Ctx: 62%')
+        && sys.includes('CPU: 100%') && sys.includes('GPU: 100%') && sys.includes('Memory: 31.9 GiB') && sys.includes('↑999KiB/s') && sys.includes('↓99.9MiB/s');
     })()\`) });
-    result.push({ name: 'topbar usage and system text content', ok: await win.webContents.executeJavaScript(\`(() => {
-      const quota = document.getElementById('oneai-topbar-quota').textContent;
-      const sys = document.getElementById('oneai-topbar-sys').textContent;
-      return quota.includes('Tokens: in 335k, out 167k, cache 321k') && quota.includes('Cache: 99%') && quota.includes('Cost: $0.24') && quota.includes('5h: 82%') && quota.includes('Model: gpt-5-codex') && quota.includes('Ctx: 62%')
-        && sys.includes('CPU: 100%') && sys.includes('GPU: 100%') && sys.includes('Mem: 31.9 GiB') && sys.includes('↑999KiB/s') && sys.includes('↓99.9MiB/s');
+    result.push({ name: 'status bar draws 5h / 7d / Ctx progress bars filled with the used share and colored by threshold', ok: await win.webContents.executeJavaScript(\`(() => {
+      const bars = () => [...document.querySelectorAll('#oneai-statusbar-quota [role="progressbar"], #oneai-statusbar-usage [role="progressbar"]')];
+      const fill = bar => bar.firstElementChild;
+      const first = bars();
+      const basicOk = first.length === 3 && first.map(b => b.getAttribute('aria-valuenow')).join() === '18,35,62' && first.map(b => fill(b).style.width).join() === '18%,35%,62%' && fill(first[0]).className.includes('bg-success');
+      window.drawQuota({ fiveHourPercent: 30, sevenDayPercent: 5, ctxPercent: 90 });
+      const warn = bars();
+      const toneOk = fill(warn[0]).className.includes('bg-warning') && fill(warn[1]).className.includes('bg-danger') && fill(warn[2]).className.includes('bg-danger') && warn[1].getAttribute('aria-valuenow') === '95';
+      window.drawQuota({ fiveHourPercent: -1, fiveHourResetsIn: '--' });
+      const unknown = bars()[0];
+      const unknownOk = unknown.getAttribute('aria-valuenow') === null && !unknown.firstElementChild && document.getElementById('oneai-statusbar-quota').textContent.includes('5h: --');
+      return basicOk && toneOk && unknownOk;
     })()\`) });
-    result.push({ name: 'topbar renders Ctx 0%, token-only Ctx, and legacy total Tokens fallback', ok: await win.webContents.executeJavaScript(\`(() => {
+    result.push({ name: 'status bar renders Ctx 0%, token-only Ctx, and legacy total Tokens fallback', ok: await win.webContents.executeJavaScript(\`(() => {
       window.drawQuota({ ctxPercent: 0 });
-      const zeroOk = document.getElementById('oneai-topbar-quota').textContent.includes('Ctx: 0%');
+      const zeroOk = document.getElementById('oneai-statusbar-usage').textContent.includes('Ctx: 0%');
       window.drawQuota({ ctxPercent: undefined, ctxTokens: 195_000, ctxWindow: undefined });
-      const tokCtxOk = document.getElementById('oneai-topbar-quota').textContent.includes('Ctx: 195k');
+      const tokCtxOk = document.getElementById('oneai-statusbar-usage').textContent.includes('Ctx: 195k') && document.querySelectorAll('#oneai-statusbar-quota [aria-valuenow]').length === 2;
       window.drawQuota({ tokens: 866_000, tokenInput: undefined, tokenOutput: undefined, tokenCache: undefined, cacheHitPercent: undefined });
-      const legacyOk = document.getElementById('oneai-topbar-quota').textContent.includes('Tokens: 866k');
+      const legacyOk = document.getElementById('oneai-statusbar-usage').textContent.includes('Tokens: 866k');
       return zeroOk && tokCtxOk && legacyOk;
     })()\`) });
-    result.push({ name: 'topbar labels latest-session metrics, estimated context, and unknown quota', ok: await win.webContents.executeJavaScript(\`(() => {
+    result.push({ name: 'status bar labels latest-session metrics, estimated context, and unknown quota', ok: await win.webContents.executeJavaScript(\`(() => {
       window.drawQuota({ cliId: 'pi', sessionScope: 'latest', ctxEstimated: true, fiveHourPercent: -1, fiveHourResetsIn: '--', sevenDayPercent: -1, sevenDayResetsOn: '--' });
-      const bar = document.getElementById('oneai-topbar-quota');
+      const bar = document.getElementById('oneai-statusbar');
       return bar.textContent.includes('最近') && bar.textContent.includes('5h: --') && bar.textContent.includes('7d: --')
         && [...bar.querySelectorAll('[title]')].some(el => el.title.includes('最近活跃会话') && el.title.includes('按最近请求估算'));
     })()\`) });
@@ -881,7 +893,7 @@ app.whenReady().then(async () => {
       hoursInput().focus(); setValue(hoursInput(), ''); hoursInput().blur(); await tick();
       check('leaving the reminder input empty restores the last valid value', hoursInput().value === '12');
       [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.trim() === '时间').click(); await tick();
-      const offsetInput = () => document.querySelector('input[aria-label="顶栏时钟增加的小时数"]');
+      const offsetInput = () => document.querySelector('input[aria-label="状态栏时钟增加的小时数"]');
       offsetInput().focus(); setValue(offsetInput(), '-'); await tick();
       check('clock offset accepts a lone minus sign while typing', offsetInput().value === '-');
       setValue(offsetInput(), '-5'); await tick();
@@ -961,11 +973,17 @@ app.whenReady().then(async () => {
       }
       [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.trim() === 'Time').click(); await tick();
       const dateSwitch = () => document.querySelector('button[role="switch"][aria-label="Show date"]');
-      check('time page has the top bar date switch, on by default', dateSwitch()?.getAttribute('aria-checked') === 'true');
+      check('time page has the status bar date switch, on by default', dateSwitch()?.getAttribute('aria-checked') === 'true');
       dateSwitch().click(); await tick(100);
       check('the date switch turns the setting off', window.currentSettings().topbarDateVisible === false && dateSwitch().getAttribute('aria-checked') === 'false');
       dateSwitch().click(); await tick(100);
       check('the date switch turns it back on', window.currentSettings().topbarDateVisible === true);
+      const barSwitch = () => document.querySelector('button[role="switch"][aria-label="Show status bar"]');
+      check('time page has the status bar switch, on by default', barSwitch()?.getAttribute('aria-checked') === 'true');
+      barSwitch().click(); await tick(100);
+      check('the status bar switch turns the setting off', window.currentSettings().statusBarVisible === false);
+      barSwitch().click(); await tick(100);
+      check('the status bar switch turns it back on', window.currentSettings().statusBarVisible === true);
       [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.trim() === 'Account').click(); await tick(300);
       check('accounts page shows the real home directory instead of a fixed path', document.body.textContent.includes('C:/Users/tester') && !document.body.textContent.includes('你'));
       [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.trim() === 'Appearance').click(); await tick();
@@ -974,7 +992,7 @@ app.whenReady().then(async () => {
       } catch (e) { check('settings language tests threw: ' + String(e.stack).split(String.fromCharCode(10)).slice(0, 3).join(' | '), false); }
       return checks;
     })()\`));
-    // 首次引导（选语言、欢迎页）与顶栏日期开关
+    // 首次引导（选语言、欢迎页）与状态栏日期开关
     result.push(...await win.webContents.executeJavaScript(\`(async () => {
       const checks = [];
       const check = (name, ok) => checks.push({ name, ok: Boolean(ok) });
@@ -1018,18 +1036,34 @@ app.whenReady().then(async () => {
           check('English usage heatmap fills the row without horizontal overflow', Boolean(g) && g.parentElement.scrollWidth <= g.parentElement.clientWidth && Math.abs(g.getBoundingClientRect().width - g.closest('section').getBoundingClientRect().width) <= 4);
         }
       }
+      // 英文长文案不得撑破布局：找出被截断却没有省略号的文本，以及超出视口的元素
+      const clipped = (root) => [...root.querySelectorAll('*')].filter((el) => {
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || !el.textContent.trim() || el.closest('svg,canvas,pre,code,.xterm,.sr-only') || el.classList.contains('sr-only')) return false;
+        const r = el.getBoundingClientRect();
+        if (r.width === 0) return false;
+        const ellipsis = cs.textOverflow === 'ellipsis' || el.className.toString().includes('truncate');
+        const scrolls = cs.overflowX === 'auto' || cs.overflowX === 'scroll';
+        return (cs.overflowX !== 'visible' && !ellipsis && !scrolls && el.scrollWidth > el.clientWidth + 1) || r.right > window.innerWidth + (el.closest('.drawer-panel') ? 25 : 1);
+      }).slice(0, 5).map((el) => el.tagName.toLowerCase() + '.' + el.className.toString().split(' ').slice(0, 3).join('.') + '[' + el.textContent.trim().slice(0, 30) + ']');
+      window.setUiLanguage('en');
+      for (const [name, fn] of [['main layout', () => window.draw()], ['sidebar', () => window.drawSidebar()], ['account sidebar', () => window.drawAccountSidebar()], ['usage', () => window.drawUsage()], ['dashboard', () => window.drawDashboard()], ['history', () => window.drawHistory([])], ['settings', () => window.drawSettings()], ['onboarding', () => window.drawOnboarding([{ id: 'codex', name: 'Codex', icon: 'codex' }])], ['new task', () => window.drawNewTask([])]]) {
+        fn(); await tick(name === 'history' ? 900 : 300);
+        const bad = clipped(document.body);
+        check('English ' + name + ' has no clipped or overflowing text' + (bad.length ? ': ' + bad.join(' | ') : ''), bad.length === 0);
+      }
       window.setUiLanguage('zh-CN');
-      // 顶栏日期：最大化且空间充足时显示年月日与星期，设置里关闭后只显示时间
+      // 状态栏日期：空间充足时默认显示年月日与星期，设置里关闭后只显示时间
       const lightQuota = { tokens: undefined, tokenInput: undefined, tokenOutput: undefined, tokenCache: undefined, cacheHitPercent: undefined, costUsd: undefined, sevenDayPercent: -1, sevenDayResetsOn: '--', ctxPercent: undefined, ctxTokens: undefined };
       window.hideDate = false; window.drawQuota(lightQuota); await tick();
       window.setMaximized(true); await tick(400);
-      const clock = () => document.getElementById('oneai-topbar-clock').textContent.trim();
-      check('maximized top bar shows the date by default', clock().indexOf('-') > 0 && clock().indexOf(':') > 0);
+      const clock = () => document.getElementById('oneai-statusbar-clock').textContent.trim();
+      check('status bar shows the date by default', clock().indexOf('-') > 0 && clock().indexOf(':') > 0);
       window.setUiLanguage('zh-TW'); window.drawQuota(lightQuota); await tick(400);
       check('Traditional Chinese clock shows the lunar month and localized weekday', clock().includes('月') && clock().includes('週'));
       window.setUiLanguage('zh-CN');
       window.hideDate = true; window.drawQuota(lightQuota); await tick(400);
-      check('with the date switched off the top bar shows only the time', clock().indexOf('-') < 0 && clock().split(':').length === 3);
+      check('with the date switched off the status bar shows only the time', clock().indexOf('-') < 0 && clock().split(':').length === 3);
       window.hideDate = false; window.setMaximized(false); window.draw(); await tick();
       return checks;
     })()\`));
@@ -1641,9 +1675,24 @@ app.whenReady().then(async () => {
       window.dashboardEmpty = false;
       window.drawDashboard(true); await wait(250);
       const dash = document.getElementById('oneai-dashboard-view');
-      check('Dashboard topbar shows Dashboard breadcrumb and hides terminal tools and quota strip', document.querySelector('header').textContent.includes('Dashboard') && !document.getElementById('oneai-terminal-tools') && !document.getElementById('oneai-topbar-quota'));
+      check('Dashboard topbar shows Dashboard breadcrumb and hides terminal tools and quota strip', document.querySelector('header').textContent.includes('Dashboard') && !document.getElementById('oneai-terminal-tools') && !document.querySelector('header .quota-bar') && !document.querySelector('header').textContent.includes('Ctx'));
       check('Dashboard renders 4 KPI cards with deduplicated session count and estimated USD cost', dash.querySelector('[data-kpi="tokens"]').textContent.includes('4.33 M') && dash.querySelector('[data-kpi="sessions"]').textContent.includes('5') && dash.querySelector('[data-kpi="cost"]').textContent.includes('$6.45') && dash.querySelector('[data-kpi="cache"]').textContent.includes('%'));
       check('Dashboard renders 12-month heatmap with active and hatched missing cells', dash.querySelectorAll('[data-dashboard-cell]').length >= 364 && dash.querySelectorAll('[data-dashboard-cell][data-status="active"]').length === 6 && dash.querySelectorAll('[data-dashboard-cell][data-status="missing"]').length > 200);
+      const dashHeader = dash.querySelector('[data-dashboard-header]');
+      const dashScroll = dash.querySelector('[data-dashboard-scroll]');
+      const dashKpis = dash.querySelector('[data-dashboard-kpis]');
+      const dashHeaderBounds = dashHeader.getBoundingClientRect();
+      const dashTitleBounds = dashHeader.querySelector('header').getBoundingClientRect();
+      const dashKpiBounds = dashKpis.getBoundingClientRect();
+      dashScroll.scrollTop = 160;
+      check('Dashboard scrolls only the analytics area below the fixed header', dashScroll.scrollTop > 0
+        && dash.scrollTop === 0 && dashHeader.getBoundingClientRect().top === dashHeaderBounds.top
+        && dashHeader.getBoundingClientRect().bottom === dashHeaderBounds.bottom
+        && dashScroll.getBoundingClientRect().top === dashHeaderBounds.bottom
+        && Math.abs(dashKpis.getBoundingClientRect().top - (dashKpiBounds.top - dashScroll.scrollTop)) < 1
+        && Math.abs(dashKpiBounds.left - dashTitleBounds.left) < 1
+        && Math.abs(dashKpiBounds.right - dashTitleBounds.right) < 1);
+      dashScroll.scrollTop = 0;
       dash.querySelector('[data-dashboard-range="today"]').click(); await wait(100);
       check('switching range tab to today filters KPIs to today only', dash.querySelector('[data-kpi="tokens"]').textContent.includes('1.01 M') && dash.querySelector('[data-kpi="sessions"]').textContent.includes('1'));
       dash.querySelector('[data-dashboard-range="overview"]').click(); await wait(100);
@@ -1667,6 +1716,16 @@ app.whenReady().then(async () => {
       check('removing the model chip restores all model rows', dash.querySelectorAll('[data-dashboard-model-row]').length === 5);
       check('Account quotas panel renders multi-group Antigravity and Codex accounts', dash.querySelector('[data-dashboard-quotas]').textContent.includes('Gemini Models') && dash.querySelector('[data-dashboard-quotas]').textContent.includes('Claude and GPT models') && dash.querySelector('[data-dashboard-quotas]').textContent.includes('Gemini 4 Argon') && dash.querySelector('[data-dashboard-quotas]').textContent.includes('alt'));
       check('Model details table renders rows including unpriced label', dash.querySelectorAll('[data-dashboard-model-row]').length === 5 && dash.querySelector('#dashboard-model-details').textContent.includes('未定价'));
+      const dashModels = dash.querySelector('#dashboard-model-details');
+      // The hidden test window does not advance the smooth scroll animation.
+      dashModels.scrollIntoView = (options) => Element.prototype.scrollIntoView.call(dashModels, { ...options, behavior: 'instant' });
+      [...dash.querySelectorAll('button')].find(b => b.textContent.includes('查看模型明细')).click();
+      delete dashModels.scrollIntoView;
+      const dashModelBounds = dashModels.getBoundingClientRect();
+      check('Dashboard model details jump stays below the fixed header', dashScroll.scrollTop > 0
+        && dashHeader.getBoundingClientRect().top === dashHeaderBounds.top
+        && dashModelBounds.top >= dashHeader.getBoundingClientRect().bottom - 1
+        && dashModelBounds.top < dashScroll.getBoundingClientRect().bottom);
       dash.querySelector('[data-dashboard-task="dash-t1"]').click();
       check('clicking a workspace task card jumps back to that task', window.events.includes('dashboard-task:dash-t1'));
       [...dash.querySelectorAll('button')].find(b => b.textContent.includes('返回终端')).click();

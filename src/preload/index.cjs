@@ -84,6 +84,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeListener('quota:update', subscription);
     };
   },
+  setSystemStatsEnabled: (enabled) => ipcRenderer.send('system:set-stats-enabled', enabled),
   onSystemStats: (callback) => {
     const subscription = (_event, value) => callback(value);
     ipcRenderer.on('system:stats', subscription);

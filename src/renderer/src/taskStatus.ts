@@ -3,11 +3,12 @@ import type { SessionCreateResult } from '../../shared/types';
 import { t } from './i18n';
 
 // 任务状态的统一文案与圆点样式（侧栏任务行使用）。
-// 启动中（脉冲）与运行中（转圈）使用动画，并遵循系统「减少动态效果」设置；减少动态效果时运行中显示为空心圈。
+// 只有启动中用脉冲动画（持续数秒，遵循系统「减少动态效果」）；运行中是绿色空心圆，不做持续动画，
+// 否则每个运行中的任务都会让窗口以 60 fps 持续重绘（6 个任务时约占单核 16%）。
 // 空闲（还没干过活）是灰色空心圆，等待输入（跑完一轮、输出已静默）是绿色实心圆。
 export const TASK_STATUS_META: Record<TaskStatus, { label: string; hint: string; dot: string }> = {
   starting: { get label() { return t('启动中'); }, get hint() { return t('正在启动终端'); }, dot: 'bg-accent motion-safe:animate-pulse' },
-  running: { get label() { return t('运行中'); }, get hint() { return t('终端运行中'); }, dot: 'border border-success border-t-transparent motion-safe:animate-spin' },
+  running: { get label() { return t('运行中'); }, get hint() { return t('终端运行中'); }, dot: 'border border-success' },
   idle: { get label() { return t('空闲'); }, get hint() { return t('终端空闲'); }, dot: 'border border-fg-faint' },
   waiting: { get label() { return t('等待输入'); }, get hint() { return t('已完成一轮输出，等待你的输入'); }, dot: 'bg-success' },
   stopped: { get label() { return t('已停止'); }, get hint() { return t('终端已停止'); }, dot: 'bg-fg-faint' },

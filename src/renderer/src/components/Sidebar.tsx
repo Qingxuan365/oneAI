@@ -1049,7 +1049,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
       {showMusicPlayer && <MusicPlayer key="music-player" directory={musicDirectory} streams={musicStreams} />}
 
       {/* 侧边栏底部：添加文件夹与设置 */}
-      <div className="flex shrink-0 items-center gap-1 border-t border-line bg-panel p-2">
+      <div className="flex h-16 shrink-0 items-center gap-1 border-t border-line bg-panel px-2">
         <button
           type="button"
           onClick={onAddFolder}

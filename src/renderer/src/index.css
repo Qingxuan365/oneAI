@@ -766,55 +766,56 @@ html, body, #root {
 }
 
 /*
- * 时钟根据实际剩余空间在 Topbar.tsx 中动态降级（完整日期时间 -> HH:MM:SS -> 隐藏）；
- * 其余次要信息按顶栏宽度逐级收起，依次为：网速、内存、GPU、CPU、Tokens 明细折为总计、Tokens/Cache/Cost、额度重置时间、Ctx、模型名。
- * 断点使用 rem，随界面缩放档位一起变化，比较对象是顶栏去掉内边距后的内容宽度；
- * 面包屑由 flex 自动截断。各断点按「面包屑与工具至少留约 394px（任务名约 56px）+ 已显示的各块自然宽度」估算，
- * 系统资源按最宽取值（定宽）计算。
- * 新增或加宽顶栏内容后，需要在 check-ui 的宽度扫描里重新确认没有重叠。
+ * 顶栏只放导航与操作，任务面包屑由 flex 自动截断，仅在很窄时收起 CLI 名与账号徽标。
+ * 额度、会话用量、系统资源与时钟在底部状态栏（StatusBar.tsx），按状态栏宽度逐级收起：
+ * 上行：时钟日期与星期、额度「已用」字样与重置时间、模型名；下行：网速、内存、GPU、Tokens 明细折为总计、系统资源、Ctx、用量整行。
+ * 断点使用 rem，随界面缩放档位一起变化，比较对象是状态栏去掉内边距后的内容宽度，按各块自然宽度估算。
+ * 新增或加宽状态栏内容后，需要在 check-ui 的宽度扫描里重新确认两行都没有溢出。
  */
 .topbar {
   container: topbar / inline-size;
 }
+.statusbar {
+  container: statusbar / inline-size;
+}
 .quota-tokens-compact {
   display: none;
 }
-@container topbar (max-width: 114rem) {
-  .topbar-sys-net { display: none; }
+@container statusbar (max-width: 78rem) {
+  .statusbar-clock-date { display: none; }
 }
-@container topbar (max-width: 108rem) {
-  .topbar-sys-mem { display: none; }
+@container statusbar (max-width: 72rem) {
+  .quota-detail { display: none; }
 }
-@container topbar (max-width: 99rem) {
-  .topbar-sys-gpu { display: none; }
+@container statusbar (max-width: 68rem) {
+  .statusbar-sys-net { display: none; }
 }
-@container topbar (max-width: 94rem) {
-  .topbar-sys { display: none; }
-}
-@container topbar (max-width: 90rem) {
+@container statusbar (max-width: 60rem) {
+  .statusbar-sys-mem { display: none; }
   .quota-tokens-breakdown { display: none; }
   .quota-tokens-compact { display: inline; }
 }
-@container topbar (max-width: 78rem) {
-  .quota-usage { display: none; }
+@container statusbar (max-width: 46rem) {
+  .statusbar-sys-gpu { display: none; }
 }
-@container topbar (max-width: 65rem) {
-  .quota-detail { display: none; }
+@container statusbar (max-width: 40rem) {
+  .quota-model { display: none; }
+  .statusbar-sys { display: none; }
 }
-@container topbar (max-width: 53.5rem) {
+@container statusbar (max-width: 38rem) {
   .quota-ctx { display: none; }
 }
+@container statusbar (max-width: 26rem) {
+  .quota-usage { display: none; }
+}
 @container topbar (max-width: 52.5rem) {
-  .quota-model { display: none; }
   .topbar-account { display: none; }
 }
 @container topbar (max-width: 48.5rem) {
   .topbar-group-name { display: none; }
 }
 @container topbar (max-width: 28.5rem) {
-  .quota-model-info, .quota-model-divider { display: none; }
   #oneai-terminal-tools { gap: 0; }
-  #oneai-topbar-quota > div { gap: 0.25rem; }
 }
 
 /* 无边框窗口：顶栏与侧栏品牌头部可拖动窗口；交互控件不可拖动；顶栏右侧给窗口控件覆盖层留位（无覆盖层时为 0） */
@@ -911,6 +912,12 @@ input[type='range'].seek-input:disabled { cursor: not-allowed; }
   .seekbar.is-playing .seekbar-fill::after { animation: seekbar-glow 1.6s ease-in-out infinite; }
 }
 
+/* 头部和滚动区共用留白与滚动条占位，保持内容左右对齐。 */
+.dashboard-section {
+  padding-inline: max(1.5rem, (100% - 79rem) / 2);
+  scrollbar-gutter: stable;
+}
+
 /* 极细滚动条，颜色随主题 */
 ::-webkit-scrollbar {
   width: 6px;
@@ -929,7 +936,7 @@ input[type='range'].seek-input:disabled { cursor: not-allowed; }
 
 /* xterm.js 容器样式适配：严禁在 .xterm 上加 padding，避免与字符矩阵发生错位与滚动拖影 */
 .xterm {
-  height: 100%;
+  height: auto; /* 由外层 flex 垂直居中，fit 后不足一行的余量平分到上下 */
   width: 100%;
   /* 横向裁剪放在外层，helpers 不再裁剪，避免 IME 定位矩形被零高度容器截断 */
   overflow: hidden;

@@ -78,7 +78,8 @@ export default defineConfig({
           if (!ctx.bundle) return html
           const hashes: string[] = []
           for (const match of html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)) {
-            const digest = crypto.createHash('sha256').update(match[1], 'utf8').digest('base64')
+            // 浏览器解析 HTML 时先把 CRLF / CR 统一成 LF 再算哈希；Windows 上检出的 index.html 是 CRLF，须先归一化
+            const digest = crypto.createHash('sha256').update(match[1].replace(/\r\n?/g, '\n'), 'utf8').digest('base64')
             hashes.push(`'sha256-${digest}'`)
           }
           const scriptSrc = ["'self'", ...hashes].join(' ')

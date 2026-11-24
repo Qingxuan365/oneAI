@@ -147,6 +147,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     };
   },
 
+  setSystemStatsEnabled: (enabled: boolean) => ipcRenderer.send('system:set-stats-enabled', enabled),
+
   onSystemStats: (callback: (stats: SystemStats) => void) => {
     const subscription = (_event: Electron.IpcRendererEvent, value: SystemStats) => callback(value);
     ipcRenderer.on('system:stats', subscription);

@@ -327,8 +327,8 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
   }, []);
 
   return (
-    <div id="oneai-dashboard-view" className="h-full w-full overflow-y-auto bg-canvas text-fg">
-      <div className="mx-auto max-w-[82rem] space-y-5 px-6 py-6">
+    <div id="oneai-dashboard-view" className="flex h-full w-full flex-col overflow-clip bg-canvas text-fg">
+      <div className="dashboard-section shrink-0 space-y-5 overflow-hidden pt-6" data-dashboard-header>
         {/* 顶部标题与操作栏 */}
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -492,7 +492,9 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
             </select>
           </div>
         </div>
+      </div>
 
+      <div className="dashboard-section min-h-0 flex-1 space-y-5 overflow-x-hidden overflow-y-auto pb-6 pt-5" data-dashboard-scroll>
         {loading && !stats && (
           <div className="rounded-xl border border-line bg-surface/60 p-12 text-center text-sm text-fg-subtle">
             {t('正在整理本机各 CLI 会话与用量记录…')}

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ptyManager } from './pty-manager';
 import { quotaService } from './quota-service';
-import { startSystemStats } from './system-stats';
+import { setSystemStatsEnabled, startSystemStats } from './system-stats';
 import { checkAccountLogin } from './account-login';
 import { setupGitBranch } from './git-branch';
 import { setupTaskSummary } from './task-summary';
@@ -18,6 +18,7 @@ import { setupProjectTree } from './project-tree';
 import { bindWindowState, loadWindowState, WindowStateTracker } from './window-state';
 import { getLanguage, setLanguage, t } from './i18n';
 import { quoteTerminalPath } from '../shared/paths';
+import { encodeBgraToPng } from './png-encode';
 import { startDiagnostics, timed, watchWindow } from './diagnostics';
 
 registerMusicScheme();
@@ -236,6 +237,10 @@ function setupIPC() {
     return true;
   });
 
+  ipcMain.on('system:set-stats-enabled', (_event, enabled: unknown) => {
+    setSystemStatsEnabled(enabled !== false);
+  });
+
   ipcMain.on('terminal:set-active', (_event, id: unknown, cliId?: unknown) => {
     ptyManager.setActiveSession(typeof id === 'string' && id ? id : null);
     quotaService.setActiveCli(typeof cliId === 'string' && cliId ? cliId : null);
@@ -300,9 +305,11 @@ function setupIPC() {
       }
 
       // 3. 检查剪贴板是否含有位图（如截图、复制的图像）
-      const img = clipboard.readImage();
-      if (!img.isEmpty()) {
-        const pngBuffer = img.toPNG();
+      // 先看格式再读取，纯文本粘贴不碰位图；PNG 编码放到 worker，主线程只取原始像素（BGRA）
+      const img = clipboard.availableFormats().some((format) => format.startsWith('image/')) ? clipboard.readImage() : null;
+      if (img && !img.isEmpty()) {
+        const { width, height } = img.getSize();
+        const pngBuffer = await encodeBgraToPng(img.toBitmap(), width, height).catch(() => img.toPNG());
         const tempDir = path.join(app.getPath('temp'), 'OneAI_Images');
         await fs.promises.mkdir(tempDir, { recursive: true });
         pasteSeq = (pasteSeq + 1) % 10000;

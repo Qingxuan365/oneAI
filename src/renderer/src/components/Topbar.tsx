@@ -1,10 +1,8 @@
-import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { FolderOpen, FolderTree, ChevronRight, LayoutDashboard, Search, Eraser, RotateCcw, Download, Copy, FileText, Check, PanelLeftClose, PanelLeftOpen, History } from 'lucide-react';
-import { InlineQuotaText } from './InlineQuotaText';
-import { SystemStatsText } from './SystemStatsText';
-import { QuotaData, TaskSession, CliDef } from '../types';
+import { TaskSession, CliDef } from '../types';
 import { BrandIcon } from './BrandIcon';
-import { getLanguage, t } from '../i18n';
+import { t } from '../i18n';
 
 interface TopbarProps {
   isSidebarCollapsed: boolean;
@@ -15,11 +13,6 @@ interface TopbarProps {
   accountName?: string;
   /** 没有活动任务时显示的当前文件夹（新任务将在此启动）与 Git 分支 */
   emptyFolder?: { name: string; branch?: string | null };
-  quota: QuotaData | null;
-  clockOffsetHours?: number;
-  /** 窗口最大化时是否在时钟里显示年月日（含农历）与星期，默认显示；设置 → 时间 里可关闭 */
-  dateVisible?: boolean;
-  onRefreshQuota: () => Promise<void>;
   onOpenSearch?: () => void;
   onClearScreen?: () => void;
   onRestartSession?: () => Promise<void>;
@@ -32,127 +25,6 @@ interface TopbarProps {
   language?: string;
 }
 
-// 数字日期转中文数字（1~30）
-function toChineseDay(n: number): string {
-  const digits = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
-  if (n <= 10) return digits[n];
-  if (n < 20) return `十${digits[n - 10]}`;
-  if (n === 20) return '二十';
-  if (n < 30) return `二十${digits[n - 20]}`;
-  return '三十';
-}
-
-let lunarFormatter: Intl.DateTimeFormat | undefined;
-let lunarLocale = '';
-let cachedLunarKey = '';
-let cachedLunarValue = '';
-
-function getLunarStr(now: Date, locale: string): string {
-  const dayKey = `${locale}:${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
-  if (dayKey === cachedLunarKey) return cachedLunarValue;
-  try {
-    if (!lunarFormatter || lunarLocale !== locale) {
-      lunarFormatter = new Intl.DateTimeFormat(`${locale}-u-ca-chinese`, {
-        month: 'long',
-        day: 'numeric',
-      });
-      lunarLocale = locale;
-    }
-    const parts = lunarFormatter.formatToParts(now);
-    const month = parts.find((p) => p.type === 'month')?.value ?? '';
-    const dayNum = parseInt(parts.find((p) => p.type === 'day')?.value ?? '0', 10);
-    cachedLunarKey = dayKey;
-    cachedLunarValue = `${month}${toChineseDay(dayNum)}日`;
-    return cachedLunarValue;
-  } catch {
-    cachedLunarKey = dayKey;
-    cachedLunarValue = '';
-    return '';
-  }
-}
-
-export type ClockDisplayMode = 'full' | 'time' | 'hidden';
-
-/** 根据可用宽度与时钟自身宽度决定显示模式，进入更宽档位时带滞回防止边界抖动 */
-export function resolveClockDisplayMode(
-  availableWidth: number,
-  timeWidth: number,
-  fullWidth: number,
-  wantsFull: boolean,
-  currentMode: ClockDisplayMode | null = null,
-  hysteresis = 8,
-): ClockDisplayMode {
-  if (timeWidth <= 0) return 'hidden';
-  const fullThreshold = currentMode === 'full' ? fullWidth : fullWidth + (currentMode === null ? 0 : hysteresis);
-  if (wantsFull && fullWidth > 0 && availableWidth >= fullThreshold) {
-    return 'full';
-  }
-  const timeThreshold = currentMode === 'time' || currentMode === 'full'
-    ? timeWidth
-    : timeWidth + (currentMode === null ? 0 : hysteresis);
-  if (availableWidth >= timeThreshold) {
-    return 'time';
-  }
-  return 'hidden';
-}
-
-const parsePx = (value: string, fallback = 6): number => {
-  const n = parseFloat(value);
-  return Number.isFinite(n) ? n : fallback;
-};
-
-// offsetHours：顶栏时间相对系统时间增加的小时数，在设置的「时间」栏目中配置
-function getFormattedTime(showDate: boolean, offsetHours: number): string {
-  const now = new Date(Date.now() + (Number.isFinite(offsetHours) ? offsetHours : 0) * 60 * 60 * 1000);
-  const h = String(now.getHours()).padStart(2, '0');
-  const m = String(now.getMinutes()).padStart(2, '0');
-  const s = String(now.getSeconds()).padStart(2, '0');
-  if (!showDate) return `${h}:${m}:${s}`;
-  const weekdays = [t('周日'), t('周一'), t('周二'), t('周三'), t('周四'), t('周五'), t('周六')];
-  const Y = now.getFullYear();
-  const M = String(now.getMonth() + 1).padStart(2, '0');
-  const D = String(now.getDate()).padStart(2, '0');
-  const w = weekdays[now.getDay()];
-  const language = getLanguage();
-  const lunar = language === 'en' ? '' : getLunarStr(now, language);
-  const lunarPart = lunar ? `（${lunar}）` : '';
-  return `${Y}-${M}-${D}${lunarPart} ${h}:${m}:${s} ${t('（{weekday}）', { weekday: w })}`;
-}
-
-/** 独立时钟节点：每秒滴答只更新自身文本，不触发整条顶栏重渲染；隐藏或窗口不可见时暂停滴答 */
-const TopbarClock: React.FC<{ mode: ClockDisplayMode; clockOffsetHours: number; language?: string }> = React.memo(({
-  mode,
-  clockOffsetHours,
-}) => {
-  const [, setTick] = useState(0);
-
-  useEffect(() => {
-    if (mode === 'hidden') return;
-    const refreshIfVisible = () => {
-      if (document.hidden) return;
-      setTick((v) => (v + 1) % 1_000_000);
-    };
-    const timer = setInterval(refreshIfVisible, 1000);
-    document.addEventListener('visibilitychange', refreshIfVisible);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener('visibilitychange', refreshIfVisible);
-    };
-  }, [mode]);
-
-  return (
-    <div
-      id="oneai-topbar-clock"
-      data-clock-mode={mode}
-      className={`topbar-clock pointer-events-none shrink-0 whitespace-nowrap px-1.5 font-mono text-xs font-bold tabular-nums tracking-wide text-fg-subtle ${mode === 'hidden' ? 'hidden' : ''}`}
-    >
-      {mode === 'hidden' ? '' : getFormattedTime(mode === 'full', clockOffsetHours)}
-    </div>
-  );
-});
-
-TopbarClock.displayName = 'TopbarClock';
-
 export const Topbar: React.FC<TopbarProps> = React.memo(({
   isSidebarCollapsed,
   onToggleSidebar,
@@ -160,10 +32,6 @@ export const Topbar: React.FC<TopbarProps> = React.memo(({
   activeTask,
   accountName,
   emptyFolder,
-  quota,
-  clockOffsetHours = 0,
-  dateVisible = true,
-  onRefreshQuota,
   onOpenSearch,
   onClearScreen,
   onRestartSession,
@@ -172,188 +40,11 @@ export const Topbar: React.FC<TopbarProps> = React.memo(({
   isDashboardOpen = false,
   isFileTreeOpen,
   onToggleFileTree,
-  language,
 }) => {
-  const [isMaximized, setIsMaximized] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [action, setAction] = useState<{ text: string; ok: boolean } | null>(null);
-  const [clockMode, setClockMode] = useState<ClockDisplayMode>('hidden');
   const exportMenuRef = useRef<HTMLDivElement>(null);
-  const headerRef = useRef<HTMLElement>(null);
-  const leftGroupRef = useRef<HTMLDivElement>(null);
-  const timeMeasureRef = useRef<HTMLSpanElement>(null);
-  const fullMeasureRef = useRef<HTMLSpanElement>(null);
-  const clockModeRef = useRef<ClockDisplayMode | null>(null);
   const actionTimerRef = useRef(0);
-
-  const wantsFull = isMaximized && dateVisible;
-  const fullSample = wantsFull ? getFormattedTime(true, clockOffsetHours) : '';
-  const hasHistoryBtn = Boolean(onOpenHistory);
-  const hasFileTreeBtn = Boolean(onToggleFileTree);
-
-  const measureClockMode = useCallback(() => {
-    const header = headerRef.current;
-    const leftGroup = leftGroupRef.current;
-    const timeEl = timeMeasureRef.current;
-    if (!header || !leftGroup || !timeEl || header.clientWidth <= 0) return;
-
-    const headerStyle = getComputedStyle(header);
-    const padLeft = parsePx(headerStyle.paddingLeft, 0);
-    const padRight = parsePx(headerStyle.paddingRight, 0);
-    const headerGap = parsePx(headerStyle.columnGap || headerStyle.gap, 6);
-    const innerWidth = header.clientWidth - padLeft - padRight;
-    const rootFontSize = parsePx(getComputedStyle(document.documentElement).fontSize, 16);
-    const maxTruncatableReserve = 14 * rootFontSize;
-
-    const leftStyle = getComputedStyle(leftGroup);
-    const leftGap = parsePx(leftStyle.columnGap || leftStyle.gap, 6);
-
-    const measureLeftChild = (el: Element): number => {
-      const style = getComputedStyle(el);
-      if (style.display === 'none') return 0;
-      if (el.hasAttribute('data-topbar-breadcrumb')) {
-        const bGap = parsePx(style.columnGap || style.gap, 6);
-        let total = 0;
-        let count = 0;
-        for (const child of Array.from(el.children)) {
-          const cStyle = getComputedStyle(child);
-          if (cStyle.display === 'none' || child.getClientRects().length === 0) continue;
-          const w = child.hasAttribute('data-topbar-truncatable')
-            ? Math.min(Math.ceil((child as HTMLElement).scrollWidth), maxTruncatableReserve)
-            : child.getBoundingClientRect().width;
-          if (w > 0) {
-            total += w;
-            count += 1;
-          }
-        }
-        return count > 0 ? total + bGap * (count - 1) : 0;
-      }
-      if (el.getClientRects().length === 0) return 0;
-      if (el.hasAttribute('data-topbar-truncatable')) {
-        return Math.min(Math.ceil((el as HTMLElement).scrollWidth), maxTruncatableReserve);
-      }
-      return el.getBoundingClientRect().width;
-    };
-
-    let leftNeeded = 0;
-    let leftVisibleCount = 0;
-    for (const child of Array.from(leftGroup.children)) {
-      const w = measureLeftChild(child);
-      if (w > 0) {
-        leftNeeded += w;
-        leftVisibleCount += 1;
-      }
-    }
-    if (leftVisibleCount > 1) {
-      leftNeeded += leftGap * (leftVisibleCount - 1);
-    }
-
-    let rightTotal = 0;
-    let rightVisibleCount = 0;
-    for (const child of Array.from(header.children)) {
-      if (child === leftGroup || child.id === 'oneai-topbar-clock' || child.hasAttribute('data-topbar-measure')) {
-        continue;
-      }
-      if (child.getClientRects().length === 0) continue;
-      const w = child.getBoundingClientRect().width;
-      if (w > 0) {
-        rightTotal += w;
-        rightVisibleCount += 1;
-      }
-    }
-
-    const SAFETY_BUFFER = 8;
-    const otherVisibleCount = 1 + rightVisibleCount;
-    const availableWidth = innerWidth - leftNeeded - rightTotal - headerGap * otherVisibleCount - SAFETY_BUFFER;
-    const timeWidth = Math.ceil(timeEl.getBoundingClientRect().width);
-    const fullWidth = fullMeasureRef.current ? Math.ceil(fullMeasureRef.current.getBoundingClientRect().width) : 0;
-    const nextMode = resolveClockDisplayMode(availableWidth, timeWidth, fullWidth, wantsFull, clockModeRef.current);
-
-    clockModeRef.current = nextMode;
-    setClockMode((prev) => (prev === nextMode ? prev : nextMode));
-  }, [wantsFull]);
-
-  useLayoutEffect(() => {
-    measureClockMode();
-  }, [
-    measureClockMode,
-    language,
-    clockOffsetHours,
-    isDashboardOpen,
-    activeTask?.id,
-    activeTask?.title,
-    currentGroup?.id,
-    currentGroup?.name,
-    accountName,
-    emptyFolder?.name,
-    emptyFolder?.branch,
-    action?.text,
-    quota,
-    isSidebarCollapsed,
-    hasHistoryBtn,
-    hasFileTreeBtn,
-  ]);
-
-  useEffect(() => {
-    const header = headerRef.current;
-    const leftGroup = leftGroupRef.current;
-    if (!header || !leftGroup) return;
-
-    let rafId = 0;
-    const scheduleMeasure = () => {
-      if (rafId) return;
-      rafId = window.requestAnimationFrame(() => {
-        rafId = 0;
-        measureClockMode();
-      });
-    };
-
-    const resizeObserver = typeof ResizeObserver !== 'undefined'
-      ? new ResizeObserver(scheduleMeasure)
-      : null;
-
-    const syncObserved = () => {
-      if (!resizeObserver) return;
-      resizeObserver.disconnect();
-      resizeObserver.observe(header);
-      if (timeMeasureRef.current) resizeObserver.observe(timeMeasureRef.current);
-      if (fullMeasureRef.current) resizeObserver.observe(fullMeasureRef.current);
-      for (const child of Array.from(header.children)) {
-        if (child === leftGroup || child.id === 'oneai-topbar-clock' || child.hasAttribute('data-topbar-measure')) {
-          continue;
-        }
-        resizeObserver.observe(child);
-      }
-    };
-
-    syncObserved();
-
-    const mutationObserver = typeof MutationObserver !== 'undefined'
-      ? new MutationObserver(() => {
-        syncObserved();
-        scheduleMeasure();
-      })
-      : null;
-    mutationObserver?.observe(header, { childList: true });
-
-    return () => {
-      if (rafId) window.cancelAnimationFrame(rafId);
-      resizeObserver?.disconnect();
-      mutationObserver?.disconnect();
-    };
-  }, [measureClockMode]);
-
-  useEffect(() => {
-    let active = true;
-    const unsubscribe = window.electronAPI.onWindowMaximizedChange(setIsMaximized);
-    window.electronAPI.isWindowMaximized().then((maximized) => {
-      if (active) setIsMaximized(maximized);
-    });
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, []);
 
   // 点击外部或按 Esc 关闭导出下拉菜单
   useEffect(() => {
@@ -399,25 +90,9 @@ export const Topbar: React.FC<TopbarProps> = React.memo(({
   const menuItem = 'flex w-full items-center gap-2 px-3 py-2 text-left text-fg-muted transition-colors hover:bg-hover hover:text-fg';
 
   return (
-    <header ref={headerRef} className="topbar relative z-10 flex h-11 shrink-0 select-none items-center gap-1.5 border-b border-line bg-panel px-2.5">
-      {/* 测量占位节点：脱离文档流且继承字体与缩放，避免影响布局或撑大 scrollWidth */}
-      <div
-        aria-hidden="true"
-        data-topbar-measure
-        className="pointer-events-none invisible absolute left-0 top-0 h-0 w-0 overflow-hidden whitespace-nowrap"
-      >
-        <span ref={timeMeasureRef} className="inline-block w-max px-1.5 font-mono text-xs font-bold tabular-nums tracking-wide">
-          88:88:88
-        </span>
-        {wantsFull && (
-          <span ref={fullMeasureRef} className="inline-block w-max px-1.5 font-mono text-xs font-bold tabular-nums tracking-wide">
-            {fullSample}
-          </span>
-        )}
-      </div>
-
+    <header className="topbar relative z-10 flex h-11 shrink-0 select-none items-center gap-1.5 border-b border-line bg-panel px-2.5">
       {/* 左侧：侧栏开关、会话面包屑与终端工具；面包屑在空间不足时自动截断 */}
-      <div ref={leftGroupRef} className="flex min-w-0 flex-1 items-center gap-1.5 text-ui text-fg-muted">
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 text-ui text-fg-muted">
         <button
           type="button"
           onClick={onToggleSidebar}
@@ -516,19 +191,6 @@ export const Topbar: React.FC<TopbarProps> = React.memo(({
           </span>
         )}
       </div>
-
-      {/* 时钟：按顶栏实际剩余空间两级降级（完整日期时间 -> HH:MM:SS -> 隐藏） */}
-      <TopbarClock mode={clockMode} clockOffsetHours={clockOffsetHours} language={language} />
-
-      {/* 右侧：单行横排纯文字大模型配额（无弹窗、无浮窗）；没有活动终端或处于 Dashboard 页面时不显示额度与刷新按钮 */}
-      {!isDashboardOpen && activeTask && (
-        <div id="oneai-topbar-quota" className="flex shrink-0 items-center whitespace-nowrap border-l border-line pl-2">
-          <InlineQuotaText quota={quota} onRefresh={onRefreshQuota} language={language} />
-        </div>
-      )}
-
-      {/* 整机资源统计与活动终端无关，空间不足时由 .topbar-sys-* 依次收起 */}
-      <SystemStatsText language={language} />
 
       {onOpenHistory && (
         <button

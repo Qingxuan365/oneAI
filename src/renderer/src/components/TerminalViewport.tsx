@@ -940,8 +940,8 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
       if (task.id === activeTaskId && !instancesRef.current.has(task.id)) {
         const termContainer = document.createElement('div');
         termContainer.id = `terminal-${task.id}`;
-        termContainer.className = 'w-full h-full overflow-hidden';
-        termContainer.style.display = task.id === activeTaskId ? 'block' : 'none';
+        termContainer.className = 'w-full h-full overflow-hidden flex-col justify-center';
+        termContainer.style.display = task.id === activeTaskId ? 'flex' : 'none';
         terminalHost.appendChild(termContainer);
 
         const term = new Terminal({
@@ -1499,7 +1499,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
     else setScrollState({ up: false, fresh: false, canTop: false, altTop: false });
     instancesRef.current.forEach((instance, id) => {
       const isCurrent = id === activeTaskId;
-      instance.container.style.display = isCurrent ? 'block' : 'none';
+      instance.container.style.display = isCurrent ? 'flex' : 'none';
 
       if (isCurrent && !hiddenRef.current) {
         // 先按当前容器尺寸 fit，再写入隐藏期间攒下的输出，避免按旧宽度排版后再回卷
@@ -1671,7 +1671,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
       />
 
       {/* 留白加在外层容器上，不能加在 .xterm 上 */}
-      <div ref={containerRef} className="term-host w-full h-full overflow-hidden px-6 pt-2" style={{ display: tasks.length === 0 ? 'none' : 'block' }} />
+      <div ref={containerRef} className="term-host w-full h-full overflow-hidden px-6 py-2" style={{ display: tasks.length === 0 ? 'none' : 'block' }} />
       {scrollState.canTop && (
         <button
           type="button"

@@ -152,7 +152,7 @@ const IntField: React.FC<{ value: number; min: number; max: number; label: strin
   );
 };
 
-/** 时间页的「当前顶栏显示」预览：每秒刷新，不用重新打开页面 */
+/** 时间页的「当前状态栏显示」预览：每秒刷新，不用重新打开页面 */
 const ClockPreview: React.FC<{ offsetHours: number }> = ({ offsetHours }) => {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -161,7 +161,7 @@ const ClockPreview: React.FC<{ offsetHours: number }> = ({ offsetHours }) => {
   }, []);
   return (
     <p className="text-xs text-fg-faint">
-      {t('当前顶栏显示：{time}', { time: new Date(now + offsetHours * 3600_000).toLocaleString(dateLocale(), { hour12: false }) })}
+      {t('当前状态栏显示：{time}', { time: new Date(now + offsetHours * 3600_000).toLocaleString(dateLocale(), { hour12: false }) })}
       {offsetHours !== 0 && t('（系统时间 {sign}{n} 小时）', { sign: offsetHours > 0 ? '+' : '', n: offsetHours })}
     </p>
   );
@@ -295,7 +295,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 ))}
               </Section>
 
-              <Section title={t('界面缩放')} hint={t('侧栏、顶栏与弹窗的文字和元素大小')}>
+              <Section title={t('界面缩放')} hint={t('侧栏、顶栏、状态栏与弹窗的文字和元素大小')}>
                 <div className="grid grid-cols-2 gap-2" role="group" aria-label={t('界面全局字体与元素缩放')}>
                   {UI_SCALES.map((scale) => (
                     <button
@@ -556,7 +556,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           )}
 
           {tab === 'time' && (
-            <Section title={t('顶栏时钟')} hint={t('在系统时间上增加的小时数')}>
+            <Section title={t('状态栏时钟')} hint={t('在系统时间上增加的小时数')}>
               <div className={row}>
                 <span>
                   <span className="block">{t('增加小时数')}</span>
@@ -566,7 +566,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button type="button" onClick={() => setClockOffset(clockOffset - 1)} disabled={clockOffset <= -24} className="icon-btn border border-line-strong bg-canvas" title={t('减少 1 小时')} aria-label={t('减少 1 小时')}>
                     <Minus size={13} />
                   </button>
-                  <IntField label={t('顶栏时钟增加的小时数')} value={clockOffset} min={-24} max={24} onCommit={setClockOffset} />
+                  <IntField label={t('状态栏时钟增加的小时数')} value={clockOffset} min={-24} max={24} onCommit={setClockOffset} />
                   <button type="button" onClick={() => setClockOffset(clockOffset + 1)} disabled={clockOffset >= 24} className="icon-btn border border-line-strong bg-canvas" title={t('增加 1 小时')} aria-label={t('增加 1 小时')}>
                     <Plus size={13} />
                   </button>
@@ -576,11 +576,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className={row}>
                 <span>
                   <span className="block">{t('显示年月日')}</span>
-                  <span className="block text-xs text-fg-faint">{t('窗口最大化时，顶栏时钟显示年月日（中文界面含农历）与星期；关闭后只显示时间')}</span>
+                  <span className="block text-xs text-fg-faint">{t('状态栏时钟显示年月日（中文界面含农历）与星期，窗口过窄时自动收起；关闭后只显示时间')}</span>
                 </span>
                 <Switch label={t('显示年月日')} checked={settings.topbarDateVisible !== false} onChange={(checked) => update({ topbarDateVisible: checked })} />
               </div>
               <ClockPreview offsetHours={clockOffset} />
+              <div className={row}>
+                <span>
+                  <span className="block">{t('显示状态栏')}</span>
+                  <span className="block text-xs text-fg-faint">{t('终端下方的两行状态栏：任务状态、额度进度条、模型、会话用量、系统资源与时钟；关闭后终端多出两行高度')}</span>
+                </span>
+                <Switch label={t('显示状态栏')} checked={settings.statusBarVisible !== false} onChange={(checked) => update({ statusBarVisible: checked })} />
+              </div>
             </Section>
           )}
 

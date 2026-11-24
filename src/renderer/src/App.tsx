@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, Suspense, lazy } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
+import { StatusBar } from './components/StatusBar';
 import { TerminalViewport, TerminalViewportRef } from './components/TerminalViewport';
 import { Modal } from './components/Modal';
 import { ConfirmDialog, ConfirmOptions } from './components/ConfirmDialog';
@@ -51,6 +52,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   musicStreams: [],
   clockOffsetHours: 0,
   topbarDateVisible: true,
+  statusBarVisible: true,
   accounts: [],
   customClis: [],
 };
@@ -179,6 +181,11 @@ export const App: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>(loadSavedSettings);
   // 先于子组件渲染切换界面语言，t() 才能在本次渲染里取到新语言的译文
   setLanguage(settings.language);
+  // 状态栏关闭时让主进程停止整机资源采样并结束常驻 PowerShell，打开后恢复
+  const statusBarVisible = settings.statusBarVisible !== false;
+  useEffect(() => {
+    window.electronAPI?.setSystemStatsEnabled?.(statusBarVisible);
+  }, [statusBarVisible]);
   // 任务启动：按任务绑定的账号注入配置目录；账号配置已被删除时拒绝启动，避免悄悄回落到默认账号
   const accountsRef = useRef(settings.accounts);
   accountsRef.current = settings.accounts;
@@ -708,11 +715,8 @@ export const App: React.FC = () => {
       return { ...quota, ...summary.usage, sessionScope: 'task', ctxEstimated: true };
     }
     if (currentGroup.id === 'claude' && !activeTask.accountId && quota.sessionScope === 'latest') {
+      // 快照属于当前任务的会话时标为「当前任务会话」，否则保留「最近活跃会话」的数据并带「最近」标签
       if (quota.sessionId && quota.sessionId === summary?.sessionId) return { ...quota, sessionScope: 'task' };
-      return {
-        ...quota, model: undefined, effort: undefined, tokens: undefined, tokenInput: undefined, tokenOutput: undefined,
-        tokenCache: undefined, cacheHitPercent: undefined, costUsd: undefined, ctxPercent: undefined, ctxTokens: undefined, ctxWindow: undefined,
-      };
     }
     return quota;
   }, [quotas, currentGroup, activeTask, summaries]);
@@ -1327,7 +1331,7 @@ ${entry.cwd}`}
         language={settings.language}
       />
 
-      {/* 右侧：顶栏（单行横排纯文字额度） + 终端主视窗 */}
+      {/* 右侧：顶栏 + 终端主视窗 + 底部两行状态栏（额度、资源、时钟） */}
       <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
         <Topbar
           isSidebarCollapsed={isSidebarCollapsed}
@@ -1336,10 +1340,6 @@ ${entry.cwd}`}
           activeTask={activeTask}
           emptyFolder={emptyFolder}
           accountName={activeTask?.accountId ? (settings.accounts.find((a) => a.id === activeTask.accountId)?.name ?? t('账号已删除')) : undefined}
-          quota={currentQuota}
-          clockOffsetHours={settings.clockOffsetHours}
-          dateVisible={settings.topbarDateVisible !== false}
-          onRefreshQuota={handleRefreshQuota}
           onOpenSearch={handleOpenSearch}
           onClearScreen={handleClearScreen}
           onRestartSession={handleRestartActive}
@@ -1348,7 +1348,6 @@ ${entry.cwd}`}
           isFileTreeOpen={isFileTreeOpen}
           onToggleFileTree={handleToggleFileTree}
           onExportLogs={handleExportLogs}
-          language={settings.language}
         />
 
         {/* 多实例保活终端容器（切换任务或打开 Dashboard 时不销毁，display: none 保活） */}
@@ -1403,6 +1402,19 @@ ${entry.cwd}`}
               />
             </Suspense>
           </div>
+        )}
+
+        {settings.statusBarVisible !== false && (
+          <StatusBar
+            quota={currentQuota}
+            showQuota={!isDashboardOpen && Boolean(activeTask)}
+            taskStatus={isDashboardOpen ? undefined : activeTask?.status}
+            taskTitle={isDashboardOpen ? undefined : activeTask?.title}
+            clockOffsetHours={settings.clockOffsetHours}
+            dateVisible={settings.topbarDateVisible !== false}
+            onRefreshQuota={handleRefreshQuota}
+            language={settings.language}
+          />
         )}
       </div>
 

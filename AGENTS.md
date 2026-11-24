@@ -38,7 +38,7 @@ d:/GitHub/OneAI/
 │   │   ├── fs-utils.ts        # 路径大小写归一化、目录包含判断、文件切片与 .zst 流式解压、LRU 容量上限 Map
 │   │   ├── pty-manager.ts     # node-pty 进程池管理器；按任务账号注入 CODEX_HOME / CLAUDE_CONFIG_DIR / KIMI_CODE_HOME
 │   │   ├── quota-service.ts   # 大模型配额、模型与推理等级、会话累计 Tokens / Cost 读取及配置热监听
-│   │   ├── system-stats.ts    # 整机 CPU / 内存 / 网速采样（网速读物理网卡，常驻 PowerShell），每 2 秒推送给顶栏
+│   │   ├── system-stats.ts    # 整机 CPU / 内存 / 网速采样（网速读物理网卡，常驻 PowerShell），每 2 秒推送给底部状态栏
 │   │   ├── task-summary.ts    # 读取任务对应会话（Claude / Codex / Kimi 的本机会话文件）里最近一条用户消息，供侧栏任务行第二行
 │   │   ├── model-format.ts    # Claude 模型 id 转显示名（无副作用，额度与用量共用）
 │   │   ├── model-pricing.ts   # 公开模型 API 等值费率表，供 Dashboard 估算已收录模型的成本与价格覆盖率
@@ -69,7 +69,7 @@ d:/GitHub/OneAI/
 │           ├── main.tsx
 │           ├── dropGuard.ts              # 拦截拖到终端以外区域的文件，避免窗口被导航到该文件
 │           ├── App.tsx                   # 全局状态、工作区持久化与会话调度
-│           ├── index.css                 # 语义颜色 token、各主题配色变量、通用控件类（icon-btn / btn-* / input / option）与顶栏容器查询断点
+│           ├── index.css                 # 语义颜色 token、各主题配色变量、通用控件类（icon-btn / btn-* / input / option）与底部状态栏容器查询断点
 │           ├── themes.ts                 # 主题明暗基调与设置页主题选项（浅 / 深、护眼、编辑器三组）；新增主题须同步 shared/types.ts、index.css、index.html 与 TerminalViewport
 │           ├── taskStatus.ts             # 任务状态文案与圆点样式、存活态（starting / running / idle / waiting）判断
 │           ├── taskSummary.ts            # 任务行第二行支持的 CLI 与「新会话 · 时间」的格式化
@@ -83,9 +83,10 @@ d:/GitHub/OneAI/
 │           ├── previewHighlight.ts       # 文件预览语法高亮：按扩展名或文件名调用 highlight.js 分词并保留跨行作用域，跳过压缩单行与 > 1 MB 文件
 │           ├── components/
 │           │   ├── Sidebar.tsx           # 左侧品牌头部（Logo、标语、版本号）、Dashboard 入口、文件夹树（Git 分支、任务）与最近任务
-│           │   ├── Topbar.tsx            # 顶部导航栏（嵌入单行额度、系统资源与全局操作）
-│           │   ├── InlineQuotaText.tsx   # 顶栏单行纯文字实时额度（Tokens / Cost、5h / 7d、模型）
-│           │   ├── SystemStatsText.tsx   # 顶栏右侧单行纯文字 CPU / 内存 / 网速，订阅 `system:stats`
+│           │   ├── Topbar.tsx            # 顶部导航栏（侧栏开关、任务面包屑、终端工具、历史与目录树入口）
+│           │   ├── StatusBar.tsx         # 终端下方两行状态栏：上行当前任务状态、额度进度条（5h / 7d / Ctx）、模型与时钟，下行 Tokens / Cache / Cost 与系统资源
+│           │   ├── InlineQuotaText.tsx   # 状态栏额度与会话用量（分 limits / usage 两行输出，所有 CLI 共用），5h / 7d / Ctx 用进度条加百分数
+│           │   ├── SystemStatsText.tsx   # 状态栏下行右侧纯文字 CPU / GPU / 内存 / 网速，订阅 `system:stats`
 │           │   ├── TerminalViewport.tsx  # xterm.js 多实例保活容器；任务第一次被选中时才创建实例，WebGL 只保留最近显示的 8 个
 │           │   ├── TerminalSearchBar.tsx # 终端关键字搜索栏
 │           │   ├── NewTaskModal.tsx      # 新建 Task 弹窗（该 CLI 配置了账号时可选账号）
@@ -163,13 +164,13 @@ interface Account {
    - 切换左侧会话时严禁销毁终端 DOM 或中断底层 PTY，必须使用隐藏（`display: none`）保活机制。
    - 视窗切换显示后必须主动触发 `fitAddon.fit()` 重新计算终端字符矩阵。
 2. **额度展示原则**：
-   - 必须保持顶栏单行横排纯文字（Inline Text），严禁添加悬浮卡片、弹窗或遮挡视窗的浮层。
+   - 额度、会话用量、系统资源与时钟统一显示在终端下方的两行状态栏（`StatusBar.tsx`），所有 CLI 展示方式一致；5h / 7d / Ctx 用细进度条加百分数（进度条填「已用」比例），其余为纯文字，严禁添加悬浮卡片、弹窗或遮挡视窗的浮层。
 3. **平台兼容性**：
    - Windows 平台优先调用 Powershell / Cmd / Git Bash / WSL 作为底层 Shell，正确处理 Windows 换行符（CRLF）与 ConPTY 信号。
 4. **界面一致性**：
    - 新弹窗统一使用 `Modal.tsx` 外壳，确认与通知使用 `ConfirmDialog.tsx`，不调用原生 `window.confirm` / `window.alert`。
    - 全局快捷键在 `App.tsx` 捕获阶段统一处理，只使用 `Ctrl+Tab`、`Ctrl+数字`、`Ctrl+Shift+字母`、`Ctrl+,` 这类终端程序不用的组合，不占用 `Ctrl+字母`；新增后同步更新设置页的快捷键列表。
-   - 顶栏新增内容前先确认各宽度下不重叠，次要信息通过 `index.css` 的 `topbar` 容器查询收起；断点按各块自然宽度估算，改动后须在 `npm run check:ui` 的宽度检查中确认无重叠且任务名不被挤没。
+   - 顶栏只放导航与操作，不再放额度、资源与时钟。状态栏新增内容前先确认各宽度下两行都不溢出，次要信息通过 `index.css` 的 `statusbar` 容器查询收起；顶栏改动须在 `npm run check:ui` 的宽度检查中确认无重叠且任务名不被挤没。
 5. **多语言**：
    - 所有显示给用户的文案经过 `t()`，代码使用简体中文原文，在 `src/shared/en.ts` 和 `src/shared/zh-TW.ts` 登记译文。模块级常量用 `T()` 登记，渲染时调用 `t()`，随语言变化的对象属性用 getter。各语言保留相同的 `{name}` 占位符。
    - 新增或修改文案后执行 `npm run check:i18n`，必须无缺失译文；不使用「已被某语言占用」的拼接句式，整句翻译。

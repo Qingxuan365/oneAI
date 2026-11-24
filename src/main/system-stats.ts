@@ -1,6 +1,6 @@
 import { BrowserWindow } from 'electron';
 import os from 'node:os';
-import { spawn, ChildProcessWithoutNullStreams } from 'node:child_process';
+import { Worker } from 'node:worker_threads';
 import type { SystemStats } from '../shared/types';
 
 const SAMPLE_INTERVAL_MS = 2000;
@@ -66,58 +66,139 @@ while ($null -ne ($request = [Console]::In.ReadLine())) {
 
 interface NetCounters { rx: number; tx: number; adapters: string }
 
+/**
+ * PowerShell 常驻进程放在 worker 线程里创建和读写：Windows 上 spawn 是同步的 CreateProcess，
+ * 偶尔会被系统（如杀毒扫描）拖慢到 2 秒，放在主线程会让界面与 IPC 一起卡住。
+ * worker 只负责转发：start 启动进程，write 写 stdin，kill 结束；stdout 按行回传，进程退出时回传 exit。
+ */
+const COUNTER_WORKER_SOURCE = `
+const { parentPort } = require('node:worker_threads');
+const { spawn } = require('node:child_process');
+const children = new Map();
+parentPort.on('message', (msg) => {
+  if (msg.type === 'start') {
+    let child;
+    try {
+      child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-NoLogo', '-EncodedCommand', msg.encoded], { windowsHide: true });
+    } catch {
+      parentPort.postMessage({ type: 'exit', key: msg.key });
+      return;
+    }
+    children.set(msg.key, child);
+    let buffer = '';
+    child.stderr.resume();
+    child.stdout.setEncoding('latin1');
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk;
+      for (let i = buffer.indexOf('\\n'); i >= 0; i = buffer.indexOf('\\n')) {
+        parentPort.postMessage({ type: 'line', key: msg.key, line: buffer.slice(0, i).trim() });
+        buffer = buffer.slice(i + 1);
+      }
+    });
+    const drop = () => {
+      if (children.get(msg.key) !== child) return;
+      children.delete(msg.key);
+      parentPort.postMessage({ type: 'exit', key: msg.key });
+    };
+    child.on('error', drop);
+    child.on('exit', drop);
+    child.stdin.on('error', () => {});
+  } else if (msg.type === 'write') {
+    children.get(msg.key)?.stdin.write(msg.data);
+  } else if (msg.type === 'kill') {
+    const child = children.get(msg.key);
+    children.delete(msg.key);
+    child?.kill();
+  } else if (msg.type === 'shutdown') {
+    for (const child of children.values()) child.kill();
+    children.clear();
+    process.exit(0);
+  }
+});
+`;
+
+type CounterWorkerMessage = { type: 'line'; key: number; line: string } | { type: 'exit'; key: number };
+
+let counterWorker: Worker | null = null;
+let nextCounterKey = 1;
+const counterListeners = new Map<number, (msg: CounterWorkerMessage) => void>();
+
+function getCounterWorker(): Worker {
+  if (counterWorker) return counterWorker;
+  const worker = new Worker(COUNTER_WORKER_SOURCE, { eval: true });
+  worker.unref(); // 不因 worker 存活而阻止应用退出
+  worker.on('message', (msg: CounterWorkerMessage) => counterListeners.get(msg.key)?.(msg));
+  const reset = () => {
+    if (counterWorker !== worker) return;
+    counterWorker = null;
+    for (const listener of [...counterListeners.values()]) listener({ type: 'exit', key: -1 });
+  };
+  worker.on('error', reset);
+  worker.on('exit', reset);
+  counterWorker = worker;
+  return worker;
+}
+
+/**
+ * 结束 worker 线程（先由它结束全部 PowerShell）。Electron 主进程里留着存活的 worker 会让应用退不出去，
+ * 所以停止采样时必须调用；之后再读取会按需重新创建。
+ */
+function shutdownCounterWorker(): void {
+  const worker = counterWorker;
+  if (!worker) return;
+  counterWorker = null;
+  worker.postMessage({ type: 'shutdown' });
+  for (const listener of [...counterListeners.values()]) listener({ type: 'exit', key: -1 });
+}
+
 class CounterReader {
-  private child: ChildProcessWithoutNullStreams | null = null;
-  private buffer = '';
+  /** 当前进程的编号；为 0 表示没有在运行的进程，读取时再启动 */
+  private key = 0;
   private waiter: ((line: string | null) => void) | null = null;
   private failures = 0;
   private cooldownUntil = 0;
 
   constructor(private readonly script: string) {}
 
-  private start(): ChildProcessWithoutNullStreams {
-    const child = spawn('powershell.exe', [
-      '-NoProfile', '-NonInteractive', '-NoLogo', '-EncodedCommand', Buffer.from(this.script, 'utf16le').toString('base64'),
-    ], { windowsHide: true });
-    child.stderr.resume(); // 丢弃错误输出，避免管道写满后阻塞 PowerShell
-    child.stdout.setEncoding('latin1');
-    child.stdout.on('data', (chunk: string) => {
-      if (this.child !== child) return;
-      this.buffer += chunk;
-      for (let i = this.buffer.indexOf('\n'); i >= 0; i = this.buffer.indexOf('\n')) {
-        const line = this.buffer.slice(0, i).trim();
-        this.buffer = this.buffer.slice(i + 1);
+  private start(): number {
+    const key = nextCounterKey++;
+    counterListeners.set(key, (msg) => {
+      if (this.key !== key) return;
+      if (msg.type === 'line') {
         const waiter = this.waiter;
         this.waiter = null;
-        waiter?.(line);
+        waiter?.(msg.line);
+      } else {
+        this.release();
       }
     });
-    const drop = () => {
-      if (this.child !== child) return;
-      this.child = null;
-      this.buffer = '';
-      const waiter = this.waiter;
-      this.waiter = null;
-      waiter?.(null);
-    };
-    child.on('error', drop);
-    child.on('exit', drop);
-    child.stdin.on('error', () => {});
-    this.child = child;
-    return child;
+    this.key = key;
+    getCounterWorker().postMessage({ type: 'start', key, encoded: Buffer.from(this.script, 'utf16le').toString('base64') });
+    return key;
+  }
+
+  /** 解除与当前进程的关联，并让在途请求以失败结束 */
+  private release(): number {
+    const key = this.key;
+    this.key = 0;
+    counterListeners.delete(key);
+    const waiter = this.waiter;
+    this.waiter = null;
+    waiter?.(null);
+    return key;
   }
 
   /** 一次只允许一个请求在途；连续读取失败两次后进入 60 秒冷却期。 */
   async read(request = ''): Promise<string | null> {
     if (this.waiter || process.platform !== 'win32' || Date.now() < this.cooldownUntil) return null;
-    const child = this.child ?? this.start();
+    const key = this.key || this.start();
     const line = await new Promise<string | null>((resolve) => {
       const timer = setTimeout(() => this.dispose(), COUNTER_REQUEST_TIMEOUT_MS);
       this.waiter = (reply) => {
         clearTimeout(timer);
         resolve(reply);
       };
-      child.stdin.write(request + '\n');
+      getCounterWorker().postMessage({ type: 'write', key, data: request + '\n' });
     });
     if (line === null || line === 'error') {
       this.failures++;
@@ -133,13 +214,8 @@ class CounterReader {
   }
 
   dispose(): void {
-    const child = this.child;
-    this.child = null;
-    this.buffer = '';
-    const waiter = this.waiter;
-    this.waiter = null;
-    waiter?.(null);
-    child?.kill();
+    const key = this.release();
+    if (key) counterWorker?.postMessage({ type: 'kill', key });
   }
 }
 
@@ -189,11 +265,21 @@ class SystemSampler {
   }
 }
 
-/** 每 2 秒推送整机资源，GPU 独立采样。窗口最小化或隐藏时暂停采样。 */
+/** 状态栏关闭时由渲染进程关掉采样，同时结束常驻的 PowerShell 进程；重新打开后按需再启动 */
+let statsEnabled = true;
+const enabledListeners = new Set<(enabled: boolean) => void>();
+
+export function setSystemStatsEnabled(enabled: boolean): void {
+  if (statsEnabled === enabled) return;
+  statsEnabled = enabled;
+  for (const listener of enabledListeners) listener(enabled);
+}
+
+/** 每 2 秒推送整机资源，GPU 独立采样。窗口最小化、隐藏或状态栏关闭时暂停采样。 */
 export function startSystemStats(win: BrowserWindow): () => void {
   const sampler = new SystemSampler();
   const gpuReader = new CounterReader(GPU_SCRIPT);
-  const visible = () => !win.isDestroyed() && win.isVisible() && !win.isMinimized();
+  const visible = () => statsEnabled && !win.isDestroyed() && win.isVisible() && !win.isMinimized();
   let stopped = false;
   let gpuPercent: number | null = null;
   let gpuNeedsBaseline = true;
@@ -216,15 +302,24 @@ export function startSystemStats(win: BrowserWindow): () => void {
       gpuBusy = false;
     }
   };
+  const onEnabledChange = (enabled: boolean) => {
+    if (enabled) return;
+    resetGpu();
+    gpuReader.dispose();
+    sampler.reset();
+    sampler.dispose();
+    shutdownCounterWorker();
+  };
+  enabledListeners.add(onEnabledChange);
   win.on('hide', resetGpu);
   win.on('minimize', resetGpu);
   void sampleGpu();
   const gpuTimer = process.platform === 'win32' ? setInterval(sampleGpu, GPU_SAMPLE_INTERVAL_MS) : null;
   let busy = true;
-  void sampler.sample().finally(() => { busy = false; });
+  void (statsEnabled ? sampler.sample() : Promise.resolve(null)).finally(() => { busy = false; });
   const timer = setInterval(async () => {
     if (busy || win.isDestroyed()) return;
-    if (!win.isVisible() || win.isMinimized()) {
+    if (!visible()) {
       sampler.reset();
       return;
     }
@@ -240,9 +335,11 @@ export function startSystemStats(win: BrowserWindow): () => void {
     stopped = true;
     clearInterval(timer);
     if (gpuTimer !== null) clearInterval(gpuTimer);
+    enabledListeners.delete(onEnabledChange);
     win.removeListener('hide', resetGpu);
     win.removeListener('minimize', resetGpu);
     gpuReader.dispose();
     sampler.dispose();
+    shutdownCounterWorker();
   };
 }
