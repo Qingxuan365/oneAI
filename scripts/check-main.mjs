@@ -106,7 +106,7 @@ try {
         import { listProjectDirectory } from './src/main/project-tree';
         import { setBoundedMap } from './src/main/fs-utils';
         import { folderKey, quoteTerminalPath, extractPathMatches } from './src/shared/paths';
-        import { buildReleaseUrl, canUseAutoUpdater, compareSemver, extractVersionFromReleaseUrl, normalizeReleaseNotes } from './src/main/updater';
+        import { buildReleaseUrl, canUseAutoUpdater, compareSemver, extractVersionFromReleaseUrl, normalizeReleaseNotes, selectLocalizedReleaseNotes } from './src/main/updater';
 
         test('Traditional Chinese is detected, translated, and accepted by main-process i18n', () => {
           for (const locale of ['zh-TW', 'zh-HK', 'zh_MO', 'zh-Hant', 'zh-Hant-CN']) assert.equal(detectLanguage(locale), 'zh-TW');
@@ -859,6 +859,15 @@ try {
           assert.equal(normalizeReleaseNotes('<p>Hello &amp; <b>world</b></p><ul><li>Fix 1</li><li>Fix 2</li></ul>'), 'Hello & world\\n- Fix 1\\n- Fix 2');
           assert.equal(normalizeReleaseNotes([{ version: '2.2.8', note: 'Added updater' }]), 'v2.2.8\\nAdded updater');
           assert.equal(normalizeReleaseNotes(null), '');
+          const trilingual = '## 简体中文\\n- 简体条目\\n\\n## 繁體中文\\n- 繁體條目\\n\\n## English\\n- English item';
+          assert.equal(selectLocalizedReleaseNotes(trilingual, 'zh-CN'), '- 简体条目');
+          assert.equal(selectLocalizedReleaseNotes(trilingual, 'zh-TW'), '- 繁體條目');
+          assert.equal(selectLocalizedReleaseNotes(trilingual, 'en'), '- English item');
+          const bilingual = '## 更新内容\\n- 中文条目\\n\\n## What\\'s New\\n- English item';
+          assert.equal(selectLocalizedReleaseNotes(bilingual, 'zh-CN'), '- 中文条目');
+          assert.equal(selectLocalizedReleaseNotes(bilingual, 'zh-TW'), '- 中文条目');
+          assert.equal(selectLocalizedReleaseNotes(bilingual, 'en'), '- English item');
+          assert.equal(selectLocalizedReleaseNotes('- Single language note', 'zh-CN'), '- Single language note');
 
           assert.equal(canUseAutoUpdater({ isPackaged: true, appUpdateYmlExists: true }), true);
           assert.equal(canUseAutoUpdater({ isPackaged: false, appUpdateYmlExists: true }), false);

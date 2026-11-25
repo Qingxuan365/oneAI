@@ -4,7 +4,8 @@ import path from 'node:path';
 import updaterPkg from 'electron-updater';
 import type { UpdateInfo } from 'electron-updater';
 import type { UpdateState } from '../shared/types';
-import { t } from './i18n';
+import type { Language } from '../shared/i18n';
+import { getLanguage, t } from './i18n';
 
 const { autoUpdater } = updaterPkg;
 
@@ -107,6 +108,49 @@ export function normalizeReleaseNotes(raw: unknown): string {
     .trim();
 }
 
+const ZH_CN_HEADING_RE = /^(?:#{1,6}\s*)?(简体中文|更新内容|更新说明|更新日志|中文(?:说明|更新)?)\s*[:：]?\s*$/;
+const ZH_TW_HEADING_RE = /^(?:#{1,6}\s*)?(繁體中文|正體中文|更新內容|更新說明|更新日誌)\s*[:：]?\s*$/;
+const EN_HEADING_RE = /^(?:#{1,6}\s*)?(what'?s\s+new|release\s+notes|changelog|changes|english)\s*[:：]?\s*$/i;
+
+/** 若更新说明包含多语言分段（简体中文 / 繁體中文 / English），按当前界面语言只保留对应语言内容；单语言说明原样返回 */
+export function selectLocalizedReleaseNotes(notes: string, lang: Language = getLanguage()): string {
+  const clean = notes.trim();
+  if (!clean) return '';
+  const lines = clean.split('\n');
+  let current: 'zh-CN' | 'zh-TW' | 'en' | 'other' = 'other';
+  const buckets: Record<'zh-CN' | 'zh-TW' | 'en', string[]> = { 'zh-CN': [], 'zh-TW': [], en: [] };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (ZH_TW_HEADING_RE.test(trimmed)) {
+      current = 'zh-TW';
+      continue;
+    }
+    if (ZH_CN_HEADING_RE.test(trimmed)) {
+      current = 'zh-CN';
+      continue;
+    }
+    if (EN_HEADING_RE.test(trimmed)) {
+      current = 'en';
+      continue;
+    }
+    if (current !== 'other') {
+      buckets[current].push(line);
+    }
+  }
+
+  const zhCn = buckets['zh-CN'].join('\n').trim();
+  const zhTw = buckets['zh-TW'].join('\n').trim();
+  const en = buckets.en.join('\n').trim();
+  const sectionCount = [zhCn, zhTw, en].filter(Boolean).length;
+  if (sectionCount >= 2) {
+    if (lang === 'en') return en || zhCn || zhTw;
+    if (lang === 'zh-TW') return zhTw || zhCn || en;
+    return zhCn || zhTw || en;
+  }
+  return clean;
+}
+
 export function canUseAutoUpdater(opts: {
   isPackaged: boolean;
   portableDir?: string;
@@ -147,6 +191,7 @@ class AppUpdaterService {
   private lastManualCheck = false;
   private etag: string | null = null;
   private cachedGithubRelease: GithubReleaseResponse | null = null;
+  private rawReleaseNotes = '';
 
   constructor() {
     const currentVersion = app.getVersion();
@@ -188,12 +233,13 @@ class AppUpdaterService {
     });
 
     autoUpdater.on('update-available', (info: UpdateInfo) => {
+      this.rawReleaseNotes = normalizeReleaseNotes(info.releaseNotes);
       this.setState({
         ...this.state,
         phase: 'available',
         latestVersion: info.version,
         releaseName: info.releaseName || `v${info.version}`,
-        releaseNotes: normalizeReleaseNotes(info.releaseNotes),
+        releaseNotes: selectLocalizedReleaseNotes(this.rawReleaseNotes),
         releaseDate: info.releaseDate,
         releaseUrl: buildReleaseUrl(info.version),
         progress: undefined,
@@ -229,12 +275,14 @@ class AppUpdaterService {
     });
 
     autoUpdater.on('update-downloaded', (info: UpdateInfo) => {
+      const normalized = normalizeReleaseNotes(info.releaseNotes);
+      if (normalized) this.rawReleaseNotes = normalized;
       this.setState({
         ...this.state,
         phase: 'downloaded',
         latestVersion: info.version || this.state.latestVersion,
         releaseName: info.releaseName || this.state.releaseName || (info.version ? `v${info.version}` : undefined),
-        releaseNotes: normalizeReleaseNotes(info.releaseNotes) || this.state.releaseNotes,
+        releaseNotes: selectLocalizedReleaseNotes(this.rawReleaseNotes) || this.state.releaseNotes,
         releaseDate: info.releaseDate || this.state.releaseDate,
         releaseUrl: buildReleaseUrl(info.version || this.state.latestVersion),
         progress: {
@@ -261,6 +309,14 @@ class AppUpdaterService {
 
   getState(): UpdateState {
     return this.state;
+  }
+
+  refreshLocalizedNotes(): void {
+    if (!this.rawReleaseNotes) return;
+    const localized = selectLocalizedReleaseNotes(this.rawReleaseNotes);
+    if (localized !== this.state.releaseNotes) {
+      this.setState({ ...this.state, releaseNotes: localized });
+    }
   }
 
   private setState(next: UpdateState): void {
@@ -324,6 +380,7 @@ class AppUpdaterService {
 
       const tag = (data?.tag_name || '').trim().replace(/^v/i, '');
       const hasNewer = Boolean(tag && !data?.draft && !data?.prerelease && compareSemver(tag, this.state.currentVersion) > 0);
+      if (hasNewer) this.rawReleaseNotes = normalizeReleaseNotes(data?.body);
       const next: UpdateState = hasNewer
         ? {
             ...this.state,
@@ -331,7 +388,7 @@ class AppUpdaterService {
             canAutoUpdate,
             latestVersion: tag,
             releaseName: data?.name || `v${tag}`,
-            releaseNotes: normalizeReleaseNotes(data?.body),
+            releaseNotes: selectLocalizedReleaseNotes(this.rawReleaseNotes),
             releaseDate: data?.published_at,
             releaseUrl: data?.html_url || buildReleaseUrl(tag),
             progress: undefined,

@@ -181,8 +181,9 @@ interface Account {
 6. **不写死本机信息**：
    - 路径、CLI 清单、语言等一律取自本机：默认文件夹与各 CLI 默认配置目录取用户主目录（主进程 IPC），CLI 是否可用按 `PATH` 检测，界面语言按系统语言预选；示例文案不得出现个人用户名、固定盘符路径或个人称呼。
    - 新增支持的 CLI 只改 `src/main/known-clis.json`，不在界面里再写一份清单。
-7. **修改后交付**：
+7. **修改后交付与发版**：
    - 每次修改项目文件并完成必要验证后，自动执行 `npm run build:win`，生成 Windows 安装版 `release/OneAI-Setup-<version>.exe`（不再默认生成便携版，需要时用 `npm run build:portable`）；核对产物的生成时间和大小，失败时明确报告。
+   - 发布 GitHub Release 时，须一并上传 `OneAI-Setup-<version>.exe`、`latest.yml` 与 `OneAI-Setup-<version>.exe.blockmap`；Release 正文（更新说明）必须使用三语分段标题（`## 简体中文`、`## 繁體中文`、`## English`），客户端按当前界面语言只展示对应语言内容。
 
 ## 5. Git 提交规范
 

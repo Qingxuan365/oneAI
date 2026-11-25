@@ -20,7 +20,7 @@ import { getLanguage, setLanguage, t } from './i18n';
 import { quoteTerminalPath } from '../shared/paths';
 import { encodeBgraToPng } from './png-encode';
 import { startDiagnostics, timed, watchWindow } from './diagnostics';
-import { setupUpdater } from './updater';
+import { setupUpdater, updaterService } from './updater';
 
 registerMusicScheme();
 
@@ -195,7 +195,10 @@ function setupIPC() {
     const before = getLanguage();
     setLanguage(language);
     // 额度提示等文案已按旧语言缓存，语言变化后立即重新读取一次
-    if (getLanguage() !== before) void quotaService.refreshAllQuotas(true);
+    if (getLanguage() !== before) {
+      void quotaService.refreshAllQuotas(true);
+      updaterService.refreshLocalizedNotes();
+    }
   });
   ipcMain.on('app:home-dir', (event) => { event.returnValue = app.getPath('home'); });
   ipcMain.handle('cli:known', () => listKnownClis());
