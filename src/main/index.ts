@@ -20,6 +20,7 @@ import { getLanguage, setLanguage, t } from './i18n';
 import { quoteTerminalPath } from '../shared/paths';
 import { encodeBgraToPng } from './png-encode';
 import { startDiagnostics, timed, watchWindow } from './diagnostics';
+import { setupUpdater } from './updater';
 
 registerMusicScheme();
 
@@ -31,6 +32,7 @@ const __dirname = path.dirname(__filename);
 
 let mainWindow: BrowserWindow | null = null;
 let windowStateTracker: WindowStateTracker | null = null;
+let allowCloseForUpdate = false;
 
 function createWindow() {
   const preloadCandidate = path.join(__dirname, '../preload/index.cjs');
@@ -147,7 +149,7 @@ function createWindow() {
   mainWindow.on('session-end', () => { closeConfirmed = true; });
   mainWindow.on('close', (event) => {
     const win = mainWindow;
-    if (closeConfirmed || !win || ptyManager.aliveCount() === 0 || win.webContents.isCrashed()) return;
+    if (closeConfirmed || allowCloseForUpdate || !win || ptyManager.aliveCount() === 0 || win.webContents.isCrashed()) return;
     // 界面没有响应确认请求时，隔 1.5 秒以上再点一次关闭就直接关，避免窗口关不掉
     const now = Date.now();
     if (closeRequestedAt && now - closeRequestedAt > 1500) return;
@@ -181,6 +183,10 @@ function setupIPC() {
   setupProjectTree();
   setupGitBranch();
   setupTaskSummary();
+  setupUpdater(() => mainWindow, () => {
+    allowCloseForUpdate = true;
+    ptyManager.destroyAll();
+  });
   ipcMain.handle('history:list', (_event, accounts) => listSessionHistory(Array.isArray(accounts) ? accounts : []));
   ipcMain.handle('history:delete', (_event, items) => deleteSessionHistory(Array.isArray(items) ? items : []));
   ipcMain.handle('usage:stats', (_event, accounts) => getUsageStats(accounts));

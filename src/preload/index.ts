@@ -7,6 +7,7 @@ import type {
   RestartSessionOptions,
   SessionAccount,
   SystemStats,
+  UpdateState,
   UsageAccountRef,
 } from '../renderer/src/types';
 
@@ -155,6 +156,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('system:stats', subscription);
     return () => {
       ipcRenderer.removeListener('system:stats', subscription);
+    };
+  },
+
+  getUpdateState: () => ipcRenderer.invoke('update:get-state'),
+  checkForUpdates: (manual?: boolean) => ipcRenderer.invoke('update:check', manual),
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+  openUpdateRelease: () => ipcRenderer.invoke('update:open-release'),
+  onUpdateState: (callback: (state: UpdateState) => void) => {
+    const subscription = (_event: Electron.IpcRendererEvent, value: UpdateState) => callback(value);
+    ipcRenderer.on('update:state', subscription);
+    return () => {
+      ipcRenderer.removeListener('update:state', subscription);
     };
   },
 } satisfies Required<ElectronTerminalAPI>);

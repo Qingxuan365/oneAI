@@ -91,3 +91,8 @@ Detailed behavior of every OneAI feature. The overview is in the [README](../REA
    - Settings → Appearance switches the language at any time and takes effect immediately.
    - A new installation starts empty: no sample tasks are created, and the default folder is your user home directory until you add your own folders.
    - Settings → Time can hide the date in the status bar clock. The date and weekday appear by default and collapse automatically when the status bar is narrow. Both Chinese interfaces also show the lunar date.
+
+10. **Software updates (GitHub Releases)**
+   - About 6 seconds after launch, OneAI silently checks GitHub Releases for a newer version in the background without downloading automatically, and stays silent when offline. You can toggle "Check for updates on startup" or trigger a manual check anytime in Settings → About.
+   - When an update is available, a badge appears next to the version in the sidebar header (and in the collapsed sidebar footer). Clicking it opens the update dialog with version details, release notes, "Skip this version", and a fallback link to the GitHub Releases page.
+   - Installed Windows builds support in-app download with live progress and speed, followed by "Restart and install" (asking for confirmation if terminal sessions are running) or "Later" to install on exit. Portable builds, dev mode, or releases without `latest.yml` fall back cleanly to browser download.

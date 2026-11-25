@@ -204,6 +204,37 @@ export interface SessionSnapshot {
   exitCode?: number;
 }
 
+export type UpdatePhase =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+export interface UpdateProgress {
+  percent: number;
+  transferred: number;
+  total: number;
+  bytesPerSecond: number;
+}
+
+export interface UpdateState {
+  phase: UpdatePhase;
+  currentVersion: string;
+  latestVersion?: string;
+  releaseName?: string;
+  releaseNotes?: string;
+  releaseDate?: string;
+  releaseUrl: string;
+  /** 安装版可应用内直接下载并覆盖安装；开发模式或便携版仅支持检测并跳转浏览器下载 */
+  canAutoUpdate: boolean;
+  progress?: UpdateProgress;
+  error?: string;
+  checkedAt?: number;
+}
+
 /** 全部内置主题 ID 单一事实源；新增主题须同步 themes.ts、index.css、index.html 与 TerminalViewport.tsx */
 export const THEME_IDS = [
   'light', 'dark', 'bean', 'parchment', 'dusk', 'nord', 'lavender', 'mist', 'forest', 'ink',

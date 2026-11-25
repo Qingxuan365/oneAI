@@ -55,6 +55,7 @@ d:/GitHub/OneAI/
 │   │   ├── music-library.ts   # 音乐：扫描本地音乐目录、经 oneai-music:// 流式协议（及兼容读取）提供本地音频，并把在线音乐的 .m3u / .pls 歌单展开成曲目（只接受 http(s)）
 │   │   ├── workspace-store.ts # 工作区状态落盘：启动同步读取，运行期异步串行原子写入，退出前兜底刷盘
 │   │   ├── window-state.ts    # 窗口状态落盘：尺寸、位置（含多屏越界保护）、最大化状态与上次主题底色 / 标题栏覆盖层色值
+│   │   ├── updater.ts         # 软件更新：基于 electron-updater 检测 GitHub Releases、应用内下载与重启覆盖安装（开发模式、便携版或缺少 latest.yml 时降级为 Releases API 检测并跳转浏览器下载）
 │   │   └── session-history.ts # 读取 Claude / Codex（含 archived_sessions 与 .jsonl.zst）/ Kimi 本机及多账号目录历史会话与恢复命令（按文件签名缓存）
 │   ├── preload/               # 预加载脚本（构建时由 vite.config.ts 自动校验两份接口键集合一致）
 │   │   ├── index.cjs          # 运行时实际加载的 preload，由 vite.config.ts 复制到 dist-electron/preload/
@@ -97,7 +98,8 @@ d:/GitHub/OneAI/
 │           │   ├── ProjectTreeDrawer.tsx # 项目目录树抽屉（顶栏右上角入口 / Ctrl+Shift+E）：懒加载目录树、筛选、预览与插入路径
 │           │   ├── UsageModal.tsx        # 本周用量弹窗（快捷键 Ctrl+Shift+U）：按 CLI → 账号 → 模型分组的用量表与近 26 周每日请求数方块图
 │           │   ├── DashboardView.tsx     # Dashboard 主分析页面（侧栏顶部入口 / Ctrl+Shift+D）：跨周期 KPI、12 个月活跃热力图、趋势图、Top 5 分布、Token 构成、多组实时账号配额与模型明细，终端后台保活
-│           │   ├── SettingsModal.tsx     # 分页设置：外观、时间、终端、账号、CLI、提醒、快捷键列表
+│           │   ├── SettingsModal.tsx     # 分页设置：外观、时间、终端、账号、CLI、提醒、快捷键列表、关于与更新
+│           │   ├── UpdateModal.tsx       # 软件更新弹窗：版本对比、更新说明、下载进度、立即重启安装、忽略此版本与 GitHub 发布页兜底
 │           │   ├── AccountsSettings.tsx  # 设置 → 账号：添加 / 编辑 / 删除账号、登录入口与登录状态
 │           │   ├── CliSettings.tsx       # 设置 → CLI：已知 CLI 的检测状态（清单取自主进程）、重新检测、添加 / 编辑 / 删除自定义 CLI
 │           │   ├── OnboardingModal.tsx   # 首次启动引导：选择界面语言，再显示检测到的 CLI、默认文件夹与小提示；完成后不再弹出

@@ -25,6 +25,7 @@ await build({
     import { DashboardView } from './src/renderer/src/components/DashboardView';
     import { SettingsModal } from './src/renderer/src/components/SettingsModal';
     import { OnboardingModal } from './src/renderer/src/components/OnboardingModal';
+    import { UpdateModal } from './src/renderer/src/components/UpdateModal';
     import { THEME_IDS } from './src/shared/types';
     import { dateLocale, getLanguage, setLanguage, t } from './src/renderer/src/i18n';
     window.ALL_THEMES = [...THEME_IDS];
@@ -278,6 +279,21 @@ await build({
       </div>));
     };
     window.drawHistory = (open, accounts) => flushSync(() => root.render(<div className="workbench-ui h-screen"><HistoryModal isOpen onClose={() => {}} onResume={(e) => window.events.push('resume:' + e.id + (e.accountId ? ':' + e.accountId : ''))} openHistoryIds={new Set(open)} accounts={accounts} /></div>));
+    window.drawUpdateModal = (state) => flushSync(() => root.render(<div className="workbench-ui h-screen">
+      <UpdateModal isOpen state={state} onClose={() => window.events.push('update-close')}
+        onCheck={() => window.events.push('update-check')}
+        onDownload={() => window.events.push('update-download')}
+        onInstall={() => window.events.push('update-install')}
+        onIgnoreVersion={(v) => window.events.push('update-ignore:' + v)}
+        onOpenRelease={() => window.events.push('update-release')} />
+    </div>));
+    window.drawSidebarUpdate = (isCollapsed, updateState, ignoredUpdateVersion = '') => flushSync(() => root.render(<div className="workbench-ui flex h-screen">
+      <Sidebar isCollapsed={isCollapsed} clis={[{ id: 'codex', name: 'Codex', icon: 'codex', defaultCommand: 'codex' }]}
+        folders={[{ path: 'D:/GitHub/OneAI', isExpanded: true }]} tasks={[]} activeTaskId={null}
+        updateState={updateState} ignoredUpdateVersion={ignoredUpdateVersion}
+        onOpenUpdate={() => window.events.push('open-update')}
+        onAddFolder={() => {}} onSelectTask={() => {}} onToggleFolder={() => {}} onReorderFolder={() => {}} onNewTask={() => {}} onCloseTask={() => {}} />
+    </div>));
     window.drawFileTree = (isOpen = true, activePreviewPath = null, hasActiveTerminal = true) => flushSync(() => root.render(<div className="workbench-ui h-screen">
       <ProjectTreeDrawer isOpen={isOpen} onClose={() => window.events.push('tree-close')} rootPath="D:/GitHub/OneAI" gitBranch="main"
         activePreviewPath={activePreviewPath} hasActiveTerminal={hasActiveTerminal}
@@ -958,13 +974,13 @@ app.whenReady().then(async () => {
       const langBtn = name => [...document.querySelectorAll('[aria-label="界面语言"] button, [aria-label="介面語言"] button, [aria-label="Interface language"] button')].find(b => b.textContent.trim() === name);
       check('appearance page offers all three languages with the current one pressed', langBtn('简体中文')?.getAttribute('aria-pressed') === 'true' && langBtn('繁體中文')?.getAttribute('aria-pressed') === 'false' && langBtn('English')?.getAttribute('aria-pressed') === 'false');
       langBtn('繁體中文').click(); await tick(150);
-      check('Traditional Chinese updates settings, renderer locale, and the main-process bridge', window.currentSettings().language === 'zh-TW' && tabLabels() === '外觀|時間|終端|帳號|CLI|提醒|快速鍵' && document.documentElement.lang === 'zh-TW' && window.mainLanguage === 'zh-TW' && window.getDateLocale() === 'zh-TW');
+      check('Traditional Chinese updates settings, renderer locale, and the main-process bridge', window.currentSettings().language === 'zh-TW' && tabLabels() === '外觀|時間|終端|帳號|CLI|提醒|快速鍵|關於' && document.documentElement.lang === 'zh-TW' && window.mainLanguage === 'zh-TW' && window.getDateLocale() === 'zh-TW');
       langBtn('English').click(); await tick(300);
       check('choosing English stores the language setting', window.currentSettings().language === 'en');
-      check('settings tabs switch to English at once', tabLabels() === 'Appearance|Time|Terminal|Account|CLI|Reminders|Shortcuts');
+      check('settings tabs switch to English at once', tabLabels() === 'Appearance|Time|Terminal|Account|CLI|Reminders|Shortcuts|About');
       check('theme names follow the language', [...document.querySelectorAll('[aria-label="Eye-care theme colors"] button')].map(b => b.textContent.trim()).join('|') === 'Bean Green|Parchment|Lavender|Mist Gray|Warm Night|Arctic Gray Blue|Forest Night|Ink Night');
       const hasCjkS = (txt) => [...txt].some(c => c.charCodeAt(0) >= 0x2e80);
-      for (const tabName of ['Time', 'Terminal', 'Account', 'CLI', 'Reminders', 'Shortcuts']) {
+      for (const tabName of ['Time', 'Terminal', 'Account', 'CLI', 'Reminders', 'Shortcuts', 'About']) {
         [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.trim() === tabName).click(); await tick(250);
         const dlg = document.querySelector('[role="dialog"]');
         const parts = [dlg.textContent, ...[...dlg.querySelectorAll('[title],[aria-label],[placeholder]')].flatMap(e => ['title', 'aria-label', 'placeholder'].map(a => e.getAttribute(a) || ''))];
@@ -988,7 +1004,7 @@ app.whenReady().then(async () => {
       check('accounts page shows the real home directory instead of a fixed path', document.body.textContent.includes('C:/Users/tester') && !document.body.textContent.includes('你'));
       [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.trim() === 'Appearance').click(); await tick();
       langBtn('简体中文').click(); await tick(300);
-      check('switching back to Simplified Chinese restores the Chinese labels', tabLabels() === '外观|时间|终端|账号|CLI|提醒|快捷键');
+      check('switching back to Simplified Chinese restores the Chinese labels', tabLabels() === '外观|时间|终端|账号|CLI|提醒|快捷键|关于');
       } catch (e) { check('settings language tests threw: ' + String(e.stack).split(String.fromCharCode(10)).slice(0, 3).join(' | '), false); }
       return checks;
     })()\`));
@@ -1735,6 +1751,33 @@ app.whenReady().then(async () => {
       const emptyDashText = document.getElementById('oneai-dashboard-view').textContent;
       check('empty Dashboard renders cleanly without NaN', emptyDashText.includes('Dashboard.') && !emptyDashText.includes('NaN'));
       window.dashboardEmpty = false;
+      window.clearRoot();
+
+      // 软件更新：侧栏徽标（可用、忽略、下载中、已下载、折叠态）与更新弹窗各状态
+      window.events = [];
+      const updAvailable = { phase: 'available', currentVersion: '2.2.7', latestVersion: '2.2.8', releaseNotes: '- Fix A | Feature B', releaseDate: '2026-11-25T00:00:00Z', releaseUrl: 'https://github.com/Qingxuan365/oneAI/releases/tag/v2.2.8', canAutoUpdate: true };
+      window.drawSidebarUpdate(false, updAvailable, ''); await wait(60);
+      const updBadge = document.querySelector('[data-update-badge]');
+      check('expanded sidebar shows clickable update badge for available update', Boolean(updBadge) && updBadge.textContent.includes('v2.2.8') && getComputedStyle(updBadge).webkitAppRegion === 'no-drag' && (updBadge.click(), window.events.includes('open-update')));
+      window.drawSidebarUpdate(false, updAvailable, '2.2.8'); await wait(60);
+      check('sidebar hides update badge when latest version is ignored', !document.querySelector('[data-update-badge]'));
+      window.drawSidebarUpdate(true, updAvailable, ''); await wait(60);
+      check('collapsed sidebar shows update badge button', Boolean(document.querySelector('[data-update-badge]')));
+      window.drawSidebarUpdate(false, { ...updAvailable, phase: 'downloaded' }, '2.2.8'); await wait(60);
+      check('downloaded update badge stays visible even if version was ignored', Boolean(document.querySelector('[data-update-badge]')) && document.querySelector('[data-update-badge]').textContent.includes('重启更新'));
+
+      window.events = [];
+      window.drawUpdateModal(updAvailable); await wait(60);
+      const updDialog = document.querySelector('[role="dialog"]');
+      check('UpdateModal renders version diff, release notes and triggers download/ignore/release actions', updDialog.textContent.includes('v2.2.7') && updDialog.textContent.includes('v2.2.8') && updDialog.textContent.includes('Feature B')
+        && ([...updDialog.querySelectorAll('button')].find(b => b.textContent.includes('下载更新')).click(), window.events.includes('update-download'))
+        && ([...updDialog.querySelectorAll('button')].find(b => b.textContent.includes('忽略此版本')).click(), window.events.includes('update-ignore:2.2.8'))
+        && ([...updDialog.querySelectorAll('button')].find(b => b.textContent.includes('发布页')).click(), window.events.includes('update-release')));
+      window.drawUpdateModal({ ...updAvailable, phase: 'downloading', progress: { percent: 45, transferred: 45 * 1024 * 1024, total: 100 * 1024 * 1024, bytesPerSecond: 5 * 1024 * 1024 } }); await wait(60);
+      check('UpdateModal shows download progress bar and speed', document.querySelector('[data-update-progress]')?.textContent.includes('45%') && document.querySelector('[data-update-progress]')?.textContent.includes('5.0 MiB/s'));
+      window.events = [];
+      window.drawUpdateModal({ ...updAvailable, phase: 'downloaded' }); await wait(60);
+      check('UpdateModal triggers install on downloaded state', ([...document.querySelectorAll('[role="dialog"] button')].find(b => b.textContent.includes('立即重启并安装')).click(), window.events.includes('update-install')));
       window.clearRoot();
       return checks;
     })()\`));

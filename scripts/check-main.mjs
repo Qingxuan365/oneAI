@@ -19,15 +19,36 @@ const stubPlugin = {
         module.exports = {
           app: {
             isReady: () => true,
+            isPackaged: false,
+            getVersion: () => '2.2.7',
             getPath: (name) => {
               const paths = globalThis.__ONEAI_TEST_PATHS__ || {};
               return paths[name] || path.join(paths.root || process.cwd(), name);
             },
           },
           ipcMain: { handle() {}, on() {} },
+          shell: { openExternal: async () => {} },
           protocol: { handle() {}, registerSchemesAsPrivileged() {} },
           dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
           BrowserWindow: class {},
+        };
+      `,
+      loader: 'js',
+    }));
+    b.onResolve({ filter: /^electron-updater$/ }, () => ({ path: 'electron-updater', namespace: 'stub' }));
+    b.onLoad({ filter: /^electron-updater$/, namespace: 'stub' }, () => ({
+      contents: `
+        module.exports = {
+          autoUpdater: {
+            autoDownload: false,
+            autoInstallOnAppQuit: true,
+            allowPrerelease: false,
+            allowDowngrade: false,
+            on() {},
+            checkForUpdates: async () => null,
+            downloadUpdate: async () => [],
+            quitAndInstall() {},
+          },
         };
       `,
       loader: 'js',
@@ -85,6 +106,7 @@ try {
         import { listProjectDirectory } from './src/main/project-tree';
         import { setBoundedMap } from './src/main/fs-utils';
         import { folderKey, quoteTerminalPath, extractPathMatches } from './src/shared/paths';
+        import { buildReleaseUrl, canUseAutoUpdater, compareSemver, extractVersionFromReleaseUrl, normalizeReleaseNotes } from './src/main/updater';
 
         test('Traditional Chinese is detected, translated, and accepted by main-process i18n', () => {
           for (const locale of ['zh-TW', 'zh-HK', 'zh_MO', 'zh-Hant', 'zh-Hant-CN']) assert.equal(detectLanguage(locale), 'zh-TW');
@@ -817,6 +839,31 @@ try {
           const week = computeDashboardView(stats, { ...filter, range: '7d', cliId: 'codex' }, now);
           assert.equal(week.comparison.prevTokens, 10);
           assert.equal(week.comparison.deltaPct, null);
+        });
+
+        test('Updater compares semver, normalizes release notes, builds release URLs and gates auto-update', () => {
+          assert.equal(compareSemver('2.2.8', '2.2.7'), 1);
+          assert.equal(compareSemver('v2.3.0', '2.2.99'), 1);
+          assert.equal(compareSemver('2.2.7', 'v2.2.7'), 0);
+          assert.equal(compareSemver('2.2.7', '2.2.8'), -1);
+          assert.equal(compareSemver('2.2.8', '2.2.8-beta.1'), 1);
+          assert.equal(compareSemver('2.2.8-beta.2', '2.2.8-beta.1'), 1);
+          assert.equal(compareSemver('invalid', '2.2.7'), 0);
+
+          assert.equal(buildReleaseUrl('2.2.8'), 'https://github.com/Qingxuan365/oneAI/releases/tag/v2.2.8');
+          assert.equal(buildReleaseUrl('v2.2.8'), 'https://github.com/Qingxuan365/oneAI/releases/tag/v2.2.8');
+          assert.equal(buildReleaseUrl(), 'https://github.com/Qingxuan365/oneAI/releases');
+          assert.equal(extractVersionFromReleaseUrl('https://github.com/Qingxuan365/oneAI/releases/tag/v2.2.8'), '2.2.8');
+          assert.equal(extractVersionFromReleaseUrl('https://github.com/Qingxuan365/oneAI/releases'), null);
+
+          assert.equal(normalizeReleaseNotes('<p>Hello &amp; <b>world</b></p><ul><li>Fix 1</li><li>Fix 2</li></ul>'), 'Hello & world\\n- Fix 1\\n- Fix 2');
+          assert.equal(normalizeReleaseNotes([{ version: '2.2.8', note: 'Added updater' }]), 'v2.2.8\\nAdded updater');
+          assert.equal(normalizeReleaseNotes(null), '');
+
+          assert.equal(canUseAutoUpdater({ isPackaged: true, appUpdateYmlExists: true }), true);
+          assert.equal(canUseAutoUpdater({ isPackaged: false, appUpdateYmlExists: true }), false);
+          assert.equal(canUseAutoUpdater({ isPackaged: true, portableDir: 'D:/portable', appUpdateYmlExists: true }), false);
+          assert.equal(canUseAutoUpdater({ isPackaged: true, appUpdateYmlExists: false }), false);
         });
       `,
     },

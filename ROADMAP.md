@@ -8,6 +8,7 @@
 ## 2. 进度看板
 
 ### 已完成
+- [x] 2026-11-25 09:54 接入基于 GitHub Releases 的软件更新提示与应用内自动更新（`electron-updater`、`updater.ts`、`UpdateModal.tsx`、`Sidebar.tsx`、`SettingsModal.tsx`）：启动约 6 秒后静默检查新版本，侧栏版本号旁与折叠态底部显示提示徽标，弹窗支持查看更新说明、应用内下载进度、立即重启覆盖安装（运行中终端先确认）与忽略此版本；「设置 → 关于」提供手动检查与自动检查开关；便携版、开发模式或线上缺少 `latest.yml` 时自动降级为 Releases API 检查并跳转浏览器下载。[功能说明](D:/GitHub/OneAI/docs/features.zh-CN.md)
 - [x] 2026-11-24 00:38 额度、会话用量、系统资源与时钟从顶栏移到终端下方的两行状态栏（`StatusBar.tsx`），所有 CLI 展示一致；上行为任务运行状态、5h / 7d / Ctx 进度条（按已用比例填充，绿 / 黄 / 红）、模型与时钟，下行为 Tokens / Cache / Cost 与 CPU / GPU / Mem / Net；顶栏只保留导航与操作，时钟动态降级逻辑改为状态栏容器查询；新增「设置 → 时间 → 显示状态栏」开关。[功能说明](D:/GitHub/OneAI/docs/features.zh-CN.md)
 - [x] 2026-11-23 19:41 OneAI 2.2.6 加入繁体中文。首次启动和设置可选择「繁體中文」，系统按中文文字系统或地区预选，切换即时更新界面和中文农历。版本同时包含 Dashboard、顶栏与侧栏修复。[功能说明](D:/GitHub/OneAI/docs/features.zh-CN.md)
 - [x] 2026-11-23 19:28 修复左侧导航交互：切换到已有 PTY 时保留运行或等待状态，关闭右键菜单时焦点回到对应按钮，侧栏拖宽在失焦或按 Esc 时取消并支持键盘调宽，历史会话按 CLI、账号与会话 ID 匹配。[功能说明](D:/GitHub/OneAI/docs/features.zh-CN.md)
@@ -31,6 +32,7 @@
 - [x] 2026-11-19 09:15 版本号升到 2.2.2 并生成安装包 `OneAI-Setup-2.2.2.exe`（85319058 字节），随 GitHub Release `v2.2.2` 发布；包含运行中转圈、任务完成提示音、休息提醒称呼与输出静默判断修复。
 
 ### 待办 / 后续增强
+- [ ] 桌面验收软件更新真实升级链路：发布包含 `OneAI-Setup-<version>.exe`、`latest.yml`（及 `.blockmap`）的新版 GitHub Release 后，从已安装的旧版触发检查、应用内下载进度与重启覆盖安装，确认新版本正常启动且工作区与设置保留。
 - [ ] 桌面验收底部状态栏：安装新版后在 Claude Code、Codex、Antigravity、Pi 与系统终端下核对状态栏两行内容、进度条观感与各主题配色、窗口缩窄时的收起顺序、日期时钟的显示与收起，以及关闭「显示状态栏」后终端行数恢复。
 - [ ] 桌面验收 `Dashboard` 页面（`Ctrl + Shift + D`）：核对本机真实 Claude Code / Codex / Antigravity / Pi 会话扫描速度与数据准确性（去重 Session 数、Tokens、估算费用与价格覆盖率、12 个月热力图与多分组 Antigravity / 多账号实时配额卡），确认各主题配色观感及从 Dashboard 切回运行中终端时的焦点与 PTY 重绘手感。
 - [ ] 桌面实测顶栏通用会话指标与多 CLI 额度展示：在 Claude Code、Codex、Antigravity（含 `Orchestrator (Neon)` / `Gemini 4 Argon` / `Claude` 模型切换）及 Pi 下验证 `Tokens: in/out/cache`、`Cache: ...%` 与 `Ctx`（含 `0%` 与纯 token 数量显示）实时刷新、悬停提示与各窗口宽度收起效果。
@@ -67,6 +69,9 @@
 - 会话日志缓冲保留最近约 2 MiB 输出；更早内容不会出现在复制和导出的日志中。
 
 ## 4. 最近验证
+- **2026-11-25 10:13** 2.2.8 发布构建与 UI 截图验收：`npx tsc --noEmit`、`npm run check:i18n`（760 条，0 缺失）、`npm run check:main`（18/18）、`npm run check:ui`（全部通过）与 `npm run build:win` 通过；已对打包版 `OneAI.exe` 的「设置 → 关于」与「软件更新」弹窗做 CDP 真实截图核对，布局、对齐与对比度正常。产物：`release/OneAI-Setup-2.2.8.exe`（85,697,602 字节）、`release/latest.yml`（338 字节）与 `release/OneAI-Setup-2.2.8.exe.blockmap`（89,317 字节）。
+- **2026-11-25 10:03** 软件更新打包版真机实测与修复：用独立 `--user-data-dir` 启动 [OneAI.exe](D:/GitHub/OneAI/release/win-unpacked/OneAI.exe) 并通过 CDP 实测，先后发现并修复三个真实问题：① 主进程 ESM 具名导入 CJS 模块 `electron-updater` 导致打包版启动报错（改为默认导入）；② 共享代理 IP 降级查 `api.github.com` 触发 403 限流（新增 `github.com/Qingxuan365/oneAI/releases/latest` 跳转兜底）；③ 启动 6 秒自动检查在手动检查后重复触发与降级后锁死 `canAutoUpdate` 的状态竞态。修复后 `tsc`、`check:main`（18/18）、`build:win` 与打包版 CDP 实测均通过（`initial.canAutoUpdate=true`，线上检查返回 `not-available` / `v2.2.7`，自动检查复用结果不重发）；安装包 [OneAI-Setup-2.2.7.exe](D:/GitHub/OneAI/release/OneAI-Setup-2.2.7.exe) 为 85,693,183 字节，[latest.yml](D:/GitHub/OneAI/release/latest.yml) 为 338 字节。未验证：发布带 `latest.yml` 的新版本后跨版本在线下载与重启覆盖安装。
+- **2026-11-25 09:54** 软件更新功能验证：`npx tsc --noEmit`、`npm run check:i18n`（760 条，0 缺失、0 占位符错误、0 未使用）、`npm run check:main`（18/18 通过，新增 `updater.ts` 版本比较 / 更新说明清洗 / 自动更新门禁测试）、`npm run check:ui`（全部通过，新增侧栏更新徽标、忽略版本、更新弹窗各状态与「设置 → 关于」英文无中文断言）及 `npm run build:win` 通过；已核对产物 [OneAI-Setup-2.2.7.exe](D:/GitHub/OneAI/release/OneAI-Setup-2.2.7.exe) （85,693,103 字节）、[latest.yml](D:/GitHub/OneAI/release/latest.yml) （338 字节）与 `release/win-unpacked/resources/app-update.yml`。未验证：真实跨版本 GitHub Release 在线下载与重启覆盖安装。
 - **2026-11-25 07:06** 2.2.7 发布构建：主进程 17/17、多语言 714 条和 TypeScript 构建通过；Windows 安装包 `release/OneAI-Setup-2.2.7.exe` 为 85,363,186 字节，生成于北京时间 2026-11-25 07:06:26。性能、界面和真实 PTY 验证见本节既有记录。
 - **2026-11-25 07:02** 继续验收终端链路：主进程 17/17 通过，新增消费确认非法值、重复确认、清屏释放积压、重启后旧输出隔离测试；真实 PTY 测试补充系统 ConPTY 与 Pi 所用 ConPTY DLL 的交互写入、尺寸调整与退出，背压及 Electron 退出回归通过。另用打包版 OneAI.exe 加载 app.asar 内 node-pty，成功输出标记并以 0 退出。本轮 build:win 通过，安装包为 85,365,823 字节，生成于北京时间 2026-11-25 07:03:19。真实 CLI 的中文输入法及长期运行仍待桌面验收。
 - **2026-11-25 06:55** 性能优化：类型检查、主进程 16 项、多语言 714 条及界面回归通过；`node scripts/check-pty.mjs` 在 Electron 下实测 3 次直接创建与 3 次 worker 创建，事件循环最大延迟分别为 79.7～83.9 ms 和 11.2～15.1 ms；首次 worker 创建等待约 145 ms，后续约 71～73 ms。4 MiB 输出在约 1 Mi 字符积压处暂停，消费确认后恢复并收到尾部标记。带存活 PTY 的 Electron 退出回归通过，先等待 node-pty 输出线程排空再终止外层 worker；taskkill 兜底期间会出现 AttachConsole 提示，测试退出码为 0。Windows 安装包构建通过，release/OneAI-Setup-2.2.6.exe 为 85,365,817 字节，生成于北京时间 2026-11-25 06:55:54；真实 CLI 中文输入、长期运行与安装后验证仍未覆盖。
@@ -93,6 +98,7 @@
 - **2026-11-19 09:44**：提示音同步与退出提示音改动：`npx tsc --noEmit`、`npm run check:main`、`npm run check:i18n`（552 条 0 缺失）、`npm run check:ui`（391 项通过，无失败）通过，`npm run build:win` 生成 `release/OneAI-Setup-2.2.2.exe`（85324248 字节）。未验证：提示音真实听感、思考间隙是否误响（需桌面实测）。
 
 ## 5. 最近完成
+- **2026-11-25 09:54** 新增基于 GitHub Releases 的软件更新提示与应用内自动更新（`electron-builder.json`、`vite.config.ts`、`src/shared/types.ts`、`src/main/updater.ts`、`src/main/index.ts`、`src/preload/index.*`、`src/renderer/src/components/UpdateModal.tsx`、`Sidebar.tsx`、`SettingsModal.tsx`、`App.tsx`、`en.ts`、`zh-TW.ts`、`check-main.mjs`、`check-ui.mjs`、`AGENTS.md`、`docs/features*.md`）：支持启动静默检查、侧栏提示徽标、弹窗更新说明与下载进度、立即重启覆盖安装（含运行中终端确认与退出保护放行）以及便携版/开发模式/缺 `latest.yml` 时的浏览器下载兜底。
 - **2026-11-25 07:07** 发布 2.2.7：版本配置与性能优化提交 `76360d5` 已推送至 `origin/main`，标签 `v2.2.7` 指向该提交；[GitHub Release](https://github.com/Qingxuan365/oneAI/releases/tag/v2.2.7) 已设为 Latest，安装包 `OneAI-Setup-2.2.7.exe` 为 85,363,186 字节，线上附件 SHA-256 `b0f4fd619db6315bca410170e825eb4b1944088921f5f87566f973dac37ed8b3` 与本地一致。独立网络工具 `tools/` 未纳入本次发布。
 - **2026-11-25 06:51** 顺序完成四项性能优化：共享 PTY worker 隔离原生创建阻塞并处理创建取消；增加 worker → 主进程 → xterm 消费确认与高低水位背压；统计缓存改为按文件分批序列化和原子落盘，保留日志变化后完整重解析以处理截断及累计状态；摘要目录按目录签名缓存，30 秒兜底重新枚举。新增真实 PTY 性能与背压测试 `scripts/check-pty.mjs`，补充取消、缓存损坏和目录变更回归。旧统计缓存保留，新缓存首次访问需重建。
 - **2026-11-24 08:06** 运行中任务的状态圆点从旋转动画改为绿色空心圆（`taskStatus.ts`，同步更新 `docs/features*.md`），避免每个运行中的任务都让窗口持续以 60 fps 重绘。修复生产构建的 CSP：`vite.config.ts` 计算内联脚本哈希前先把 CRLF 统一成 LF，与浏览器的计算方式一致；首帧设置主题的内联脚本此前一直被拦截，浅色主题启动时会先闪一帧深色。

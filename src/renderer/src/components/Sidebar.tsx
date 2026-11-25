@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { BedDouble, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Folder, FolderOpen, FolderPlus, GitBranch, GripVertical, History, LayoutDashboard, Moon, PanelLeftOpen, Pencil, Plus, RotateCcw, Settings, SlidersHorizontal, Sun, Trash2, User, X } from 'lucide-react';
-import { Account, CliDef, FolderEntry, HistoryEntry, MusicStream, TaskSession } from '../types';
+import { ArrowUpCircle, BedDouble, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Folder, FolderOpen, FolderPlus, GitBranch, GripVertical, History, LayoutDashboard, Moon, PanelLeftOpen, Pencil, Plus, RotateCcw, Settings, SlidersHorizontal, Sun, Trash2, User, X } from 'lucide-react';
+import { Account, CliDef, FolderEntry, HistoryEntry, MusicStream, TaskSession, UpdateState } from '../types';
 
 const NO_STREAMS: MusicStream[] = [];
 // 一个文件夹的任务数超过这个值时，侧栏对屏幕外的任务行启用 content-visibility
@@ -62,6 +62,10 @@ interface SidebarProps {
   onResumeHistory?: (entry: HistoryEntry) => void;
   onOpenHistory?: () => void;
   onOpenSettings?: () => void;
+  /** 应用更新状态与被用户忽略的版本；有可用/下载中/已就绪更新时在版本号旁显示提示徽标 */
+  updateState?: UpdateState | null;
+  ignoredUpdateVersion?: string;
+  onOpenUpdate?: () => void;
   musicDirectory?: string;
   musicStreams?: MusicStream[];
   showMusicPlayer?: boolean;
@@ -133,6 +137,9 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   onResumeHistory,
   onOpenHistory,
   onOpenSettings,
+  updateState = null,
+  ignoredUpdateVersion = '',
+  onOpenUpdate,
   musicDirectory = '',
   musicStreams = NO_STREAMS,
   showMusicPlayer = true,
@@ -228,6 +235,25 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
 
   const runningCount = tasks.filter((task) => isTaskAlive(task.status)).length;
   const allFoldersExpanded = folders.length > 0 && folders.every((folder) => folder.isExpanded);
+  const showUpdateBadge = Boolean(
+    onOpenUpdate && updateState && (
+      updateState.phase === 'downloaded'
+      || updateState.phase === 'downloading'
+      || (updateState.phase === 'available' && updateState.latestVersion && updateState.latestVersion !== ignoredUpdateVersion)
+    ),
+  );
+  const updateBadgeText = updateState?.phase === 'downloaded'
+    ? t('重启更新')
+    : updateState?.phase === 'downloading'
+      ? `${updateState.progress?.percent ?? 0}%`
+      : updateState?.latestVersion
+        ? `v${updateState.latestVersion}`
+        : '';
+  const updateBadgeTitle = updateState?.phase === 'downloaded'
+    ? t('新版本 v{version} 已下载完成，点击重启并安装', { version: updateState.latestVersion ?? '' })
+    : updateState?.phase === 'downloading'
+      ? t('正在下载新版本（{percent}%）', { percent: updateState.progress?.percent ?? 0 })
+      : t('发现新版本 v{version}，点击查看更新', { version: updateState?.latestVersion ?? '' });
 
   // 右键菜单：新建任务（文件夹「+」）、文件夹行、任务行、最近任务文件夹共用
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -565,6 +591,19 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
         </div>
 
         <div className="flex w-full shrink-0 flex-col items-center gap-1 border-t border-line bg-panel py-2">
+          {showUpdateBadge && onOpenUpdate && (
+            <button
+              type="button"
+              data-update-badge
+              onClick={onOpenUpdate}
+              className="icon-btn relative h-8 w-8 text-accent"
+              title={updateBadgeTitle}
+              aria-label={updateBadgeTitle}
+            >
+              <ArrowUpCircle size={15} />
+              <span className={`absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full ${updateState?.phase === 'downloaded' ? 'bg-success' : 'bg-accent'}`} aria-hidden="true" />
+            </button>
+          )}
           <button type="button" onClick={onAddFolder} className="icon-btn h-8 w-8" title={t('添加文件夹')} aria-label={t('添加文件夹')}>
             <FolderPlus size={15} className="text-accent" />
           </button>
@@ -593,14 +632,32 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
           <span className="text-2xl font-semibold tracking-tight text-fg">OneAI</span>
         </div>
         <p className="mt-1.5 text-ui text-fg-subtle">All agents in one.</p>
-        <p className="mt-0.5 flex items-center justify-center gap-1 whitespace-nowrap text-2xs text-fg-faint" aria-live="polite">
-          <span className="font-mono">v{version}</span>
-          <span aria-hidden="true">·</span>
+        <div className="mt-0.5 flex min-w-0 items-center justify-center gap-1 overflow-hidden whitespace-nowrap text-2xs text-fg-faint" aria-live="polite">
+          <span className="shrink-0 font-mono">v{version}</span>
+          {showUpdateBadge && onOpenUpdate && (
+            <button
+              type="button"
+              data-update-badge
+              onClick={onOpenUpdate}
+              title={updateBadgeTitle}
+              aria-label={updateBadgeTitle}
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+              className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0 font-mono text-2xs leading-4 transition-colors ${
+                updateState?.phase === 'downloaded'
+                  ? 'border-success/40 bg-success/15 text-success hover:bg-success/25'
+                  : 'border-accent/40 bg-accent/15 text-accent hover:bg-accent/25'
+              }`}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${updateState?.phase === 'downloaded' ? 'bg-success' : 'bg-accent'}`} aria-hidden="true" />
+              <span>{updateBadgeText}</span>
+            </button>
+          )}
+          <span className="shrink-0" aria-hidden="true">·</span>
           {greeting.period === 'day' ? <Sun size={12} className="text-warning shrink-0" aria-hidden="true" />
             : greeting.period === 'evening' ? <Moon size={12} className="text-fg-muted shrink-0" aria-hidden="true" />
               : <BedDouble size={12} className="text-accent shrink-0" aria-hidden="true" />}
-          {t(greeting.text)}
-        </p>
+          <span className="min-w-0 truncate">{t(greeting.text)}</span>
+        </div>
       </div>
 
       {/* Dashboard 导航菜单（品牌头部正下方） */}

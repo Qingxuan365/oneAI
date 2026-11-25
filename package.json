@@ -1,6 +1,6 @@
 {
   "name": "oneai",
-  "version": "2.2.7",
+  "version": "2.2.8",
   "description": "Desktop workbench for managing multiple local AI coding CLIs with live quotas",
   "author": "OneAI Team",
   "license": "MIT",
@@ -21,6 +21,7 @@
     "@xterm/addon-search": "^0.16.0",
     "@xterm/addon-webgl": "^0.18.0",
     "@xterm/xterm": "^5.5.0",
+    "electron-updater": "^6.8.11",
     "fzstd": "^0.1.1",
     "highlight.js": "^11.11.1",
     "lucide-react": "^0.441.0",

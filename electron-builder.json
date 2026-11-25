@@ -35,5 +35,12 @@
   },
   "portable": {
     "artifactName": "${productName}-Portable-${version}.exe"
-  }
+  },
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "Qingxuan365",
+      "repo": "oneAI"
+    }
+  ]
 }

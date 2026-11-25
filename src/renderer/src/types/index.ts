@@ -18,6 +18,9 @@ import type {
   SystemStats,
   TaskSummary,
   ThemeId,
+  UpdatePhase,
+  UpdateProgress,
+  UpdateState,
   UsageAccountInfo,
   UsageAccountRef,
   UsageCli,
@@ -48,6 +51,9 @@ export type {
   SystemStats,
   TaskSummary,
   ThemeId,
+  UpdatePhase,
+  UpdateProgress,
+  UpdateState,
   UsageAccountInfo,
   UsageAccountRef,
   UsageCli,
@@ -132,6 +138,8 @@ export interface AppSettings {
   clockOffsetHours: number; // 状态栏时钟相对系统时间增加的小时数，默认 0（-24 ~ 24 的整数）
   topbarDateVisible: boolean; // 状态栏时钟是否显示年月日（含农历）与星期，默认 true（字段名沿用旧版以保留已有设置）
   statusBarVisible: boolean; // 是否显示终端下方的两行状态栏，默认 true
+  autoCheckUpdates: boolean; // 启动时是否自动在后台检查 GitHub 新版本，默认 true
+  ignoredUpdateVersion: string; // 用户选择「忽略此版本」后记录的版本号，空串表示未忽略
   accounts: Account[]; // 多账号配置（Codex / Claude Code / Kimi Code），默认空；「恢复默认设置」不会清空
   customClis: CustomCli[]; // 用户自定义的 CLI，默认空；「恢复默认设置」不会清空
 }
@@ -214,6 +222,13 @@ export interface ElectronTerminalAPI {
   /** 状态栏关闭时停止整机资源采样，重新打开后恢复 */
   setSystemStatsEnabled?: (enabled: boolean) => void;
   onSystemStats: (callback: (stats: SystemStats) => void) => () => void;
+  /** 应用更新：读取状态、检查、下载、重启安装、打开 GitHub Release 页面与状态订阅 */
+  getUpdateState?: () => Promise<UpdateState>;
+  checkForUpdates?: (manual?: boolean) => Promise<UpdateState>;
+  downloadUpdate?: () => Promise<{ ok: boolean; error?: string }>;
+  installUpdate?: () => Promise<{ ok: boolean; error?: string }>;
+  openUpdateRelease?: () => Promise<boolean>;
+  onUpdateState?: (callback: (state: UpdateState) => void) => () => void;
 }
 
 declare global {

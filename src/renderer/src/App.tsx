@@ -7,7 +7,8 @@ import { Modal } from './components/Modal';
 import { ConfirmDialog, ConfirmOptions } from './components/ConfirmDialog';
 import { BrandIcon } from './components/BrandIcon';
 import { AppLogo } from './components/AppLogo';
-import { CliDef, CustomCli, FolderEntry, TaskSession, QuotaData, AppSettings, ThemeId, HistoryEntry, Account, TaskSummary } from './types';
+import { CliDef, CustomCli, FolderEntry, TaskSession, QuotaData, AppSettings, ThemeId, HistoryEntry, Account, TaskSummary, UpdateState } from './types';
+import { version as appVersion } from '../../../package.json';
 import { BUILTIN_CLIS } from './clis';
 import { SUMMARY_CLIS, formatAgo } from './taskSummary';
 import { ensureFolder, folderKey, folderName, groupRecent, historySessionKey, loadAppState, moveBefore, nextTaskTitle, orderedTasks, scheduleSaveAppState, tasksInFolder } from './workspaceState';
@@ -29,6 +30,7 @@ const UsageModal = lazy(() => import('./components/UsageModal').then((m) => ({ d
 const DashboardView = lazy(() => import('./components/DashboardView').then((m) => ({ default: m.DashboardView })));
 const FilePreviewPanel = lazy(() => import('./components/FilePreviewPanel').then((m) => ({ default: m.FilePreviewPanel })));
 const ProjectTreeDrawer = lazy(() => import('./components/ProjectTreeDrawer').then((m) => ({ default: m.ProjectTreeDrawer })));
+const UpdateModal = lazy(() => import('./components/UpdateModal').then((m) => ({ default: m.UpdateModal })));
 
 const DEFAULT_SETTINGS: AppSettings = {
   language: systemLanguage(),
@@ -53,6 +55,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   clockOffsetHours: 0,
   topbarDateVisible: true,
   statusBarVisible: true,
+  autoCheckUpdates: true,
+  ignoredUpdateVersion: '',
   accounts: [],
   customClis: [],
 };
@@ -151,6 +155,13 @@ export const App: React.FC = () => {
   }, [activeTaskId, isDashboardOpen, unreadTaskIds]);
   const [quotas, setQuotas] = useState<Record<string, QuotaData>>({});
   const [workReminderVisible, setWorkReminderVisible] = useState(false);
+  const [isUpdateOpen, setIsUpdateOpen] = useState(false);
+  const [updateState, setUpdateState] = useState<UpdateState>(() => ({
+    phase: 'idle',
+    currentVersion: appVersion,
+    releaseUrl: 'https://github.com/Qingxuan365/oneAI/releases',
+    canAutoUpdate: false,
+  }));
   const terminalViewportRef = useRef<TerminalViewportRef>(null);
   // 应用内确认 / 通知弹窗：askConfirm 返回用户的选择
   const [confirmOptions, setConfirmOptions] = useState<ConfirmOptions | null>(null);
@@ -186,6 +197,57 @@ export const App: React.FC = () => {
   useEffect(() => {
     window.electronAPI?.setSystemStatsEnabled?.(statusBarVisible);
   }, [statusBarVisible]);
+
+  // 软件更新：同步主进程状态；开启自动检查时延迟 6 秒在后台静默检查一次（避开冷启动与终端恢复）
+  useEffect(() => {
+    let active = true;
+    void window.electronAPI?.getUpdateState?.().then((state) => {
+      if (active && state) setUpdateState(state);
+    }).catch(() => {});
+    const unsub = window.electronAPI?.onUpdateState?.((state) => {
+      setUpdateState(state);
+    });
+    const timer = settingsRef.current.autoCheckUpdates !== false
+      ? window.setTimeout(() => {
+          void window.electronAPI?.checkForUpdates?.(false).catch(() => {});
+        }, 6_000)
+      : 0;
+    return () => {
+      active = false;
+      unsub?.();
+      if (timer) window.clearTimeout(timer);
+    };
+  }, []);
+
+  const handleOpenUpdate = useCallback(() => {
+    setIsSettingsOpen(false);
+    setIsUpdateOpen(true);
+  }, []);
+  const handleCheckForUpdates = useCallback(() => {
+    setIsSettingsOpen(false);
+    setIsUpdateOpen(true);
+    void window.electronAPI?.checkForUpdates?.(true).catch(() => {});
+  }, []);
+  const handleDownloadUpdate = useCallback(() => {
+    void window.electronAPI?.downloadUpdate?.().catch(() => {});
+  }, []);
+  const handleOpenUpdateRelease = useCallback(() => {
+    void window.electronAPI?.openUpdateRelease?.().catch(() => {});
+  }, []);
+  const handleIgnoreUpdateVersion = useCallback((ver: string) => {
+    setSettings((prev) => ({ ...prev, ignoredUpdateVersion: ver }));
+    setIsUpdateOpen(false);
+  }, []);
+  const handleInstallUpdate = useCallback(async () => {
+    const aliveCount = tasksRef.current.filter((task) => isTaskAlive(task.status)).length;
+    if (aliveCount > 0 && !await askConfirm({
+      title: t('重启并安装更新'),
+      message: t('还有 {n} 个终端进程在运行，重启安装更新会全部终止。', { n: aliveCount }),
+      confirmLabel: t('重启并安装'),
+      danger: true,
+    })) return;
+    await window.electronAPI?.installUpdate?.();
+  }, [askConfirm]);
   // 任务启动：按任务绑定的账号注入配置目录；账号配置已被删除时拒绝启动，避免悄悄回落到默认账号
   const accountsRef = useRef(settings.accounts);
   accountsRef.current = settings.accounts;
@@ -1138,7 +1200,7 @@ export const App: React.FC = () => {
   const shortcutRef = useRef<(e: KeyboardEvent) => boolean>(() => false);
   shortcutRef.current = (e) => {
     if (!e.ctrlKey || e.altKey || e.metaKey) return false;
-    if (isNewTaskOpen || isSettingsOpen || isHistoryOpen || isUsageOpen || workReminderVisible || confirmOptions) return false;
+    if (isNewTaskOpen || isSettingsOpen || isHistoryOpen || isUsageOpen || isUpdateOpen || workReminderVisible || confirmOptions) return false;
     const key = e.key.toLowerCase();
     if (e.shiftKey && key === 'e') { setIsFileTreeOpen((v) => !v); return true; }
     if (isFileTreeOpen) return false;
@@ -1263,13 +1325,14 @@ ${entry.cwd}`}
   }, [hasActiveTask, history, visibleClis, workspacePath, workspaceBranch, settings.language, handleAddFolderVoid, handleResumeHistory, handleQuickNewTask, handleOpenNewTask]);
 
   // 低频弹窗与 Dashboard 首次打开前不加载分包、不挂载；首次打开后保持挂载交由显隐控制，保留内部状态
-  const everOpenedModalsRef = useRef({ newTask: false, history: false, usage: false, settings: false, fileTree: false, dashboard: false });
+  const everOpenedModalsRef = useRef({ newTask: false, history: false, usage: false, settings: false, fileTree: false, dashboard: false, update: false });
   if (isNewTaskOpen) everOpenedModalsRef.current.newTask = true;
   if (isHistoryOpen) everOpenedModalsRef.current.history = true;
   if (isUsageOpen) everOpenedModalsRef.current.usage = true;
   if (isSettingsOpen) everOpenedModalsRef.current.settings = true;
   if (isFileTreeOpen) everOpenedModalsRef.current.fileTree = true;
   if (isDashboardOpen) everOpenedModalsRef.current.dashboard = true;
+  if (isUpdateOpen) everOpenedModalsRef.current.update = true;
   const openHistoryIds = useMemo(
     () => new Set(tasks.flatMap((task) => task.historyId ? [historySessionKey(task.groupId, task.accountId, task.historyId)] : [])),
     [tasks],
@@ -1325,6 +1388,9 @@ ${entry.cwd}`}
         onOpenHistory={handleOpenHistory}
         unreadTaskIds={unreadTaskIds}
         onOpenSettings={handleOpenSettings}
+        updateState={updateState}
+        ignoredUpdateVersion={settings.ignoredUpdateVersion}
+        onOpenUpdate={handleOpenUpdate}
         musicDirectory={settings.musicDirectory}
         musicStreams={settings.musicStreams}
         showMusicPlayer={settings.musicPlayerVisible}
@@ -1509,6 +1575,24 @@ ${entry.cwd}`}
             onCustomClisChange={handleCustomClisChange}
             onRedetectClis={redetectClis}
             accountTaskCounts={accountTaskCounts}
+            updateState={updateState}
+            onCheckForUpdates={handleCheckForUpdates}
+            onOpenUpdate={handleOpenUpdate}
+            onOpenUpdateRelease={handleOpenUpdateRelease}
+          />
+        </Suspense>
+      )}
+      {everOpenedModalsRef.current.update && (
+        <Suspense fallback={null}>
+          <UpdateModal
+            isOpen={isUpdateOpen}
+            onClose={() => setIsUpdateOpen(false)}
+            state={updateState}
+            onCheck={() => void window.electronAPI?.checkForUpdates?.(true).catch(() => {})}
+            onDownload={handleDownloadUpdate}
+            onInstall={() => void handleInstallUpdate()}
+            onIgnoreVersion={handleIgnoreUpdateVersion}
+            onOpenRelease={handleOpenUpdateRelease}
           />
         </Suspense>
       )}

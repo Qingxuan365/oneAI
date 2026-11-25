@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Clock, Keyboard, LucideIcon, Minus, Monitor, Moon, Palette, Plus, RotateCcw, Settings, SlidersHorizontal, SquareTerminal, Sun, TerminalSquare, Users } from 'lucide-react';
-import { Account, AppSettings, CustomCli } from '../types';
+import { ArrowUpCircle, Clock, ExternalLink, Info, Keyboard, LucideIcon, Minus, Monitor, Moon, Palette, Plus, RefreshCw, RotateCcw, Settings, SlidersHorizontal, SquareTerminal, Sun, TerminalSquare, Users } from 'lucide-react';
+import { Account, AppSettings, CustomCli, UpdateState } from '../types';
+import { version as appVersion } from '../../../../package.json';
 import { THEME_OPTIONS } from '../themes';
 import { playTaskDoneSound } from '../taskDoneSound';
 import { Modal } from './Modal';
@@ -25,9 +26,14 @@ interface SettingsModalProps {
   onRedetectClis: () => void | Promise<void>;
   /** 各账号当前的任务数（键为账号 id） */
   accountTaskCounts?: Record<string, number>;
+  /** 软件更新状态与操作 */
+  updateState?: UpdateState | null;
+  onCheckForUpdates?: () => void;
+  onOpenUpdate?: () => void;
+  onOpenUpdateRelease?: () => void;
 }
 
-type TabId = 'appearance' | 'terminal' | 'general' | 'accounts' | 'clis' | 'time' | 'shortcuts';
+type TabId = 'appearance' | 'terminal' | 'general' | 'accounts' | 'clis' | 'time' | 'shortcuts' | 'about';
 
 const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: 'appearance', label: T('外观'), icon: Palette },
@@ -37,6 +43,7 @@ const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: 'clis', label: 'CLI', icon: SquareTerminal },
   { id: 'general', label: T('提醒'), icon: SlidersHorizontal },
   { id: 'shortcuts', label: T('快捷键'), icon: Keyboard },
+  { id: 'about', label: T('关于'), icon: Info },
 ];
 
 const FONT_PRESETS = [13, 14, 15, 16, 18, 20];
@@ -179,8 +186,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onCustomClisChange,
   onRedetectClis,
   accountTaskCounts,
+  updateState = null,
+  onCheckForUpdates,
+  onOpenUpdate,
+  onOpenUpdateRelease,
 }) => {
   const [tab, setTab] = useState<TabId>('appearance');
+  const hasUpdateDot = Boolean(updateState && (updateState.phase === 'available' || updateState.phase === 'downloading' || updateState.phase === 'downloaded'));
   const update = (patch: Partial<AppSettings>) => onUpdateSettings({ ...settings, ...patch });
   const setFontSize = (size: number) => update({ terminalFontSize: Math.max(12, Math.min(24, size)) });
   const clockOffset = Number.isFinite(settings.clockOffsetHours) ? settings.clockOffsetHours : 0;
@@ -216,7 +228,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     >
       <div className="flex h-[60vh] min-h-0 select-none">
         {/* 竖向选项卡：只有当前页可 Tab 聚焦，上下方向键与 Home / End 切换（WAI-ARIA tabs 模式） */}
-        <div role="tablist" aria-label={t('设置分类')} aria-orientation="vertical" className="w-36 shrink-0 space-y-0.5 border-r border-line bg-surface p-2"
+        <div role="tablist" aria-label={t('设置分类')} aria-orientation="vertical" className="w-36 shrink-0 space-y-0.5 overflow-y-auto border-r border-line bg-surface p-2"
           onKeyDown={(e) => {
             const index = TABS.findIndex((item) => item.id === tab);
             const next = e.key === 'ArrowDown' ? (index + 1) % TABS.length
@@ -240,7 +252,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               className={`flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-ui transition-colors ${tab === id ? 'bg-selected font-medium text-fg' : 'text-fg-subtle hover:bg-hover hover:text-fg'}`}
             >
               <Icon size={14} />
-              {t(label)}
+              <span className="truncate">{t(label)}</span>
+              {id === 'about' && hasUpdateDot && (
+                <span className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${updateState?.phase === 'downloaded' ? 'bg-success' : 'bg-accent'}`} aria-hidden="true" />
+              )}
             </button>
           ))}
         </div>
@@ -603,6 +618,70 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </dl>
             </Section>
           ))}
+
+          {tab === 'about' && (
+            <>
+              <Section title={t('软件更新')}>
+                <div className={row}>
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-medium text-fg">OneAI <span className="font-mono text-fg-subtle">v{updateState?.currentVersion ?? appVersion}</span></span>
+                    <span className="block break-words text-xs text-fg-faint">
+                      {updateState?.phase === 'checking'
+                        ? t('正在检查更新…')
+                        : updateState?.phase === 'available' && updateState.latestVersion
+                          ? t('发现新版本 v{version}', { version: updateState.latestVersion })
+                          : updateState?.phase === 'downloading'
+                            ? t('正在下载新版本（{percent}%）', { percent: updateState.progress?.percent ?? 0 })
+                            : updateState?.phase === 'downloaded' && updateState.latestVersion
+                              ? t('新版本 v{version} 已下载完成，等待重启安装', { version: updateState.latestVersion })
+                              : updateState?.phase === 'not-available'
+                                ? t('当前已是最新版本')
+                                : updateState?.phase === 'error'
+                                  ? (updateState.error || t('检查更新失败，请稍后重试'))
+                                  : t('从 GitHub Releases 检查并获取新版本')}
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    {hasUpdateDot && onOpenUpdate ? (
+                      <button type="button" onClick={onOpenUpdate} className="btn-primary flex items-center gap-1.5 px-3 py-1.5 text-xs">
+                        <ArrowUpCircle size={13} aria-hidden="true" />
+                        <span>{updateState?.phase === 'downloaded' ? t('立即安装') : t('查看更新')}</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={onCheckForUpdates}
+                        disabled={updateState?.phase === 'checking' || !onCheckForUpdates}
+                        className="btn-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs disabled:opacity-50"
+                      >
+                        <RefreshCw size={12} className={updateState?.phase === 'checking' ? 'animate-spin' : ''} aria-hidden="true" />
+                        <span>{t('检查更新')}</span>
+                      </button>
+                    )}
+                  </span>
+                </div>
+                <div className={row}>
+                  <span>
+                    <span className="block">{t('启动时自动检查更新')}</span>
+                    <span className="block text-xs text-fg-faint">{t('启动应用后在后台静默检查 GitHub 新版本；不会自动下载，断网时静默跳过')}</span>
+                  </span>
+                  <Switch label={t('启动时自动检查更新')} checked={settings.autoCheckUpdates !== false} onChange={(checked) => update({ autoCheckUpdates: checked })} />
+                </div>
+                {onOpenUpdateRelease && (
+                  <div className={row}>
+                    <span>
+                      <span className="block">GitHub Releases</span>
+                      <span className="block text-xs text-fg-faint">{t('查看历史版本、更新日志与手动下载安装包')}</span>
+                    </span>
+                    <button type="button" onClick={onOpenUpdateRelease} className="btn-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs">
+                      <ExternalLink size={12} aria-hidden="true" />
+                      <span>{t('打开发布页')}</span>
+                    </button>
+                  </div>
+                )}
+              </Section>
+            </>
+          )}
         </div>
       </div>
     </Modal>
