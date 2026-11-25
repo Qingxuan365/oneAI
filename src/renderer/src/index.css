@@ -778,11 +778,24 @@ html, body, #root {
 .statusbar {
   container: statusbar / inline-size;
 }
+#oneai-statusbar-usage {
+  container: statusbar-usage / inline-size;
+}
+.quota-terminal-track {
+  background-image: repeating-conic-gradient(rgb(var(--color-fg-subtle) / 0.7) 0% 25%, transparent 25% 50%);
+  background-size: 2px 2px;
+}
+.quota-window-short {
+  display: none;
+}
 .quota-tokens-compact {
   display: none;
 }
-@container statusbar (max-width: 78rem) {
+@container statusbar (max-width: 86rem) {
   .statusbar-clock-date { display: none; }
+}
+@container statusbar (max-width: 78rem) {
+  .quota-reset { display: none; }
 }
 @container statusbar (max-width: 72rem) {
   .quota-detail { display: none; }
@@ -792,18 +805,33 @@ html, body, #root {
 }
 @container statusbar (max-width: 60rem) {
   .statusbar-sys-mem { display: none; }
+}
+@container statusbar-usage (max-width: 44rem) {
   .quota-tokens-breakdown { display: none; }
   .quota-tokens-compact { display: inline; }
+}
+@container statusbar (max-width: 50rem) {
+  .quota-limits { gap: 0.75rem; }
+  .quota-terminal-bar { width: 3.5rem; }
 }
 @container statusbar (max-width: 46rem) {
   .statusbar-sys-gpu { display: none; }
 }
+@container statusbar (max-width: 44rem) {
+  .quota-window-label { display: none; }
+  .quota-window-short { display: inline; }
+}
 @container statusbar (max-width: 40rem) {
-  .quota-model { display: none; }
-  .statusbar-sys { display: none; }
+  .quota-model-info, .statusbar-sys { display: none; }
 }
 @container statusbar (max-width: 38rem) {
   .quota-ctx { display: none; }
+}
+@container statusbar (max-width: 36rem) {
+  #oneai-statusbar-task { display: none; }
+  .statusbar-limits-row, .quota-limits { gap: 0.5rem; }
+  .quota-window { gap: 0.25rem; }
+  .quota-terminal-bar { width: 2.5rem; }
 }
 @container statusbar (max-width: 26rem) {
   .quota-usage { display: none; }

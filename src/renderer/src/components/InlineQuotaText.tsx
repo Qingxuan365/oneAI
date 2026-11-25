@@ -5,22 +5,29 @@ import { t } from '../i18n';
 
 interface InlineQuotaTextProps {
   quota: QuotaData | null;
-  /** 状态栏的两行：limits 为额度进度条、模型与上下文，usage 为会话 Tokens / Cache / Cost */
+  /** 状态栏的两行：limits 为额度进度条与模型，usage 为会话 Tokens / Cache / Cost / Ctx */
   row: 'limits' | 'usage';
   onRefresh: () => Promise<void>;
   /** 传入当前语言，使 React.memo 在切换语言时同步重绘 */
   language?: string;
 }
 
-type Tone = 'ok' | 'warn' | 'bad' | 'plain';
-const TONE_TEXT: Record<Tone, string> = { ok: 'text-success', warn: 'text-warning', bad: 'text-danger', plain: 'text-fg' };
-const TONE_FILL: Record<Tone, string> = { ok: 'bg-success', warn: 'bg-warning', bad: 'bg-danger', plain: 'bg-accent' };
+type Tone = 'warn' | 'bad' | 'plain';
+const TONE_TEXT: Record<Tone, string> = { warn: 'text-warning', bad: 'text-danger', plain: 'text-fg' };
+const TONE_FILL: Record<Tone, string> = { warn: 'bg-warning', bad: 'bg-danger', plain: 'bg-fg-muted' };
+const FIVE_HOUR_LABEL = '5h limit:';
+const WEEKLY_LABEL = 'Weekly limit:';
+const resetTimeFormatter = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const resetDateFormatter = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
 
-// 额度已用比例配色：已用 <= 50 绿色，51-80 黄色，> 80 红色（即剩余 >= 50 / 20-49 / < 20）
-function quotaTone(used: number): Tone {
-  if (used <= 50) return 'ok';
-  if (used <= 80) return 'warn';
-  return 'bad';
+function formatQuotaReset(resetAt: number | undefined, weekly: boolean): string | undefined {
+  if (resetAt === undefined || resetAt <= Date.now()) return undefined;
+  const reset = new Date(resetAt);
+  if (!Number.isFinite(reset.getTime())) return undefined;
+  const time = resetTimeFormatter.format(reset);
+  return weekly
+    ? t('resets {time} on {day}', { time, day: resetDateFormatter.format(reset) })
+    : t('resets {time}', { time });
 }
 
 // 上下文占用百分比配色：>= 85 红色，65-84 黄色，< 65 正文色
@@ -31,17 +38,21 @@ function ctxTone(pct?: number): Tone {
   return 'plain';
 }
 
-/** 细进度条，填充宽度为「已用」比例；未知时只画空轨道 */
-const UsageBar = ({ used, tone, label }: { used: number | null; tone: Tone; label: string }) => (
+/** 额度填剩余比例，上下文填占用比例。未知时只画轨道。 */
+const UsageBar = ({ value, tone = 'plain', label }: { value: number | null; tone?: Tone; label: string }) => (
   <span
     role="progressbar"
     aria-label={label}
     aria-valuemin={0}
     aria-valuemax={100}
-    aria-valuenow={used ?? undefined}
-    className="quota-bar relative inline-block h-2 w-16 shrink-0 overflow-hidden rounded-full bg-line-strong/60 align-middle"
+    aria-valuenow={value ?? undefined}
+    className="quota-bar quota-terminal-bar inline-flex w-20 shrink-0 items-center align-middle"
   >
-    {used !== null && <span className={`absolute inset-y-0 left-0 rounded-full ${TONE_FILL[tone]}`} style={{ width: `${Math.max(0, Math.min(100, used))}%` }} />}
+    <span aria-hidden="true" className="text-fg-subtle">[</span>
+    <span aria-hidden="true" className="quota-terminal-track relative h-3.5 flex-1 overflow-hidden">
+      {value !== null && <span className={`absolute inset-y-0 left-0 ${TONE_FILL[tone]}`} style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />}
+    </span>
+    <span aria-hidden="true" className="text-fg-subtle">]</span>
   </span>
 );
 
@@ -63,8 +74,8 @@ function formatTokens(n: number): string {
 }
 
 /**
- * 状态栏额度与会话用量，所有 CLI 共用。额度行：5h / 7d / Ctx 为进度条加百分数，空间不足时
- * .quota-detail 与 .quota-model 由状态栏容器查询收起，完整信息保留在 title 中；用量行：Tokens / Cache / Cost。
+ * 状态栏额度与会话用量，所有 CLI 共用。额度行显示 5h / 7d 进度条与模型，
+ * 用量行显示 Tokens / Cache / Cost / Ctx。窄栏由容器查询收起次要详情。
  */
 export const InlineQuotaText: React.FC<InlineQuotaTextProps> = React.memo(({ quota, onRefresh, row }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -90,8 +101,8 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = React.memo(({ quo
     if (row === 'usage') return null;
     return (
       <div className="flex items-center gap-3 font-mono text-ui text-fg-faint">
-        <span>5h --</span>
-        <span>7d --</span>
+        <span>{t(FIVE_HOUR_LABEL)} --</span>
+        <span>{t(WEEKLY_LABEL)} --</span>
         {refreshButton(t('刷新额度'))}
       </div>
     );
@@ -110,13 +121,15 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = React.memo(({ quo
   }
 
   const sessionLabel = quota.sessionScope === 'task' ? t('当前任务会话') : t('最近活跃会话');
+  const showMissingUsage = quota.cliId === 'codex';
+  const missingUsageTitle = t('暂无此任务的会话用量');
 
   // 当前上下文占用，放在用量行末尾；用独立 .quota-ctx 控制显示优先级
   const hasCtx = quota.ctxPercent !== undefined || quota.ctxTokens !== undefined;
 
   const ctxValue = quota.ctxPercent !== undefined
     ? `${quota.ctxPercent}%`
-    : (quota.ctxTokens !== undefined ? formatTokens(quota.ctxTokens) : '');
+    : (quota.ctxTokens !== undefined ? formatTokens(quota.ctxTokens) : '--');
   const ctxDetail = quota.ctxPercent !== undefined && quota.ctxTokens !== undefined && quota.ctxWindow !== undefined
     ? t('当前上下文占用：{percent}%（{used} / {limit}）', { percent: quota.ctxPercent, used: formatTokens(quota.ctxTokens), limit: formatTokens(quota.ctxWindow) })
     : quota.ctxPercent !== undefined
@@ -124,12 +137,12 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = React.memo(({ quo
       : quota.ctxTokens !== undefined
         ? t('当前上下文已用：{used} tokens', { used: formatTokens(quota.ctxTokens) })
         : undefined;
-  const ctxTitle = ctxDetail && `${sessionLabel} · ${ctxDetail}${quota.ctxEstimated ? ` · ${t('按最近请求估算')}` : ''}`;
-  const ctxNode = hasCtx && (
+  const ctxTitle = ctxDetail ? `${sessionLabel} · ${ctxDetail}${quota.ctxEstimated ? ` · ${t('按最近请求估算')}` : ''}` : missingUsageTitle;
+  const ctxNode = (hasCtx || showMissingUsage) && (
     <span className="quota-ctx flex items-center gap-1.5 whitespace-nowrap" title={ctxTitle}>
       <span className="text-fg-subtle">Ctx: </span>
-      {quota.ctxPercent !== undefined && <UsageBar used={quota.ctxPercent} tone={ctxTone(quota.ctxPercent)} label={t('上下文占用')} />}
-      <span className={`${TONE_TEXT[ctxTone(quota.ctxPercent)]}`}>{ctxValue}</span>
+      {quota.ctxPercent !== undefined && <UsageBar value={quota.ctxPercent} tone={ctxTone(quota.ctxPercent)} label={t('上下文占用')} />}
+      <span className={hasCtx ? TONE_TEXT[ctxTone(quota.ctxPercent)] : 'text-fg-faint'}>{ctxValue}</span>
     </span>
   );
 
@@ -139,7 +152,7 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = React.memo(({ quo
     const totalTokens = quota.tokens ?? ((quota.tokenInput ?? 0) + (quota.tokenOutput ?? 0) + (quota.tokenCache ?? 0));
     const hasCache = quota.cacheHitPercent !== undefined;
     const hasCost = quota.costUsd !== undefined;
-    if (!hasTokens && !hasCache && !hasCost && !hasCtx) return null;
+    if (!hasTokens && !hasCache && !hasCost && !hasCtx && !showMissingUsage) return null;
     const tokensTitle = hasBreakdown
       ? t('{session}累计 token（输入 {input} · 输出 {output} · 缓存 {cache} · 合计 {total}）', {
         session: sessionLabel,
@@ -148,14 +161,16 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = React.memo(({ quo
         cache: (quota.tokenCache ?? 0).toLocaleString('en-US'),
         total: totalTokens.toLocaleString('en-US'),
       })
-      : t('{session}累计 token（输入 + 输出 + 缓存读写）：{tokens}', { session: sessionLabel, tokens: totalTokens.toLocaleString('en-US') });
+      : hasTokens
+        ? t('{session}累计 token（输入 + 输出 + 缓存读写）：{tokens}', { session: sessionLabel, tokens: totalTokens.toLocaleString('en-US') })
+        : missingUsageTitle;
 
     // 最近活跃会话的累计用量；空间不足时先将明细折为总计，再整段由 .quota-usage 收起
     return (
       <div className="quota-usage flex items-center gap-5 whitespace-nowrap font-mono text-ui text-fg-muted">
         {/* 数据不属于当前任务时的来源标签，随整行一起收起，不单独隐藏，避免把别的会话用量误当成当前任务 */}
-        {quota.sessionScope === 'latest' && <span className="text-warning" title={sessionLabel}>{t('最近')}</span>}
-        {hasTokens && (
+        {quota.sessionScope === 'latest' && <span lang="en" className="text-warning" title={sessionLabel}>{t('最近', undefined, 'en')}</span>}
+        {(hasTokens || showMissingUsage) && (
           <span title={tokensTitle}>
             <span className="text-fg-subtle">Tokens: </span>
             {hasBreakdown ? (
@@ -165,15 +180,20 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = React.memo(({ quo
                 </span>
                 <span className="quota-tokens-compact text-fg" aria-hidden="true">{formatTokens(totalTokens)}</span>
               </>
-            ) : (
+            ) : hasTokens ? (
               <span className="text-fg">{formatTokens(quota.tokens!)}</span>
+            ) : (
+              <>
+                <span className="quota-tokens-breakdown text-fg-faint">in --, out --, cache --</span>
+                <span className="quota-tokens-compact text-fg-faint" aria-hidden="true">--</span>
+              </>
             )}
           </span>
         )}
-        {hasCache && (
-          <span title={t('{session}缓存命中率：{percent}%', { session: sessionLabel, percent: quota.cacheHitPercent! })}>
+        {(hasCache || showMissingUsage) && (
+          <span title={hasCache ? t('{session}缓存命中率：{percent}%', { session: sessionLabel, percent: quota.cacheHitPercent! }) : missingUsageTitle}>
             <span className="text-fg-subtle">Cache: </span>
-            <span className="text-fg">{quota.cacheHitPercent}%</span>
+            <span className={hasCache ? 'text-fg' : 'text-fg-faint'}>{hasCache ? `${quota.cacheHitPercent}%` : '--'}</span>
           </span>
         )}
         {hasCost && (
@@ -189,43 +209,44 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = React.memo(({ quo
 
   // 系统终端是本地 Shell，没有额度窗口，只显示 Shell 名称与状态
   const windows = quota.cliId === 'terminal' ? [] : [
-    { label: '5h', percent: quota.fiveHourPercent, reset: quota.fiveHourResetsIn },
-    { label: '7d', percent: quota.sevenDayPercent, reset: quota.sevenDayResetsOn },
+    { label: '5h', title: FIVE_HOUR_LABEL, percent: quota.fiveHourPercent, reset: quota.fiveHourResetsIn, resetAt: quota.fiveHourResetAt },
+    { label: '7d', title: WEEKLY_LABEL, percent: quota.sevenDayPercent, reset: quota.sevenDayResetsOn, resetAt: quota.sevenDayResetAt },
   ];
   const modelTitle = quota.model && [
-    quota.cliId === 'agy' || !quota.sessionScope ? t('配置模型') : sessionLabel,
+    quota.cliId === 'agy' || !quota.sessionScope || (quota.cliId === 'codex' && quota.sessionScope === 'latest') ? t('配置模型') : sessionLabel,
     quota.effort ? t('{model} · 推理思考等级: {effort}', { model: quota.model, effort: quota.effort }) : quota.model,
   ].join(' · ');
 
   return (
-    <div className="flex items-center gap-5 font-mono text-ui text-fg-muted" title={modelTitle}>
-      {/* 模型与推理等级放在额度之前，一眼可知当前模型；窗口变窄时先收起模型名，再整体收起 */}
+    <div className="quota-limits flex items-center gap-5 font-mono text-ui text-fg-muted" title={modelTitle}>
+      {/* 空间不足时先截断模型名，给额度留出完整的显示宽度。 */}
       {quota.model && (
-        <span className="quota-model-info flex items-center gap-1.5">
-          <span className="quota-model">
+        <span className="quota-model-info flex min-w-0 items-center gap-1.5">
+          <span className="quota-model truncate">
             <span className="text-fg-subtle">Model: </span>
             <span className="text-fg">{quota.model}</span>
           </span>
           {quota.effort && (
-            <span className={`rounded border px-1.5 py-px text-ui lowercase tracking-wider ${effortColor(quota.effort)}`}>
+            <span className={`shrink-0 rounded border px-1.5 py-px text-ui lowercase tracking-wider ${effortColor(quota.effort)}`}>
               {quota.effort}
             </span>
           )}
         </span>
       )}
-      {windows.map(({ label, percent, reset }) => {
-        const used = percent < 0 ? null : Math.max(0, Math.min(100, 100 - percent));
-        const tone: Tone = used === null ? 'plain' : quotaTone(used);
+      {windows.map(({ label, title, percent, reset, resetAt }) => {
+        const remaining = percent >= 0 && Number.isFinite(percent) ? Math.min(100, percent) : null;
+        const resetLabel = remaining === null ? undefined : formatQuotaReset(resetAt, label === '7d');
+        const resetTooltip = resetLabel ?? (reset !== '--' ? reset : undefined);
         return (
-          <React.Fragment key={label}>
-            <span className="flex items-center gap-1.5 whitespace-nowrap" title={t('{label} 额度剩余 {percent}{reset}', { label, percent: percent < 0 ? t('未知') : `${percent}%`, reset: reset !== '--' ? t('，{reset}', { reset }) : '' })}>
-              <span className="text-fg-subtle">{label}: </span>
-              <UsageBar used={used} tone={tone} label={t('{label} 额度已用', { label })} />
-              <span className={`${used === null ? 'text-fg-faint' : TONE_TEXT[tone]}`}>{used === null ? '--' : `${used}%`}</span>
-              {used !== null && <span className="quota-detail text-fg-subtle">{t('已用')}</span>}
-              {reset !== '--' && <span className="quota-detail text-fg-subtle">({reset})</span>}
+          <span key={label} className="quota-window flex shrink-0 items-center gap-1.5 whitespace-nowrap" title={t('{label} 额度剩余 {percent}{reset}', { label, percent: remaining === null ? t('未知') : `${remaining}%`, reset: resetTooltip ? t('，{reset}', { reset: resetTooltip }) : '' })}>
+            <span className="text-fg-subtle">
+              <span className="quota-window-label">{t(title)}</span>
+              <span className="quota-window-short">{label}:</span>
             </span>
-          </React.Fragment>
+            <UsageBar value={remaining} label={t(title)} />
+            <span className={remaining === null ? 'text-fg-faint' : 'text-fg'}>{remaining === null ? '--' : t('{percent}% left', { percent: remaining })}</span>
+            {resetLabel && <span className="quota-reset text-fg-subtle">({resetLabel})</span>}
+          </span>
         );
       })}
 

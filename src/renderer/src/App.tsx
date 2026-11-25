@@ -774,7 +774,7 @@ export const App: React.FC = () => {
     if (!quota) return null;
     const summary = summaries[activeTask.id];
     if (currentGroup.id === 'codex' && summary?.usage) {
-      return { ...quota, ...summary.usage, sessionScope: 'task', ctxEstimated: true };
+      return { ...quota, ...summary.usage, sessionScope: summary.usageScope, ctxEstimated: true };
     }
     if (currentGroup.id === 'claude' && !activeTask.accountId && quota.sessionScope === 'latest') {
       // 快照属于当前任务的会话时标为「当前任务会话」，否则保留「最近活跃会话」的数据并带「最近」标签

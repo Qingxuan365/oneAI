@@ -140,7 +140,7 @@ await build({
     window.draw = (status = 'running', accountName, quotaOverride) => {
       const task = { id: 'task', groupId: 'codex', title: 'Task 1: UI regression', status, cwd: 'D:/GitHub/OneAI', createdAt: 1 };
       const group = CLIS[0];
-      const baseQuota = { status: 'normal', cliName: 'Codex', model: 'gpt-5-codex', effort: 'high', tokens: 823_000, tokenInput: 335_000, tokenOutput: 167_000, tokenCache: 321_000, cacheHitPercent: 99, ctxPercent: 62, ctxTokens: 292_617, ctxWindow: 475_000, costUsd: 0.24, fiveHourPercent: 82, sevenDayPercent: 65, fiveHourResetsIn: '2h 45m', sevenDayResetsOn: '3d 22h 16m' };
+      const baseQuota = { status: 'normal', cliName: 'Codex', model: 'gpt-5-codex', effort: 'high', tokens: 823_000, tokenInput: 335_000, tokenOutput: 167_000, tokenCache: 321_000, cacheHitPercent: 99, ctxPercent: 62, ctxTokens: 292_617, ctxWindow: 475_000, costUsd: 0.24, fiveHourPercent: 82, sevenDayPercent: 65, fiveHourResetsIn: '2h 45m', sevenDayResetsOn: '3d 22h 16m', fiveHourResetAt: new Date(2040, 10, 25, 6, 43).getTime(), sevenDayResetAt: new Date(2040, 10, 30, 20, 52).getTime() };
       const quota = quotaOverride ? { ...baseQuota, ...quotaOverride } : baseQuota;
       flushSync(() => root.render(<div className="workbench-ui flex h-screen">
         <Sidebar isCollapsed={false} clis={CLIS} folders={[{ path: task.cwd, isExpanded: true }]} tasks={[task]} activeTaskId={task.id}
@@ -150,7 +150,7 @@ await build({
           onOpenSearch={() => window.events.push('search')}
           onClearScreen={() => {}} onRestartSession={async () => {}} onExportLogs={async () => ({ success: true })} onOpenHistory={() => {}} onToggleFileTree={() => window.events.push('file-tree')} />
           <div className="flex-1" />
-          <StatusBar quota={quota} showQuota taskStatus={status} dateVisible={!window.hideDate} onRefreshQuota={async () => {}} language={getLanguage()} /></div>
+          <StatusBar quota={quota} showQuota taskTitle="Task 1" taskStatus={status} dateVisible={!window.hideDate} onRefreshQuota={async () => {}} language={getLanguage()} /></div>
       </div>));
       window.pushStats?.(window.fakeStats);
     };
@@ -396,11 +396,13 @@ app.whenReady().then(async () => {
         check(theme + ' header/sidebar same panel', panel === getComputedStyle(document.querySelector('aside > div')).backgroundColor);
       }
       check('all 25 theme panel colors differ', ALL_THEMES.length === 25 && new Set(colors).size === colors.length);
-      for (const [status, label] of Object.entries({ starting: '启动中', running: '运行中', idle: '空闲', waiting: '等待输入', stopped: '已停止', error: '启动失败' })) {
+      const statusLabels = { starting: ['启动中', 'Starting'], running: ['运行中', 'Running'], idle: ['空闲', 'Free'], waiting: ['等待输入', 'Waiting'], stopped: ['已停止', 'Stopped'], error: ['启动失败', 'Failed'] };
+      const statusBarLabel = () => document.getElementById('oneai-statusbar-status');
+      for (const [status, [label, englishLabel]] of Object.entries(statusLabels)) {
         window.draw(status);
         check(status + ' Chinese label in the sidebar row', task().textContent.includes(label));
         check(status + ' topbar shows no task status', !document.querySelector('header').textContent.includes(label));
-        check(status + ' status bar shows the task status', document.getElementById('oneai-statusbar-status').textContent.includes(label) && document.getElementById('oneai-statusbar-status').dataset.taskStatus === status);
+        check(status + ' status bar shows the English task status', statusBarLabel().textContent === englishLabel && statusBarLabel().dataset.taskStatus === status);
         check(status + ' accessible task button', task().tagName === 'BUTTON');
         check(status + ' restart disabled', [...document.querySelectorAll('header button')].find(b => b.title.includes('当前终端') || b.title.includes('正在启动')).disabled === (status === 'starting'));
         const dot = () => task().querySelector('span.rounded-full');
@@ -414,6 +416,14 @@ app.whenReady().then(async () => {
         }
         if (status === 'error') check('error colors match', getComputedStyle(dot()).backgroundColor === getComputedStyle(dot().parentElement).color);
       }
+      for (const language of ['zh-TW', 'en']) {
+        window.setUiLanguage(language);
+        check(language + ' status bar keeps English task statuses', Object.entries(statusLabels).every(([status, [, label]]) => {
+          window.draw(status);
+          return statusBarLabel().textContent === label;
+        }));
+      }
+      window.setUiLanguage('zh-CN');
       window.draw();
       task().focus();
       return results;
@@ -434,8 +444,8 @@ app.whenReady().then(async () => {
     await win.webContents.executeJavaScript("document.querySelector('button[aria-expanded]').focus()");
     await key('Enter', 'Enter', 13, '\\r');
     result.push({ name: 'Enter toggles folder', ok: await win.webContents.executeJavaScript("window.events.includes('toggle')") });
-    // 顶栏带账号徽标时再扫一遍各宽度，确认徽标不会把任务名挤没
-    await win.webContents.executeJavaScript("window.draw('running', '工作账号')");
+    // 带账号徽标和近期用量标签时扫描各宽度，检查顶栏和状态栏的布局
+    await win.webContents.executeJavaScript("window.draw('starting', '工作账号', { cliId: 'codex', sessionScope: 'latest' })");
     // 窗口尺寸异步生效：先等页面的 innerWidth 追上窗口内容宽度，再留一点时间给容器查询重新布局，避免固定等待造成偶发失败
     const settleSize = async () => {
       for (let i = 0; i < 100; i++) {
@@ -444,7 +454,7 @@ app.whenReady().then(async () => {
       }
       await new Promise(r => setTimeout(r, 200));
     };
-    for (const width of [900, 1100, 1280, 1440, 1600, 1750, 1840, 1920, 2400, 2800]) {
+    for (const width of [900, 1100, 1280, 1320, 1440, 1500, 1600, 1750, 1840, 1920, 2400, 2800]) {
       win.setSize(width, 900);
       await win.webContents.executeJavaScript('window.setMaximized(' + (width >= 1920) + ')');
       await settleSize();
@@ -493,32 +503,82 @@ app.whenReady().then(async () => {
     await win.webContents.executeJavaScript('window.setMaximized(true)');
     await settleSize();
     result.push({ name: 'maximized 1920 status bar keeps the date clock, usage breakdown, Ctx, system stats and reset time', ok: await win.webContents.executeJavaScript(\`
-      ['#oneai-statusbar-sys', '.quota-usage', '.quota-tokens-breakdown', '.quota-detail', '.quota-ctx', '.topbar-account', '.statusbar-clock-date'].every(sel => document.querySelector(sel).getClientRects().length > 0)\`) });
+      ['#oneai-statusbar-sys', '.quota-usage', '.quota-tokens-breakdown', '.quota-reset', '.quota-ctx', '.topbar-account', '.statusbar-clock-date'].every(sel => document.querySelector(sel).getClientRects().length > 0)\`) });
     result.push({ name: 'status bar shows usage, limits and system text content', ok: await win.webContents.executeJavaScript(\`(() => {
       const limits = document.getElementById('oneai-statusbar-quota').textContent;
       const usage = document.getElementById('oneai-statusbar-usage').textContent;
       const sys = document.getElementById('oneai-statusbar-sys').textContent;
-      return usage.includes('Tokens: in 335k, out 167k, cache 321k') && usage.includes('Cache: 99%') && usage.includes('Cost: $0.24') && limits.includes('5h: ') && limits.includes('18%') && limits.includes('7d: ') && limits.includes('35%') && limits.includes('Model: gpt-5-codex') && usage.includes('Ctx: 62%')
+      const ctx = document.querySelector('.quota-ctx');
+      return usage.includes('Tokens: in 335k, out 167k, cache 321k') && usage.includes('Cache: 99%') && usage.includes('Cost: $0.24') && limits.includes('5h limit:') && limits.includes('82% left') && limits.includes('Weekly limit:') && limits.includes('65% left') && limits.includes('Model: gpt-5-codex')
+        && ctx?.firstElementChild.textContent.trim() === 'Ctx:' && ctx.lastElementChild.textContent === '62%'
         && sys.includes('CPU: 100%') && sys.includes('GPU: 100%') && sys.includes('Memory: 31.9 GiB') && sys.includes('↑999KiB/s') && sys.includes('↓99.9MiB/s');
     })()\`) });
-    result.push({ name: 'status bar draws 5h / 7d / Ctx progress bars filled with the used share and colored by threshold', ok: await win.webContents.executeJavaScript(\`(() => {
+    result.push({ name: 'status bar shares bracketed bars for quota and Ctx, with remaining quota above and context occupancy below', ok: await win.webContents.executeJavaScript(\`(() => {
       const bars = () => [...document.querySelectorAll('#oneai-statusbar-quota [role="progressbar"], #oneai-statusbar-usage [role="progressbar"]')];
-      const fill = bar => bar.firstElementChild;
+      const track = bar => bar.querySelector('.quota-terminal-track');
+      const fill = bar => track(bar).firstElementChild;
       const first = bars();
-      const basicOk = first.length === 3 && first.map(b => b.getAttribute('aria-valuenow')).join() === '18,35,62' && first.map(b => fill(b).style.width).join() === '18%,35%,62%' && fill(first[0]).className.includes('bg-success');
-      window.drawQuota({ fiveHourPercent: 30, sevenDayPercent: 5, ctxPercent: 90 });
-      const warn = bars();
-      const toneOk = fill(warn[0]).className.includes('bg-warning') && fill(warn[1]).className.includes('bg-danger') && fill(warn[2]).className.includes('bg-danger') && warn[1].getAttribute('aria-valuenow') === '95';
+      const basicOk = first.length === 3 && first.map(b => b.getAttribute('aria-valuenow')).join() === '82,65,62' && first.map(b => fill(b).style.width).join() === '82%,65%,62%';
+      const shapeOk = first.length === 3 && first.every(bar => {
+        const trackStyle = getComputedStyle(track(bar));
+        const fillStyle = getComputedStyle(fill(bar));
+        return getComputedStyle(bar).width === getComputedStyle(first[0]).width
+          && trackStyle.borderRadius === '0px' && fillStyle.borderRadius === '0px'
+          && trackStyle.height === '14px' && fillStyle.height === trackStyle.height && trackStyle.backgroundImage.includes('repeating-conic-gradient')
+          && bar.firstElementChild.textContent === '[' && bar.lastElementChild.textContent === ']' && fill(bar).classList.contains('bg-fg-muted');
+      });
+      const layoutOk = first[0].getBoundingClientRect().right < first[1].getBoundingClientRect().left
+        && first[0].getBoundingClientRect().top === first[1].getBoundingClientRect().top
+        && first[0].parentElement.textContent.endsWith('82% left(resets 06:43)')
+        && first[1].parentElement.textContent.endsWith('65% left(resets 20:52 on 30 Nov)');
+      window.drawQuota({ ctxPercent: 65 });
+      const warningOk = fill(bars()[2]).classList.contains('bg-warning');
+      window.drawQuota({ fiveHourPercent: 0, sevenDayPercent: 100, ctxPercent: 85 });
+      const edge = bars();
+      const edgeOk = fill(edge[0]).style.width === '0%' && fill(edge[1]).style.width === '100%' && fill(edge[2]).classList.contains('bg-danger');
       window.drawQuota({ fiveHourPercent: -1, fiveHourResetsIn: '--' });
       const unknown = bars()[0];
-      const unknownOk = unknown.getAttribute('aria-valuenow') === null && !unknown.firstElementChild && document.getElementById('oneai-statusbar-quota').textContent.includes('5h: --');
-      return basicOk && toneOk && unknownOk;
+      const unknownOk = unknown.getAttribute('aria-valuenow') === null && !fill(unknown)
+        && unknown.nextElementSibling.textContent === '--' && !unknown.parentElement.querySelector('.quota-reset');
+      return basicOk && shapeOk && layoutOk && warningOk && edgeOk && unknownOk;
+    })()\`) });
+    result.push({ name: 'Codex with account quota but no task usage shows empty session metrics on the lower left', ok: await win.webContents.executeJavaScript(\`(() => {
+      const noUsage = { cliId: 'codex', tokens: undefined, tokenInput: undefined, tokenOutput: undefined, tokenCache: undefined, cacheHitPercent: undefined, costUsd: undefined, ctxPercent: undefined, ctxTokens: undefined };
+      window.drawQuota(noUsage);
+      const usage = document.querySelector('#oneai-statusbar-usage .quota-usage');
+      const top = document.getElementById('oneai-statusbar-quota').parentElement.getBoundingClientRect();
+      const rect = usage?.firstElementChild?.getBoundingClientRect();
+      const lowerLeft = rect?.width > 0 && rect.left === top.left && rect.top >= top.bottom;
+      const placeholders = usage?.children[0]?.innerText === 'Tokens: in --, out --, cache --'
+        && usage.children[1]?.innerText === 'Cache: --' && usage.querySelector('.quota-ctx')?.textContent === 'Ctx: --';
+      window.drawQuota({ cliId: 'codex' });
+      const liveUsage = document.querySelector('#oneai-statusbar-usage .quota-usage');
+      return lowerLeft && placeholders && liveUsage?.textContent.includes('Cache: 99%') && liveUsage.querySelector('.quota-ctx').lastElementChild.textContent === '62%';
+    })()\`) });
+    result.push({ name: 'Codex recent usage is labeled on the lower row while the upper row identifies the configured model', ok: await win.webContents.executeJavaScript(\`(() => {
+      window.drawQuota({ cliId: 'codex', sessionScope: 'latest', ctxEstimated: true });
+      const usage = document.querySelector('#oneai-statusbar-usage .quota-usage');
+      const limits = document.querySelector('#oneai-statusbar-quota');
+      const latestOk = usage?.firstElementChild?.textContent === 'Recent'
+        && usage.textContent.includes('Cache: 99%')
+        && usage.querySelector('.quota-ctx').title.includes('最近活跃会话')
+        && limits?.querySelector('.quota-limits')?.title.startsWith('配置模型');
+      const otherLanguagesOk = ['zh-TW', 'en'].every(language => {
+        window.setUiLanguage(language);
+        window.drawQuota({ cliId: 'codex', sessionScope: 'latest' });
+        return document.querySelector('#oneai-statusbar-usage .quota-usage > span:first-child[lang="en"]')?.textContent === 'Recent';
+      });
+      window.setUiLanguage('zh-CN');
+      window.drawQuota({ cliId: 'codex', sessionScope: 'task' });
+      return latestOk && otherLanguagesOk && document.querySelector('#oneai-statusbar-usage .quota-usage')?.firstElementChild?.textContent.startsWith('Tokens:');
     })()\`) });
     result.push({ name: 'status bar renders Ctx 0%, token-only Ctx, and legacy total Tokens fallback', ok: await win.webContents.executeJavaScript(\`(() => {
       window.drawQuota({ ctxPercent: 0 });
-      const zeroOk = document.getElementById('oneai-statusbar-usage').textContent.includes('Ctx: 0%');
+      const zeroCtx = document.querySelector('.quota-ctx');
+      const zeroOk = zeroCtx.lastElementChild.textContent === '0%' && zeroCtx.querySelector('[role="progressbar"]').getAttribute('aria-valuenow') === '0';
       window.drawQuota({ ctxPercent: undefined, ctxTokens: 195_000, ctxWindow: undefined });
-      const tokCtxOk = document.getElementById('oneai-statusbar-usage').textContent.includes('Ctx: 195k') && document.querySelectorAll('#oneai-statusbar-quota [aria-valuenow]').length === 2;
+      const tokenCtx = document.querySelector('.quota-ctx');
+      const tokCtxOk = tokenCtx.textContent === 'Ctx: 195k' && !tokenCtx.querySelector('[role="progressbar"]');
       window.drawQuota({ tokens: 866_000, tokenInput: undefined, tokenOutput: undefined, tokenCache: undefined, cacheHitPercent: undefined });
       const legacyOk = document.getElementById('oneai-statusbar-usage').textContent.includes('Tokens: 866k');
       return zeroOk && tokCtxOk && legacyOk;
@@ -526,7 +586,8 @@ app.whenReady().then(async () => {
     result.push({ name: 'status bar labels latest-session metrics, estimated context, and unknown quota', ok: await win.webContents.executeJavaScript(\`(() => {
       window.drawQuota({ cliId: 'pi', sessionScope: 'latest', ctxEstimated: true, fiveHourPercent: -1, fiveHourResetsIn: '--', sevenDayPercent: -1, sevenDayResetsOn: '--' });
       const bar = document.getElementById('oneai-statusbar');
-      return bar.textContent.includes('最近') && bar.textContent.includes('5h: --') && bar.textContent.includes('7d: --')
+      const limits = [...bar.querySelectorAll('#oneai-statusbar-quota .quota-terminal-bar')];
+      return bar.querySelector('.quota-usage')?.firstElementChild?.textContent === 'Recent' && limits.length === 2 && limits.every(limit => limit.nextElementSibling.textContent === '--')
         && [...bar.querySelectorAll('[title]')].some(el => el.title.includes('最近活跃会话') && el.title.includes('按最近请求估算'));
     })()\`) });
     await win.webContents.executeJavaScript("window.draw(); document.querySelector('button[aria-current]').focus()");
@@ -1074,9 +1135,10 @@ app.whenReady().then(async () => {
       window.hideDate = false; window.drawQuota(lightQuota); await tick();
       window.setMaximized(true); await tick(400);
       const clock = () => document.getElementById('oneai-statusbar-clock').textContent.trim();
-      check('status bar shows the date by default', clock().indexOf('-') > 0 && clock().indexOf(':') > 0);
+      const weekday = new Intl.DateTimeFormat('zh-CN', { weekday: 'long' }).format(new Date());
+      check('status bar shows the date and full Chinese weekday by default', clock().indexOf('-') > 0 && clock().indexOf(':') > 0 && clock().includes(weekday));
       window.setUiLanguage('zh-TW'); window.drawQuota(lightQuota); await tick(400);
-      check('Traditional Chinese clock shows the lunar month and localized weekday', clock().includes('月') && clock().includes('週'));
+      check('Traditional Chinese clock shows the lunar month and full weekday', clock().includes('月') && clock().includes(weekday));
       window.setUiLanguage('zh-CN');
       window.hideDate = true; window.drawQuota(lightQuota); await tick(400);
       check('with the date switched off the status bar shows only the time', clock().indexOf('-') < 0 && clock().split(':').length === 3);

@@ -57,8 +57,10 @@ export interface QuotaData {
   ctxEstimated?: boolean;
   fiveHourPercent: number;   // 5h remaining pct (0-100)，未知为 -1
   fiveHourResetsIn: string;  // e.g. "2h 45m"
+  fiveHourResetAt?: number; // Unix 时间戳，单位毫秒
   sevenDayPercent: number;   // 7d remaining pct (0-100)，未知为 -1
-  sevenDayResetsOn: string;  // e.g. "Resets Sun"
+  sevenDayResetsOn: string;  // e.g. "4d 2h 47m"
+  sevenDayResetAt?: number;  // Unix 时间戳，单位毫秒
   quotaGroups?: QuotaGroupSnapshot[]; // 同一账号下的多组独立额度（如 Antigravity 的 Gemini / Claude / Argon 分组）
   lastUpdated: number;
   status: 'normal' | 'warning' | 'critical' | 'offline';
@@ -71,6 +73,7 @@ export interface TaskSummary {
   text: string | null;
   sessionId?: string;
   usage?: TaskSessionUsage;
+  usageScope?: QuotaData['sessionScope'];
 }
 
 export type UsageCli = 'claude' | 'codex' | 'agy' | 'pi';

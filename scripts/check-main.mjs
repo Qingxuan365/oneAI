@@ -503,6 +503,76 @@ try {
           assert.equal(summaries['t-kimi-fresh']?.text, null);
         });
 
+        test('Codex task usage falls back to the latest token event in the same project and account', async () => {
+          const home = path.join(fixtureRoot, 'codex-recent-usage');
+          const otherHome = path.join(fixtureRoot, 'codex-other-account');
+          const project = path.join(fixtureRoot, 'codex-project');
+          const otherProject = path.join(fixtureRoot, 'other-project');
+          const now = Date.now();
+          const iso = (offset: number) => new Date(now + offset).toISOString();
+          const writeRollout = async (id: string, cwd: string, options: {
+            home?: string; birth: number; tokenAt?: number; total?: number; mtime: number; review?: boolean;
+          }) => {
+            const birth = new Date(now + options.birth);
+            const dir = path.join(options.home ?? home, 'sessions', String(birth.getFullYear()),
+              String(birth.getMonth() + 1).padStart(2, '0'), String(birth.getDate()).padStart(2, '0'));
+            await fsp.mkdir(dir, { recursive: true });
+            const log = path.join(dir, 'rollout-' + id + '.jsonl');
+            const rows: unknown[] = [
+              { type: 'session_meta', payload: { id, cwd, source: 'cli', timestamp: birth.toISOString() } },
+              { type: 'turn_context', timestamp: birth.toISOString(), payload: { model: options.review ? 'codex-auto-review' : 'gpt-codex' } },
+            ];
+            if (options.tokenAt !== undefined) {
+              rows.push({ type: 'event_msg', timestamp: iso(options.tokenAt), payload: { type: 'token_count', info: {
+                total_token_usage: { input_tokens: 80, cached_input_tokens: 20, output_tokens: 10, total_tokens: options.total },
+                last_token_usage: { input_tokens: 40 }, model_context_window: 100,
+              } } });
+            }
+            await fsp.writeFile(log, rows.map(row => JSON.stringify(row)).join('\\n') + '\\n');
+            const mtime = new Date(now + options.mtime);
+            await fsp.utimes(log, mtime, mtime);
+          };
+          await writeRollout('older-thread', project, { birth: -80_000, tokenAt: -20_000, total: 210, mtime: -1_000 });
+          await writeRollout('newest-usage', project, { birth: -60_000, tokenAt: -10_000, total: 310, mtime: -9_000 });
+          await writeRollout('no-usage', project, { birth: -8_000, mtime: -500 });
+          await writeRollout('review', project, { birth: -7_000, tokenAt: -6_000, total: 410, mtime: -5_000, review: true });
+          await writeRollout('other-project', otherProject, { birth: -6_000, tokenAt: -4_000, total: 510, mtime: -3_000 });
+          await writeRollout('other-account', project, { home: otherHome, birth: -5_000, tokenAt: -3_000, total: 610, mtime: -2_000 });
+
+          const active = { id: 'active', cliId: 'codex', cwd: project, createdAt: now - 90_000, configDir: home, includeUsage: true };
+          const peer = { ...active, id: 'peer', createdAt: now - 70_000, includeUsage: false };
+          const result = await readTaskSummaries([
+            active, peer,
+            { ...active, id: 'other-account-task', configDir: otherHome },
+            { ...active, id: 'invalid-account-task', configDir: 'relative' },
+          ]);
+          assert.equal(result.active?.usageScope, 'latest');
+          assert.equal(result.active?.usage?.tokens, 310);
+          assert.equal(result.active?.usage?.cacheHitPercent, 25);
+          assert.equal(result.active?.usage?.ctxPercent, 40);
+          assert.equal(result.active?.usage?.model, undefined);
+          assert.equal(result.peer?.usage, undefined);
+          assert.equal(result['other-account-task']?.usage?.tokens, 610);
+          assert.equal(result['invalid-account-task'], undefined);
+
+          const resumed = await readTaskSummaries([{ ...active, historyId: 'older-thread' }, peer]);
+          assert.equal(resumed.active?.usageScope, 'task');
+          assert.equal(resumed.active?.usage?.tokens, 210);
+          assert.equal(resumed.active?.usage?.model, 'gpt-codex');
+
+          const justCreated = await readTaskSummaries([{ ...active, createdAt: now }]);
+          assert.equal(justCreated.active?.usageScope, 'latest');
+          assert.equal(justCreated.active?.usage?.tokens, 310);
+
+          const missing = await readTaskSummaries([
+            { ...active, historyId: 'missing-thread' },
+            { ...active, id: 'empty', cwd: path.join(fixtureRoot, 'empty-project') },
+          ]);
+          assert.equal(missing.active?.usage, undefined);
+          assert.equal(missing.empty?.usage, undefined);
+          assert.equal(missing.empty?.usageScope, undefined);
+        });
+
         test('file-preview, path helpers, LRU bounded map and terminal path extractor handle edge cases', async () => {
           const cwd = path.join(fixtureRoot, 'preview-cwd');
           const externalDir = path.join(fixtureRoot, 'external');
@@ -710,8 +780,12 @@ try {
           assert.equal(data.fiveHourPercent, 93);
           assert.equal(data.sevenDayPercent, 39);
           assert.equal(data.fiveHourResetsIn, '1h 0m');
+          assert.equal(data.fiveHourResetAt, future * 1000);
+          assert.equal(data.sevenDayResetAt, future * 1000);
           assert.equal(readCodexRateWindows({ primary: { used_percent: 12 } }, now).fiveHourPercent, -1);
-          assert.equal(readCodexRateWindows({ secondary: { window_minutes: 300, used_percent: 12, resets_at: now / 1000 } }, now).fiveHourPercent, -1);
+          const expired = readCodexRateWindows({ secondary: { window_minutes: 300, used_percent: 12, resets_at: now / 1000 } }, now);
+          assert.equal(expired.fiveHourPercent, -1);
+          assert.equal(expired.fiveHourResetAt, undefined);
           assert.equal(readCodexRateWindows({ primary: { window_minutes: 300, used_percent: 0 } }, now).fiveHourPercent, 100);
         });
 

@@ -3,7 +3,16 @@ import { InlineQuotaText } from './InlineQuotaText';
 import { SystemStatsText } from './SystemStatsText';
 import { QuotaData, TaskStatus } from '../types';
 import { TASK_STATUS_META } from '../taskStatus';
-import { getLanguage, t } from '../i18n';
+import { getLanguage, t, T } from '../i18n';
+
+const STATUS_LABELS: Record<TaskStatus, string> = {
+  starting: T('启动中'),
+  running: T('运行中'),
+  idle: T('任务空闲'),
+  waiting: T('等待'),
+  stopped: T('已停止'),
+  error: T('失败'),
+};
 
 interface StatusBarProps {
   quota: QuotaData | null;
@@ -68,7 +77,7 @@ function getClockParts(offsetHours: number): ClockParts {
   const h = String(now.getHours()).padStart(2, '0');
   const m = String(now.getMinutes()).padStart(2, '0');
   const s = String(now.getSeconds()).padStart(2, '0');
-  const weekdays = [t('周日'), t('周一'), t('周二'), t('周三'), t('周四'), t('周五'), t('周六')];
+  const weekdays = [t('星期日'), t('星期一'), t('星期二'), t('星期三'), t('星期四'), t('星期五'), t('星期六')];
   const Y = now.getFullYear();
   const M = String(now.getMonth() + 1).padStart(2, '0');
   const D = String(now.getDate()).padStart(2, '0');
@@ -132,7 +141,7 @@ export const StatusBar: React.FC<StatusBarProps> = React.memo(({
 }) => {
   return (
     <footer id="oneai-statusbar" aria-label={t('状态栏')} className="statusbar flex h-16 shrink-0 select-none flex-col border-t border-line bg-panel px-[18px] py-0.5">
-      <div className="flex min-h-0 flex-1 items-center gap-3 overflow-hidden">
+      <div className="statusbar-limits-row flex min-h-0 flex-1 items-center gap-3 overflow-hidden">
         {taskStatus && taskTitle && (
           <span id="oneai-statusbar-task" title={taskTitle} className="max-w-[9rem] shrink truncate whitespace-nowrap font-mono text-ui text-fg">
             {taskTitle}
@@ -141,7 +150,7 @@ export const StatusBar: React.FC<StatusBarProps> = React.memo(({
         {taskStatus && (
           <span id="oneai-statusbar-status" data-task-status={taskStatus} title={TASK_STATUS_META[taskStatus].hint} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap font-mono text-ui text-fg-muted">
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${TASK_STATUS_META[taskStatus].dot}`} aria-hidden="true" />
-            <span className="text-fg">{TASK_STATUS_META[taskStatus].label}</span>
+            <span lang="en" className="text-fg">{t(STATUS_LABELS[taskStatus], undefined, 'en')}</span>
           </span>
         )}
         <div id="oneai-statusbar-quota" className="min-w-0 flex-1 overflow-hidden">

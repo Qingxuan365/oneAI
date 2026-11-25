@@ -18,7 +18,7 @@ OneAI 把 Codex、Claude Code、Kimi Code、OpenCode 等 AI 编程 CLI 放进同
 
 - **文件夹树与多任务**：任务按项目文件夹分组，每个任务有状态灯、Git 分支徽标和会话里最近一条消息；后台任务输出停下后会显示「待查看」。
 - **保活终端**：基于 xterm.js 与 Windows ConPTY（`node-pty`），切换任务或文件夹不会结束任何进程。
-- **底部两行状态栏**：所有 CLI 一致。上行显示任务状态、5h / 7d 额度与上下文进度条（按已用比例填充）、当前模型和时钟；下行显示输入 / 输出 / 缓存 Tokens、缓存命中率、Cost，以及 CPU、GPU、内存和网速。
+- **底部两行状态栏**：上行显示任务状态、当前模型、5 小时及每周剩余额度和时钟。下行显示会话 Tokens、缓存命中率、费用、上下文占用，以及 CPU、GPU、内存和网速。
 - **多账号**：Codex、Claude Code、Kimi Code 可并行使用多个账号。账号只是「配置目录 + 环境变量」，OneAI 不读取、不复制你的登录凭据。
 - **用量分析 Dashboard**：侧栏 `Dashboard` 页面（`Ctrl + Shift + D`）提供多时间区间 KPI 卡片、近 12 个月活跃热力图、Token / 费用 / 会话趋势图、Top 5 下钻、Token 构成、多分组实时账号配额与可排序模型明细表（仍保留 `Ctrl + Shift + U` 旧版本周用量面板），全部来自本机会话记录。
 - **历史会话**：浏览并恢复 Claude Code、Codex、Kimi Code 的历史会话。

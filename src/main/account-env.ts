@@ -26,6 +26,8 @@ export function resolveConfigDir(dir: unknown): string | null {
   return path.isAbsolute(value) ? path.resolve(value) : null;
 }
 
+export const DEFAULT_CODEX_HOME = resolveConfigDir(process.env.CODEX_HOME) ?? path.join(os.homedir(), '.codex');
+
 /**
  * 生成账号对应的终端环境变量，并确保配置目录存在（Codex 在目录不存在时直接报错退出）。
  * 配置目录变量最后写入，附加环境变量无法覆盖它。只创建目录，不读取、不复制任何凭据。

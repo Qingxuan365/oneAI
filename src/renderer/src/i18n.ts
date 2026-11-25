@@ -24,8 +24,8 @@ export function systemLanguage(): Language {
 }
 
 /** 界面文案翻译：键为中文原文，如 t('新建任务')、t('{n} 个任务', { n: 3 }) */
-export function t(key: string, params?: Record<string, string | number>): string {
-  return translate(current, key, params);
+export function t(key: string, params?: Record<string, string | number>, language: Language = current): string {
+  return translate(language, key, params);
 }
 
 /** 日期时间格式使用的 locale */

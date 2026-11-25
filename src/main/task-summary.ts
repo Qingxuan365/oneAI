@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ipcMain } from 'electron';
-import { resolveConfigDir } from './account-env';
+import { DEFAULT_CODEX_HOME, resolveConfigDir } from './account-env';
 import { normalizePathKey, readSlice, readZstHead, readZstTail, setBoundedMap } from './fs-utils';
 import { folderKey } from '../shared/paths';
 import type { TaskSummary } from '../shared/types';
@@ -27,6 +27,7 @@ interface SessionInfo {
 }
 
 const MAX_TASKS = 100;
+const MAX_CODEX_FILES = 200;
 const MAX_SESSIONS_PER_GROUP = 40;
 const MAX_TEXT = 100;
 const MAX_SUMMARY_CACHE = 800;
@@ -176,37 +177,47 @@ async function codexSessionsByFolder(
   targetFolders: ReadonlySet<string>,
   earliest: number,
   wantedHistoryIds: ReadonlySet<string>,
-): Promise<Map<string, SessionInfo[]>> {
+  usageFolders: ReadonlySet<string>,
+) {
   const byFolder = new Map<string, SessionInfo[]>();
-  if (targetFolders.size === 0) return byFolder;
+  const usageFiles = new Map<string, { file: string; stat: fs.Stats }[]>();
   const foundIds = new Set<string>();
   const root = path.join(home, 'sessions');
-  // 只看修改时间不早于最早任务创建时间的文件；按日期目录由新到旧，早于这个日期前一天的整个目录跳过
+  // 任务匹配按任务创建时间筛选。最近用量也可以来自任务创建前的文件，复用同一批扫描结果。
   const cutoffDay = new Date(earliest - 24 * 3600_000);
   const cutoff = new Date(cutoffDay.getFullYear(), cutoffDay.getMonth(), cutoffDay.getDate()).getTime();
   const files: string[] = [];
   const numericDirs = async (dir: string) => {
     try { return (await readSessionDirectory(dir)).filter((e) => e.isDirectory() && /^\d+$/.test(e.name)).map((e) => e.name).sort().reverse(); } catch { return []; }
   };
-  for (const year of await numericDirs(root)) {
+  scan: for (const year of await numericDirs(root)) {
     for (const month of await numericDirs(path.join(root, year))) {
       for (const day of await numericDirs(path.join(root, year, month))) {
-        if (new Date(Number(year), Number(month) - 1, Number(day)).getTime() < cutoff) continue;
+        if (usageFolders.size === 0 && new Date(Number(year), Number(month) - 1, Number(day)).getTime() < cutoff) continue;
         const dayDir = path.join(root, year, month, day);
         try { files.push(...(await readSessionDirectory(dayDir)).filter((e) => e.isFile() && e.name.endsWith('.jsonl')).map((e) => path.join(dayDir, e.name))); } catch { /* 跳过 */ }
+        if (files.length >= MAX_CODEX_FILES) break scan;
       }
     }
   }
-  const candidateFiles = files.slice(0, 200);
+  const candidateFiles = files.slice(0, MAX_CODEX_FILES);
   const stats = await Promise.all(candidateFiles.map((file) => statOf(file)));
   for (let i = 0; i < candidateFiles.length; i++) {
     const file = candidateFiles[i];
     const stat = stats[i];
-    if (!stat || stat.mtimeMs < earliest - SKEW_MS) continue;
+    if (!stat) continue;
+    const canMatchTask = stat.mtimeMs >= earliest - SKEW_MS;
+    if (!canMatchTask && usageFolders.size === 0) continue;
     const meta = await readCodexMeta(file, stat);
     if (!meta) continue;
     const key = folderKey(meta.cwd);
     if (!targetFolders.has(key)) continue;
+    if (usageFolders.has(key)) {
+      const candidates = usageFiles.get(key) ?? [];
+      candidates.push({ file, stat });
+      usageFiles.set(key, candidates);
+    }
+    if (!canMatchTask) continue;
     const lastPrompt = await cached(file, stat, () => lastCodexPrompt(file).catch(() => null));
     const list = byFolder.get(key) ?? [];
     list.push({ id: meta.id, birth: meta.birth, lastPrompt, file, stat });
@@ -250,7 +261,7 @@ async function codexSessionsByFolder(
     const rest = list.filter((item) => !wantedHistoryIds.has(item.id)).sort((a, b) => b.birth - a.birth).slice(0, MAX_SESSIONS_PER_GROUP);
     byFolder.set(key, [...pinned, ...rest]);
   }
-  return byFolder;
+  return { byFolder, usageFiles };
 }
 
 // ---------- Kimi Code：<KIMI_CODE_HOME>/sessions/<项目>/<会话>/state.json（含 cwd、createdAt、lastPrompt） ----------
@@ -336,11 +347,13 @@ function parseTasks(raw: unknown): SummaryTask[] {
     const { id, cliId, cwd, createdAt, historyId, configDir, includeUsage } = item as Record<string, unknown>;
     if (typeof id !== 'string' || !id || (cliId !== 'claude' && cliId !== 'codex' && cliId !== 'kimi')) continue;
     if (typeof cwd !== 'string' || !path.isAbsolute(cwd) || typeof createdAt !== 'number') continue;
+    const resolvedConfigDir = resolveConfigDir(configDir);
+    if (configDir !== undefined && !resolvedConfigDir) continue;
     tasks.push({
       id, cliId, cwd, createdAt,
       includeUsage: includeUsage === true,
       historyId: typeof historyId === 'string' && historyId ? historyId : undefined,
-      configDir: typeof configDir === 'string' && configDir ? (resolveConfigDir(configDir) ?? undefined) : undefined,
+      configDir: resolvedConfigDir ?? undefined,
     });
   }
   return tasks;
@@ -348,7 +361,7 @@ function parseTasks(raw: unknown): SummaryTask[] {
 
 const DEFAULT_HOMES: Record<SummaryTask['cliId'], string> = {
   claude: path.join(os.homedir(), '.claude'),
-  codex: path.join(os.homedir(), '.codex'),
+  codex: DEFAULT_CODEX_HOME,
   kimi: path.join(os.homedir(), '.kimi-code'),
 };
 
@@ -386,22 +399,35 @@ export async function readTaskSummaries(raw: unknown): Promise<Record<string, Ta
     const earliest = Math.min(...allTasks.map((task) => task.createdAt));
     const wantedHistoryIds = new Set(allTasks.flatMap((task) => (task.historyId ? [task.historyId] : [])));
     const targetFolders = new Set(folders.keys());
-    let grouped = new Map<string, SessionInfo[]>();
-    try {
-      grouped = cliId === 'codex'
-        ? await codexSessionsByFolder(home, targetFolders, earliest, wantedHistoryIds)
-        : await kimiSessionsByFolder(home, targetFolders, earliest, wantedHistoryIds);
-    } catch { /* 读取失败时按「没有会话」处理 */ }
+    const usageFolders = new Set(allTasks.filter((task) => task.includeUsage && !task.historyId).map((task) => folderKey(task.cwd)));
+    const codex = cliId === 'codex'
+      ? await codexSessionsByFolder(home, targetFolders, earliest, wantedHistoryIds, usageFolders).catch(() => undefined)
+      : undefined;
+    const grouped = cliId === 'codex'
+      ? codex?.byFolder
+      : await kimiSessionsByFolder(home, targetFolders, earliest, wantedHistoryIds).catch(() => undefined);
     for (const [fKey, tasks] of folders) {
-      const sessions = grouped.get(fKey) ?? [];
+      const sessions = grouped?.get(fKey) ?? [];
       const assigned = assignSessions(tasks, sessions);
+      let recentUsage: ReturnType<typeof quotaService.readLatestCodexUsage> | undefined;
       for (const task of tasks) {
         const session = assigned.get(task.id);
-        const confident = canUseSession(task, tasks, sessions, session);
-        const usage = task.includeUsage && confident && session?.file && session.stat
-          ? await quotaService.readCodexTaskUsage(session.file, session.stat)
-          : undefined;
-        result[task.id] = { text: session?.lastPrompt ?? null, sessionId: session?.id, usage };
+        const summary: TaskSummary = { text: session?.lastPrompt ?? null, sessionId: session?.id };
+        result[task.id] = summary;
+        if (cliId !== 'codex' || !task.includeUsage) continue;
+        if (canUseSession(task, tasks, sessions, session) && session?.file && session.stat) {
+          summary.usage = await quotaService.readCodexTaskUsage(session.file, session.stat);
+          if (summary.usage) summary.usageScope = 'task';
+        } else if (!task.historyId) {
+          if (!recentUsage) {
+            const candidates = (codex?.usageFiles.get(fKey) ?? [])
+              .sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs)
+              .slice(0, MAX_SESSIONS_PER_GROUP);
+            recentUsage = quotaService.readLatestCodexUsage(candidates);
+          }
+          summary.usage = await recentUsage;
+          if (summary.usage) summary.usageScope = 'latest';
+        }
       }
     }
   }));
@@ -410,7 +436,7 @@ export async function readTaskSummaries(raw: unknown): Promise<Record<string, Ta
 
 function canUseSession(task: SummaryTask, tasks: SummaryTask[], sessions: SessionInfo[], session?: SessionInfo): boolean {
   if (task.historyId) return session?.id === task.historyId;
-  // Keep the sidebar heuristic, but hide task usage if several tasks or logs could match.
+  // 侧栏摘要允许启发式匹配。任务用量要求明确归属。
   return tasks.filter((item) => !item.historyId).length === 1
     && new Set(sessions.filter((item) => item.birth >= task.createdAt - SKEW_MS).map((item) => item.id)).size === 1;
 }

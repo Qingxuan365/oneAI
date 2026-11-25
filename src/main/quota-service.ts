@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import https from 'node:https';
 import { execFile } from 'node:child_process';
-import { isAccountCli, resolveConfigDir, AccountCliId } from './account-env';
+import { DEFAULT_CODEX_HOME, isAccountCli, resolveConfigDir, AccountCliId } from './account-env';
 import { isSamePath, normalizePathKey, readSlice, readZstTail, setBoundedMap } from './fs-utils';
 import type { QuotaData, QuotaGroupSnapshot, TaskSessionUsage } from '../shared/types';
 import { getLanguage, t } from './i18n';
@@ -60,7 +60,6 @@ export function parseTomlStrings(content: string): Map<string, Map<string, strin
   return sections;
 }
 
-const CODEX_HOME_DEFAULT = path.join(os.homedir(), '.codex');
 const CLAUDE_HOME_DEFAULT = path.join(os.homedir(), '.claude');
 const KIMI_HOME_DEFAULT = path.join(os.homedir(), '.kimi-code');
 const CLAUDE_STATUS_FILE = path.join(os.homedir(), '.config', 'oneai', 'claude-status.json');
@@ -253,7 +252,7 @@ interface CodexRateWindow {
 
 export function readCodexRateWindows(limits: { primary?: CodexRateWindow; secondary?: CodexRateWindow }, now: number) {
   const windows = [limits.primary, limits.secondary];
-  const read = (minutes: number) => {
+  const read = (minutes: number): { percent: number; reset: string; resetMs?: number } => {
     const window = windows.find((item) => item?.window_minutes === minutes);
     if (!window || typeof window.used_percent !== 'number' || !Number.isFinite(window.used_percent)) {
       return { percent: -1, reset: '--' };
@@ -265,13 +264,14 @@ export function readCodexRateWindows(limits: { primary?: CodexRateWindow; second
     return {
       percent: Math.max(0, Math.min(100, Math.round(100 - window.used_percent))),
       reset: resetMs === undefined ? '--' : formatDuration(resetMs - now),
+      resetMs,
     };
   };
   const five = read(300);
   const seven = read(10_080);
   return {
-    fiveHourPercent: five.percent, fiveHourResetsIn: five.reset,
-    sevenDayPercent: seven.percent, sevenDayResetsOn: seven.reset,
+    fiveHourPercent: five.percent, fiveHourResetsIn: five.reset, fiveHourResetAt: five.resetMs,
+    sevenDayPercent: seven.percent, sevenDayResetsOn: seven.reset, sevenDayResetAt: seven.resetMs,
   };
 }
 
@@ -737,7 +737,7 @@ export class QuotaService {
     return { model, effort };
   }
 
-  public async getCodexInfo(home: string = CODEX_HOME_DEFAULT): Promise<{ model: string; effort?: string }> {
+  public async getCodexInfo(home: string = DEFAULT_CODEX_HOME): Promise<{ model: string; effort?: string }> {
     let model = 'Auto';
     let effort: string | undefined = undefined;
     const configPath = path.join(home, 'config.toml');
@@ -1095,8 +1095,10 @@ export class QuotaService {
       const fiveHourPercent = toRemaining(limit5h);
       const sevenDayPercent = toRemaining(limit7d);
 
-      const fiveHourResetsIn = fiveHourPercent >= 0 && resetAt(limit5h) > now ? formatDuration(resetAt(limit5h) - now) : '--';
-      const sevenDayResetsOn = sevenDayPercent >= 0 && resetAt(limit7d) > now ? formatResetDay(resetAt(limit7d)) : '--';
+      const fiveResetMs = resetAt(limit5h);
+      const sevenResetMs = resetAt(limit7d);
+      const fiveHourResetAt = fiveHourPercent >= 0 && fiveResetMs > now ? fiveResetMs : undefined;
+      const sevenDayResetAt = sevenDayPercent >= 0 && sevenResetMs > now ? sevenResetMs : undefined;
 
       const known = [fiveHourPercent, sevenDayPercent].filter((p) => p >= 0);
       const minPct = known.length ? Math.min(...known) : 100;
@@ -1109,9 +1111,11 @@ export class QuotaService {
         effort: currentEffort,
         planType: 'Kimi Coding',
         fiveHourPercent,
-        fiveHourResetsIn,
+        fiveHourResetsIn: fiveHourResetAt === undefined ? '--' : formatDuration(fiveHourResetAt - now),
+        fiveHourResetAt,
         sevenDayPercent,
-        sevenDayResetsOn,
+        sevenDayResetsOn: sevenDayResetAt === undefined ? '--' : formatResetDay(sevenDayResetAt),
+        sevenDayResetAt,
         lastUpdated: Date.now(),
         status,
       };
@@ -1135,8 +1139,8 @@ export class QuotaService {
   }
 
   /** key 为缓存键（默认账号是 'codex'），home 为该账号的 CODEX_HOME；账号没有会话记录时额度记为未知而不是 100% */
-  private async fetchCodexQuota(key: string = 'codex', home: string = CODEX_HOME_DEFAULT): Promise<QuotaData> {
-    const isAccount = !isSamePath(home, CODEX_HOME_DEFAULT);
+  private async fetchCodexQuota(key: string = 'codex', home: string = DEFAULT_CODEX_HOME): Promise<QuotaData> {
+    const isAccount = !isSamePath(home, DEFAULT_CODEX_HOME);
     const unknownPct = -1;
     const codexInfo = await this.getCodexInfo(home);
     const currentModel = codexInfo.model;
@@ -1242,6 +1246,7 @@ export class QuotaService {
 
   private codexTailCache = new Map<string, {
     mtimeMs: number; size: number; usage?: SessionTokenUsage; rateLimits: any;
+    usageAt?: number;
     context: { model?: string; effort?: string; at: number } | null;
     isSubagent: boolean;
   }>();
@@ -1254,6 +1259,18 @@ export class QuotaService {
     } catch {
       return undefined;
     }
+  }
+
+  async readLatestCodexUsage(files: readonly { file: string; stat: fs.Stats }[]): Promise<SessionTokenUsage | undefined> {
+    let latest: { at: number; usage: SessionTokenUsage } | undefined;
+    for (const { file, stat } of files) {
+      try {
+        const tail = await this.readCodexTail(file, stat.mtimeMs, stat.size);
+        if (tail.isSubagent || tail.usageAt === undefined || tail.usage?.tokens === undefined) continue;
+        if (!latest || tail.usageAt > latest.at) latest = { at: tail.usageAt, usage: tail.usage };
+      } catch { /* 跳过失效的会话文件 */ }
+    }
+    return latest?.usage;
   }
 
   private async readCodexTail(file: string, mtimeMs: number, size: number) {
@@ -1298,6 +1315,8 @@ export class QuotaService {
           });
           if (total.total_tokens > 0) usage.tokens = total.total_tokens;
           result.usage = usage;
+          const at = Date.parse(parsed.timestamp);
+          if (parsed.type === 'event_msg' && parsed.payload.type === 'token_count' && Number.isFinite(at)) result.usageAt = at;
         }
       } catch {}
     }
@@ -1490,8 +1509,10 @@ export class QuotaService {
       costUsd: typeof data.cost?.total_cost_usd === 'number' && Number.isFinite(data.cost.total_cost_usd) && data.cost.total_cost_usd >= 0 ? data.cost.total_cost_usd : undefined,
       fiveHourPercent: five.pct,
       fiveHourResetsIn: five.resetMs ? formatDuration(five.resetMs - now) : '--',
+      fiveHourResetAt: five.resetMs,
       sevenDayPercent: seven.pct,
       sevenDayResetsOn: seven.resetMs ? formatResetDay(seven.resetMs) : '--',
+      sevenDayResetAt: seven.resetMs,
       status,
     };
   }
@@ -1739,8 +1760,10 @@ export class QuotaService {
       planType: prev?.planType,
       fiveHourPercent: five.pct,
       fiveHourResetsIn: five.pct < 0 ? '--' : fiveReset > 0 ? formatDuration(fiveReset) : t('已就绪'),
+      fiveHourResetAt: five.pct >= 0 && fiveReset > 0 ? five.resetMs : undefined,
       sevenDayPercent: seven.pct,
       sevenDayResetsOn: seven.pct < 0 ? '--' : seven.resetMs ? formatResetDay(seven.resetMs) : t('近期重置'),
+      sevenDayResetAt: seven.pct >= 0 && seven.resetMs > currentNow ? seven.resetMs : undefined,
       quotaGroups: quotaGroups.length > 0 ? quotaGroups : undefined,
       lastUpdated: this.agyUsageAt,
       status: minPct < 15 ? 'critical' : minPct < 40 ? 'warning' : 'normal',
