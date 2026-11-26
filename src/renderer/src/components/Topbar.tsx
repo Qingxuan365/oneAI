@@ -87,6 +87,7 @@ export const Topbar: React.FC<TopbarProps> = React.memo(({
     else if (!result?.canceled) showAction(t('保存失败：{reason}', { reason: result?.error || t('操作未完成') }), false);
   };
 
+  const isRunning = !isDashboardOpen && activeTask?.status === 'running';
   const menuItem = 'flex w-full items-center gap-2 px-3 py-2 text-left text-fg-muted transition-colors hover:bg-hover hover:text-fg';
 
   return (
@@ -216,6 +217,13 @@ export const Topbar: React.FC<TopbarProps> = React.memo(({
           <FolderTree size={16} />
         </button>
       )}
+      <div
+        aria-hidden="true"
+        data-topbar-neon={isRunning ? 'running' : 'idle'}
+        className={`topbar-neon-track${isRunning ? ' is-running' : ''}`}
+      >
+        <span className="topbar-neon-beam" />
+      </div>
     </header>
   );
 });

@@ -140,7 +140,7 @@ export const StatusBar: React.FC<StatusBarProps> = React.memo(({
   language,
 }) => {
   return (
-    <footer id="oneai-statusbar" aria-label={t('状态栏')} className="statusbar flex h-16 shrink-0 select-none flex-col border-t border-line bg-panel px-[18px] py-0.5">
+    <footer id="oneai-statusbar" aria-label={t('状态栏')} className="statusbar flex h-16 shrink-0 select-none flex-col bg-canvas px-[18px] py-0.5">
       <div className="statusbar-limits-row flex min-h-0 flex-1 items-center gap-3 overflow-hidden">
         {taskStatus && taskTitle && (
           <span id="oneai-statusbar-task" title={taskTitle} className="max-w-[9rem] shrink truncate whitespace-nowrap font-mono text-ui text-fg">

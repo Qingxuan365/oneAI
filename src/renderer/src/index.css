@@ -730,6 +730,12 @@ html, body, #root {
   .option-active {
     @apply rounded-md border border-accent/60 bg-accent/15 text-xs font-medium text-accent transition-colors;
   }
+  .task-neon-running {
+    box-shadow:
+      0 0 0 1px rgb(var(--color-accent) / 0.14),
+      0 0 8px rgb(var(--color-accent) / 0.24),
+      0 0 14px rgb(var(--color-violet) / 0.16);
+  }
 }
 
 /* Dashboard 热力图无日志日期斜线底纹，颜色取自当前主题语义变量 */
@@ -757,12 +763,118 @@ html, body, #root {
   0%, 15% { transform: translateX(0); }
   85%, 100% { transform: translateX(calc(var(--marquee-dist) * -1)); }
 }
+@keyframes topbar-neon-sweep {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(300%); }
+}
+.topbar-neon-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 1px);
+  height: 8px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
+.topbar-neon-track::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgb(var(--color-accent) / 0.25), rgb(var(--color-violet) / 0.35), rgb(var(--color-accent) / 0.25), transparent);
+}
+.topbar-neon-track.is-running {
+  opacity: 1;
+}
+.topbar-neon-beam {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 25%;
+  height: 2px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgb(var(--color-accent) / 0.35) 16%,
+    rgb(var(--color-accent) / 0.95) 38%,
+    rgb(var(--color-violet) / 0.95) 55%,
+    rgb(var(--color-success) / 0.9) 72%,
+    rgb(var(--color-accent) / 0.35) 86%,
+    transparent 100%
+  );
+  box-shadow: 0 1px 6px rgb(var(--color-accent) / 0.55), 0 0 10px rgb(var(--color-violet) / 0.35);
+}
+@keyframes task-neon-spin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+.task-neon-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+}
+.task-neon-ring::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 150%;
+  aspect-ratio: 1 / 1;
+  transform: translate(-50%, -50%) rotate(0deg);
+  background: conic-gradient(
+    from 0deg,
+    rgb(var(--color-accent) / 0.18) 0deg,
+    rgb(var(--color-accent) / 0.88) 38deg,
+    rgb(var(--color-violet) / 0.98) 68deg,
+    rgb(var(--color-success) / 0.95) 95deg,
+    rgb(var(--color-accent) / 0.35) 128deg,
+    rgb(var(--color-accent) / 0.15) 180deg,
+    rgb(var(--color-accent) / 0.88) 218deg,
+    rgb(var(--color-violet) / 0.98) 248deg,
+    rgb(var(--color-success) / 0.95) 275deg,
+    rgb(var(--color-accent) / 0.35) 308deg,
+    rgb(var(--color-accent) / 0.18) 360deg
+  );
+}
 @media (prefers-reduced-motion: no-preference) {
+  .topbar-neon-track.is-running .topbar-neon-beam {
+    animation: topbar-neon-sweep 2.8s ease-in-out infinite alternate;
+    will-change: transform;
+  }
+  .task-neon-ring::before {
+    animation: task-neon-spin 3.2s linear infinite;
+    will-change: transform;
+  }
   .marquee-text.is-overflow.is-playing { animation: marquee-slide var(--marquee-duration) linear infinite alternate; }
   .marquee-title-box:hover .marquee-text.is-overflow.is-playing { animation-play-state: paused; }
   .drawer-panel { animation: drawer-in 180ms ease-out; }
   .modal-overlay { animation: overlay-in 120ms ease-out; }
   .modal-panel { animation: dialog-in 160ms ease-out; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .topbar-neon-track.is-running .topbar-neon-beam {
+    width: 100%;
+    transform: none;
+    opacity: 0.7;
+  }
+  .task-neon-ring::before {
+    animation: none;
+    opacity: 0.8;
+  }
 }
 
 /*

@@ -43,11 +43,11 @@ function defaultAppearance(preferDark = true): Pick<WindowState, 'backgroundColo
   return preferDark
     ? {
         backgroundColor: '#0d1117',
-        titleBarOverlay: { color: '#141d27', symbolColor: '#e2e8f0', height: 44 },
+        titleBarOverlay: { color: '#141d27', symbolColor: '#e2e8f0', height: 43 },
       }
     : {
         backgroundColor: '#ffffff',
-        titleBarOverlay: { color: '#f0f3f6', symbolColor: '#1f2328', height: 44 },
+        titleBarOverlay: { color: '#f0f3f6', symbolColor: '#1f2328', height: 43 },
       };
 }
 

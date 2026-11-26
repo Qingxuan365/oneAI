@@ -49,7 +49,7 @@ Codex、Claude Code、Kimi Code、OpenCode、Grok Build、Antigravity、Qwen Cod
 
 OneAI 目前只支持 **Windows 10 / 11（x64）**，因为依赖 Windows ConPTY 接口。各 AI CLI 本身不随 OneAI 分发：请自行安装需要的 CLI，并确认它们的命令在 `PATH` 中。
 
-- **安装包**：从[最新发布](https://github.com/keepingFE/oneAI/releases/latest)下载 `OneAI-Setup-<version>.exe` 并运行。
+- **安装包**：从[最新发布](https://github.com/Qingxuan365/oneAI/releases/latest)下载 `OneAI-Setup-<version>.exe` 并运行。
 - **从源码构建**：见下文。
 
 首次启动时，OneAI 会请你选择界面语言，再显示一段简短的引导。之后添加项目文件夹，点文件夹右侧的「+」选择 CLI 即可。
@@ -88,7 +88,7 @@ Electron 31、React 18、TypeScript、Tailwind CSS、Lucide React、`@xterm/xter
 
 ## 隐私
 
-OneAI 在本机运行，没有遥测和统计，也没有更新检查。它读取你所用 CLI 的本机会话文件来显示历史、摘要和用量，不读取、不复制登录凭据。OneAI 自己发起的网络请求只有 Kimi Code 的额度查询（`api.kimi.com`），使用你自己的 Kimi Code 登录，并且只在使用 Kimi Code 时发生。如果你在设置里添加了在线音乐，播放器还会访问你添加的这些地址，且只用于播放。你在终端里启动的各 CLI 照常访问它们自己的服务。
+OneAI 在本机运行，没有遥测。会话历史、摘要和用量均来自本机的 CLI 会话文件。OneAI 默认在启动时访问 GitHub Releases 检查更新，可在「设置 → 关于」关闭。查询 Kimi Code 额度时，OneAI 使用你的 Kimi Code 登录凭据请求 `api.kimi.com`。添加在线音乐后，OneAI 会连接相应的音频流或歌单进行播放。在终端内启动的各 CLI 会访问各自的服务。
 
 ## 参与贡献
 

@@ -687,7 +687,7 @@ export const App: React.FC = () => {
       const symbolColor = toHex(getComputedStyle(header).color);
       const backgroundColor = toHex(getComputedStyle(document.body).backgroundColor) ?? undefined;
       if (color && symbolColor) {
-        window.electronAPI.setTitleBarOverlay({ color, symbolColor, height: Math.round(header.getBoundingClientRect().height), backgroundColor });
+        window.electronAPI.setTitleBarOverlay({ color, symbolColor, height: Math.max(24, Math.floor(header.getBoundingClientRect().height) - 1), backgroundColor });
       }
     }
   }, [resolvedTheme, settings.uiScale]);

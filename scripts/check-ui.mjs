@@ -40,7 +40,7 @@ await build({
       // 路径里带 logged 的账号视为已登录；账号相关桩不使用反斜杠，避免外层模板字符串转义
       checkAccountLogin: async account => ({ loggedIn: account.configDir.indexOf('logged') >= 0, detail: account.configDir.indexOf('logged') >= 0 ? 'me@example.com' : undefined }),
       selectWorkspaceDirectory: async () => 'C:/picked/dir',
-      listSessionHistory: async (accounts) => { const h = (id, cliId, title, cwd, ago, extra = {}) => ({ id, cliId, title, cwd, updatedAt: Date.now() - ago, command: 'x', ...extra }); const base = [h('h1', 'codex', 'Today one', 'D:/GitHub/OneAI', 60000), h('h2', 'claude', 'Yesterday one', 'D:/plan', 86400000 + 3600000 * 2), h('h2', 'kimi', 'Old one', 'D:/old', 10 * 86400000)]; return Array.isArray(accounts) && accounts.length ? [h('h-acc', 'codex', 'Account session', 'D:/acc', 30000, { accountId: accounts[0].id, accountName: accounts[0].name }), ...base] : base; },
+      listSessionHistory: async (accounts) => { const h = (id, cliId, title, cwd, ago, extra = {}) => ({ id, cliId, title, cwd, updatedAt: Date.now() - ago, command: 'x', ...extra }); const base = [h('h1', 'codex', 'Today one', 'D:/GitHub/OneAI', 60000), h('h2', 'claude', 'Yesterday one', 'D:/plan', Date.now() - (new Date().setHours(0, 0, 0, 0) - 3600000 * 2)), h('h2', 'kimi', 'Old one', 'D:/old', 10 * 86400000)]; return Array.isArray(accounts) && accounts.length ? [h('h-acc', 'codex', 'Account session', 'D:/acc', 30000, { accountId: accounts[0].id, accountName: accounts[0].name }), ...base] : base; },
       getGitBranches: async (dirs) => Object.fromEntries(dirs.map((d) => [d, d === 'D:/GitHub/OneAI' ? 'main' : null])),
       getUsageStats: async () => window.usageFixture(window.usageEmpty),
       getDashboardStats: async () => window.dashboardFixture(window.dashboardEmpty),
@@ -183,8 +183,10 @@ await build({
     const mkTask = (id, groupId, cwd, extra = {}) => ({ id, groupId, title: id, status: 'idle', cwd, createdAt: 1, ...extra });
     // withMusic：带一条在线音乐，用于检查折叠侧栏时播放器不被卸载
     const MUSIC_STREAMS = [{ id: 'm1', name: 'Test radio', url: 'https://example.com/test.mp3' }];
-    window.drawSidebar = (isCollapsed = false, clockOffset = 0, withMusic = false, customWidth = null, isDashboardActive = false) => {
-      const tasks = [mkTask('side-a', 'codex', 'D:/GitHub/OneAI', { title: 'Side a' }), mkTask('side-b', 'codex', 'D:/GitHub/OneAI', { title: 'Side b' }), mkTask('side-c', 'claude', 'D:/sports', { title: 'Side c' }), mkTask('side-d', 'claude', 'D:/sports', { title: 'Side d', status: 'stopped' }), mkTask('side-t', 'terminal', 'D:/sports', { title: 'Side t' })];
+    window.drawSidebar = (isCollapsed = false, clockOffset = 0, withMusic = false, customWidth = null, isDashboardActive = false, runningIds = []) => {
+      const runningSet = new Set(runningIds);
+      const st = (id, fallback = 'idle') => runningSet.has(id) ? 'running' : fallback;
+      const tasks = [mkTask('side-a', 'codex', 'D:/GitHub/OneAI', { title: 'Side a', status: st('side-a') }), mkTask('side-b', 'codex', 'D:/GitHub/OneAI', { title: 'Side b', status: st('side-b') }), mkTask('side-c', 'claude', 'D:/sports', { title: 'Side c', status: st('side-c') }), mkTask('side-d', 'claude', 'D:/sports', { title: 'Side d', status: st('side-d', 'stopped') }), mkTask('side-t', 'terminal', 'D:/sports', { title: 'Side t', status: st('side-t') })];
       const folders = [{ path: 'D:/GitHub/OneAI', isExpanded: true }, { path: 'D:/sports', isExpanded: true }, { path: 'D:/empty', isExpanded: true }];
       const entry = (id, cliId, title, ago) => ({ id, cliId, title, cwd: 'D:/plan', updatedAt: Date.now() - ago, command: cliId + ' resume ' + id });
       const recent = [{ key: keyOf('D:/plan'), path: 'D:/plan', updatedAt: Date.now() - 3600000, total: 7, entries: [entry('h1', 'codex', 'History one', 3600000), entry('h2', 'claude', 'History two', 7200000)] }];
@@ -415,6 +417,26 @@ app.whenReady().then(async () => {
           check('starting restart visibly disabled', restart.disabled && Number(getComputedStyle(restart).opacity) < 1);
         }
         if (status === 'error') check('error colors match', getComputedStyle(dot()).backgroundColor === getComputedStyle(dot().parentElement).color);
+        const neonTrack = document.querySelector('header [data-topbar-neon]');
+        const neonBeam = neonTrack?.querySelector('.topbar-neon-beam');
+        const taskRow = document.querySelector('[data-task-id="task"]');
+        const taskRing = taskRow?.querySelector('[data-task-neon="running"]');
+        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (status === 'running') {
+          check('running topbar neon beam sweeps cleanly below header while keeping 44px height', neonTrack?.dataset.topbarNeon === 'running'
+            && neonTrack.classList.contains('is-running')
+            && Math.round(document.querySelector('header').getBoundingClientRect().height) === 44
+            && neonTrack.getBoundingClientRect().top >= document.querySelector('header').getBoundingClientRect().bottom - 0.5
+            && (reducedMotion || getComputedStyle(neonBeam).animationName === 'topbar-neon-sweep'));
+          check('running sidebar task row shows perimeter neon ring', Boolean(taskRow?.classList.contains('task-neon-running'))
+            && Boolean(taskRing)
+            && (reducedMotion || getComputedStyle(taskRing, '::before').animationName === 'task-neon-spin'));
+        } else {
+          check(status + ' topbar neon beam stays idle', neonTrack?.dataset.topbarNeon === 'idle'
+            && !neonTrack.classList.contains('is-running')
+            && getComputedStyle(neonBeam).animationName === 'none');
+          check(status + ' sidebar task row has no perimeter neon ring', !taskRow?.classList.contains('task-neon-running') && !taskRing);
+        }
       }
       for (const language of ['zh-TW', 'en']) {
         window.setUiLanguage(language);
@@ -488,6 +510,7 @@ app.whenReady().then(async () => {
       ['#oneai-statusbar-clock', '.quota-usage', '.quota-tokens-breakdown', '.statusbar-sys-cpu', '.statusbar-sys-mem', '.statusbar-sys-net'].every(sel => document.querySelector(sel).getClientRects().length > 0)\`) });
     result.push({ name: 'status bar at 2800 maximized shows full date-time clock', ok: await win.webContents.executeJavaScript("(() => { const c = document.getElementById('oneai-statusbar-clock'); const t = c.textContent.trim(); return c.getAttribute('data-clock-mode') === 'full' && c.getBoundingClientRect().width > 0 && t.includes('-') && t.includes(':'); })()") });
     result.push({ name: 'status bar clock renders in regular font weight', ok: await win.webContents.executeJavaScript("parseInt(getComputedStyle(document.getElementById('oneai-statusbar-clock')).fontWeight, 10) < 600") });
+    result.push({ name: 'status bar matches canvas background with no top border', ok: await win.webContents.executeJavaScript("(() => { const bar = document.getElementById('oneai-statusbar'); const s = getComputedStyle(bar); return s.borderTopWidth === '0px' && s.backgroundColor === getComputedStyle(document.body).backgroundColor; })()") });
     result.push({ name: 'status bar distinguishes unavailable and idle GPU readings', ok: await win.webContents.executeJavaScript(\`(async () => {
       const update = async gpuPercent => {
         window.pushStats({ ...window.fakeStats, gpuPercent });
@@ -708,6 +731,24 @@ app.whenReady().then(async () => {
       check('collapsed strip has one button per folder', document.querySelectorAll('[data-folder-strip]').length === 3);
       document.querySelector('[data-folder-strip]').click(); await tick();
       check('collapsed folder button opens the CLI menu', menuText().includes('Claude Code'));
+
+      // 后台运行中任务（含激活任务空闲、Dashboard 视图、折叠侧栏）环形霓虹效果
+      window.drawSidebar(false, 0, false, null, false, ['side-b', 'side-c']); await tick();
+      check('background running tasks show neon ring while idle active task does not',
+        !row('a').classList.contains('task-neon-running') && !row('a').querySelector('[data-task-neon]')
+        && row('b').classList.contains('task-neon-running') && Boolean(row('b').querySelector('[data-task-neon="running"]'))
+        && row('c').classList.contains('task-neon-running') && Boolean(row('c').querySelector('[data-task-neon="running"]')));
+      window.drawSidebar(false, 0, false, null, true, ['side-b', 'side-c']); await tick();
+      check('running tasks keep neon ring while Dashboard is active',
+        !row('a').querySelector('[data-task-neon]')
+        && Boolean(row('b').querySelector('[data-task-neon="running"]'))
+        && Boolean(row('c').querySelector('[data-task-neon="running"]')));
+      window.drawSidebar(true, 0, false, null, false, ['side-b', 'side-c']); await tick();
+      check('collapsed rail running tasks show neon ring without horizontal overflow',
+        !strip('a').classList.contains('task-neon-running') && !strip('a').querySelector('[data-task-neon]')
+        && strip('b').classList.contains('task-neon-running') && Boolean(strip('b').querySelector('[data-task-neon="running"]'))
+        && strip('c').classList.contains('task-neon-running') && Boolean(strip('c').querySelector('[data-task-neon="running"]'))
+        && strip('b').scrollWidth <= strip('b').clientWidth);
       return checks;
     })()\`));
     // 终端按需创建：只为选中过的任务创建 xterm 实例，避免 WebGL 上下文随任务数量溢出
@@ -1753,7 +1794,7 @@ app.whenReady().then(async () => {
       window.dashboardEmpty = false;
       window.drawDashboard(true); await wait(250);
       const dash = document.getElementById('oneai-dashboard-view');
-      check('Dashboard topbar shows Dashboard breadcrumb and hides terminal tools and quota strip', document.querySelector('header').textContent.includes('Dashboard') && !document.getElementById('oneai-terminal-tools') && !document.querySelector('header .quota-bar') && !document.querySelector('header').textContent.includes('Ctx'));
+      check('Dashboard topbar shows Dashboard breadcrumb and hides terminal tools and quota strip', document.querySelector('header').textContent.includes('Dashboard') && !document.getElementById('oneai-terminal-tools') && !document.querySelector('header .quota-bar') && !document.querySelector('header').textContent.includes('Ctx') && document.querySelector('header [data-topbar-neon]')?.dataset.topbarNeon === 'idle' && getComputedStyle(document.querySelector('header .topbar-neon-beam')).animationName === 'none');
       check('Dashboard renders 4 KPI cards with deduplicated session count and estimated USD cost', dash.querySelector('[data-kpi="tokens"]').textContent.includes('4.33 M') && dash.querySelector('[data-kpi="sessions"]').textContent.includes('5') && dash.querySelector('[data-kpi="cost"]').textContent.includes('$6.45') && dash.querySelector('[data-kpi="cache"]').textContent.includes('%'));
       check('Dashboard renders 12-month heatmap with active and hatched missing cells', dash.querySelectorAll('[data-dashboard-cell]').length >= 364 && dash.querySelectorAll('[data-dashboard-cell][data-status="active"]').length === 6 && dash.querySelectorAll('[data-dashboard-cell][data-status="missing"]').length > 200);
       const dashHeader = dash.querySelector('[data-dashboard-header]');

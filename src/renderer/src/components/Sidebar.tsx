@@ -555,6 +555,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                 {tasksOf(folder.path).map((task) => {
                   const order = taskOrder.get(task.id) ?? 0;
                   const isActive = !isDashboardActive && task.id === activeTaskId;
+                  const isRunning = task.status === 'running';
                   const statusMeta = TASK_STATUS_META[task.status];
                   const isUnread = !isActive && Boolean(unreadTaskIds?.has(task.id));
                   const account = accountOf(task);
@@ -577,11 +578,12 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                       aria-current={isActive ? 'true' : undefined}
                       title={`${t('{label}（{status}）', { label, status: `${statusMeta.label}${isUnread ? t('，待查看') : ''}` })}${order <= 9 ? ` Ctrl+${order}` : ''}`}
                       aria-label={t('{label}，{status}', { label, status: `${statusMeta.label}${isUnread ? t('，待查看') : ''}` })}
-                      className={`relative flex h-9 w-9 shrink-0 items-center justify-center ${order >= 10 ? 'gap-0.5' : 'gap-1'} rounded-md font-mono text-xs tabular-nums transition-colors ${isActive ? 'bg-selected font-medium text-fg' : isUnread ? 'bg-accent font-semibold text-canvas hover:bg-accent/85' : 'text-fg-subtle hover:bg-hover hover:text-fg'}`}
+                      className={`relative flex h-9 w-9 shrink-0 items-center justify-center ${order >= 10 ? 'gap-0.5' : 'gap-1'} rounded-md font-mono text-xs tabular-nums transition-colors ${isActive ? 'bg-selected font-medium text-fg' : isUnread ? 'bg-accent font-semibold text-canvas hover:bg-accent/85' : 'text-fg-subtle hover:bg-hover hover:text-fg'} ${isRunning ? 'task-neon-running' : ''}`}
                     >
+                      {isRunning && <span className="task-neon-ring" aria-hidden="true" data-task-neon="running" />}
                       {order < 100 && <BrandIcon icon={cli?.icon ?? task.groupId} size={11} />}
                       <span>{order}</span>
-                      <span className={`absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full ${statusMeta.dot} ${isUnread ? 'ring-1 ring-canvas' : ''}`} aria-hidden="true" />
+                      <span className={`absolute right-0.5 top-0.5 z-[2] h-1.5 w-1.5 rounded-full ${statusMeta.dot} ${isUnread ? 'ring-1 ring-canvas' : ''}`} aria-hidden="true" />
                     </button>
                   );
                 })}
@@ -847,6 +849,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
 
                     {folderTasks.map((task) => {
                       const isActive = !isDashboardActive && task.id === activeTaskId;
+                      const isRunning = task.status === 'running';
                       const statusMeta = TASK_STATUS_META[task.status];
                       const isUnread = !isActive && Boolean(unreadTaskIds?.has(task.id));
                       const cli = cliOf(task);
@@ -864,9 +867,10 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                           <div
                             key={task.id}
                             data-task-id={task.id}
-                            className="relative flex items-center rounded-md bg-selected/60 text-ui"
+                            className={`relative flex items-center rounded-md bg-selected/60 text-ui ${isRunning ? 'task-neon-running' : ''}`}
                           >
-                            {isActive && <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-accent" aria-hidden="true" />}
+                            {isRunning && <span className="task-neon-ring" aria-hidden="true" data-task-neon="running" />}
+                            {isActive && !isRunning && <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-accent" aria-hidden="true" />}
                             <div className={`flex min-w-0 flex-1 flex-col justify-center pl-2.5 pr-2 ${hasSummary ? 'min-h-[2.75rem] gap-0.5 py-1' : 'h-8'}`}>
                               <div className="flex w-full min-w-0 items-center gap-2">
                                 <BrandIcon icon={cli?.icon ?? task.groupId} size={16} />
@@ -943,11 +947,12 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                               : isUnread
                                 ? 'font-medium text-fg hover:bg-hover'
                                 : 'text-fg-subtle hover:bg-hover hover:text-fg'
-                          } ${draggedTask?.id === task.id ? 'opacity-50' : draggedTask && draggedTask.folder !== key ? 'opacity-45' : ''} ${
+                          } ${isRunning ? 'task-neon-running' : ''} ${draggedTask?.id === task.id ? 'opacity-50' : draggedTask && draggedTask.folder !== key ? 'opacity-45' : ''} ${
                             dropEdge === 'before' ? 'shadow-[inset_0_2px_0_rgb(var(--color-accent))]' : dropEdge === 'after' ? 'shadow-[inset_0_-2px_0_rgb(var(--color-accent))]' : ''
                           }`}
                         >
-                          {isActive && <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-accent" aria-hidden="true" />}
+                          {isRunning && <span className="task-neon-ring" aria-hidden="true" data-task-neon="running" />}
+                          {isActive && !isRunning && <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-accent" aria-hidden="true" />}
                           <button
                             type="button"
                             data-keep-focus
