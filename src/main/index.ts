@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, clipboard, shell, dialog, Menu, screen, session } from 'electron';
+import { app, BrowserWindow, ipcMain, clipboard, shell, dialog, Menu, screen, session, Tray, type IpcMainEvent } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -32,7 +32,14 @@ const __dirname = path.dirname(__filename);
 
 let mainWindow: BrowserWindow | null = null;
 let windowStateTracker: WindowStateTracker | null = null;
-let allowCloseForUpdate = false;
+let appQuitting = false;
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.focus();
+}
 
 function createWindow() {
   const preloadCandidate = path.join(__dirname, '../preload/index.cjs');
@@ -139,28 +146,75 @@ function createWindow() {
 
   // 还有终端进程在运行时，关闭窗口先交给界面确认，避免误关丢掉所有 CLI 会话
   let closeConfirmed = false;
+  let closeRequestedAt = 0;
+  let quitFromTray = false;
+  let tray: Tray | null = null;
+  const setCloseToTray = (event: IpcMainEvent, enabled: unknown) => {
+    if (process.platform !== 'win32' || event.sender !== mainWindow?.webContents || typeof enabled !== 'boolean') return;
+    if (!enabled) {
+      if (!tray) return;
+      tray.destroy();
+      tray = null;
+      if (!mainWindow?.isVisible()) showMainWindow();
+      return;
+    }
+    if (tray) return;
+    try {
+      tray = new Tray(path.resolve(__dirname, '../../resources/icon.ico'));
+      tray.setToolTip('OneAI');
+      tray.on('double-click', showMainWindow);
+      tray.on('right-click', () => {
+        tray?.popUpContextMenu(Menu.buildFromTemplate([{
+          label: t('退出 OneAI'),
+          click: () => {
+            if (quitFromTray || !mainWindow || mainWindow.isDestroyed()) return;
+            quitFromTray = true;
+            mainWindow.close();
+          },
+        }]));
+      });
+    } catch (error) {
+      tray?.destroy();
+      tray = null;
+      console.error('[OneAI] Failed to create the tray icon:', error);
+    }
+  };
+  ipcMain.on('window:set-close-to-tray', setCloseToTray);
   ipcMain.removeAllListeners('window:confirm-close');
   ipcMain.on('window:confirm-close', () => {
     closeConfirmed = true;
     mainWindow?.close();
   });
-  let closeRequestedAt = 0;
   // 系统关机或注销时不拦截
   mainWindow.on('session-end', () => { closeConfirmed = true; });
   mainWindow.on('close', (event) => {
     const win = mainWindow;
-    if (closeConfirmed || allowCloseForUpdate || !win || ptyManager.aliveCount() === 0 || win.webContents.isCrashed()) return;
+    if (closeConfirmed || appQuitting || !win || win.webContents.isCrashed()) return;
+    if (tray && !quitFromTray) {
+      event.preventDefault();
+      win.hide();
+      return;
+    }
+    const aliveCount = ptyManager.aliveCount();
+    if (aliveCount === 0) return;
     // 界面没有响应确认请求时，隔 1.5 秒以上再点一次关闭就直接关，避免窗口关不掉
     const now = Date.now();
     if (closeRequestedAt && now - closeRequestedAt > 1500) return;
     closeRequestedAt = now;
     event.preventDefault();
-    win.webContents.send('window:close-request', ptyManager.aliveCount());
+    if (quitFromTray) showMainWindow();
+    win.webContents.send('window:close-request', aliveCount);
   });
   ipcMain.removeAllListeners('window:cancel-close');
-  ipcMain.on('window:cancel-close', () => { closeRequestedAt = 0; });
+  ipcMain.on('window:cancel-close', () => {
+    closeRequestedAt = 0;
+    quitFromTray = false;
+  });
 
   mainWindow.on('closed', () => {
+    ipcMain.removeListener('window:set-close-to-tray', setCloseToTray);
+    tray?.destroy();
+    tray = null;
     clearTimeout(showFallbackTimer);
     if (bgStartupTimer) {
       clearTimeout(bgStartupTimer);
@@ -184,7 +238,7 @@ function setupIPC() {
   setupGitBranch();
   setupTaskSummary();
   setupUpdater(() => mainWindow, () => {
-    allowCloseForUpdate = true;
+    appQuitting = true;
     ptyManager.destroyAll();
   });
   ipcMain.handle('history:list', (_event, accounts) => listSessionHistory(Array.isArray(accounts) ? accounts : []));
@@ -225,6 +279,8 @@ function setupIPC() {
   ipcMain.handle('terminal:get-snapshot', async (_event, { id }) => {
     return ptyManager.getSessionSnapshot(id);
   });
+  ipcMain.handle('terminal:shell-activity', (_event, ids: unknown) =>
+    Array.isArray(ids) ? ptyManager.getSessionShellActivity(ids) : null);
 
   ipcMain.on('terminal:acknowledge', (_event, { id, seq }) => ptyManager.acknowledge(id, seq));
 
@@ -431,12 +487,7 @@ async function cleanupPastedImages(): Promise<void> {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    if (!mainWindow.isVisible()) mainWindow.show();
-    mainWindow.focus();
-  });
+  app.on('second-instance', showMainWindow);
 }
 
 app.whenReady().then(() => {
@@ -456,6 +507,7 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', () => {
+  appQuitting = true;
   // localStorage（设置、引导状态）由 Chromium 延迟写盘，退出前主动刷盘，避免最近的改动丢失
   try { session.defaultSession.flushStorageData(); } catch {}
   quotaService.stopPolling();

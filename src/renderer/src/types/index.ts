@@ -120,13 +120,14 @@ export interface AppSettings {
   onboardingDone: boolean; // 首次引导（选择语言、认识各入口）是否已完成；完成后不再弹出
   theme: 'system' | ThemeId; // 应用主题，默认跟随系统（仅在 light / dark 间切换）
   voiceReminderEnabled: boolean; // 工作满提醒时长时是否语音播报
-  taskDoneSoundEnabled: boolean; // 任务由运行中转为等待输入（输出停止）时播放提示音，默认 true
+  taskDoneSoundEnabled: boolean; // 任务由运行中转为等待输入或终端退出时播放提示音，默认 true
   taskDoneSoundVolume: number; // 提示音音量 (0 ~ 100, 默认 60)
   taskDoneSoundBackgroundOnly: boolean; // 仅当该任务不在当前视窗（非当前任务或窗口失焦）时才响，默认 false
   workReminderHours: number; // 工作时长提醒的间隔小时数，默认 1（1 ~ 12 的整数）
   terminalFontSize: number;   // 终端代码字体大小 (12 ~ 24, 默认 15)
   terminalLineHeight: number; // 终端行高 (1.2 ~ 1.6, 默认 1.3)
   uiScale: 'compact' | 'standard' | 'comfortable' | 'large'; // 界面全局字体缩放
+  closeToTray: boolean; // 关闭窗口时隐藏到 Windows 系统托盘，默认 false
   terminalCursorStyle: 'bar' | 'block' | 'underline'; // 终端光标样式 (默认 'bar')
   terminalCursorBlink: boolean; // 终端光标闪烁 (默认 true)
   terminalLinkClick: boolean; // 终端链接无需按住 Ctrl，单击即打开，默认 false
@@ -158,6 +159,7 @@ export interface ElectronTerminalAPI {
   onWindowCloseRequest?: (callback: (aliveCount: number) => void) => () => void;
   confirmWindowClose?: () => void;
   cancelWindowClose?: () => void;
+  setCloseToTray?: (enabled: boolean) => void;
   selectWorkspaceDirectory?: (currentPath?: string) => Promise<string | null>;
   listMusic?: (dir?: string) => Promise<{ directory: string; tracks: Array<{ name: string; path: string }> }>;
   readMusic?: (filePath: string) => Promise<Uint8Array | null>;
@@ -187,6 +189,7 @@ export interface ElectronTerminalAPI {
   getSessionBuffer: (id: string) => Promise<string>;
   acknowledgeSession?: (id: string, seq: number) => void;
   getSessionSnapshot?: (id: string) => Promise<SessionSnapshot>;
+  getSessionShellActivity?: (ids: string[]) => Promise<string[] | null>;
   /** 会话不存在（已退出或尚未启动）时返回 false */
   writeSession: (id: string, data: string) => Promise<boolean>;
   resizeSession: (id: string, cols: number, rows: number) => Promise<void>;

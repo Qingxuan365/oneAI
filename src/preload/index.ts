@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   confirmWindowClose: () => ipcRenderer.send('window:confirm-close'),
   cancelWindowClose: () => ipcRenderer.send('window:cancel-close'),
+  setCloseToTray: (enabled: boolean) => ipcRenderer.send('window:set-close-to-tray', enabled),
   selectWorkspaceDirectory: (currentPath?: string) => ipcRenderer.invoke('workspace:select-directory', currentPath),
   listMusic: (dir?: string) => ipcRenderer.invoke('music:list', dir),
   readMusic: (filePath: string) => ipcRenderer.invoke('music:read', filePath),
@@ -70,6 +71,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   getSessionSnapshot: (id: string) =>
     ipcRenderer.invoke('terminal:get-snapshot', { id }),
+
+  getSessionShellActivity: (ids: string[]) =>
+    ipcRenderer.invoke('terminal:shell-activity', ids),
 
   writeSession: (id: string, data: string) =>
     ipcRenderer.invoke('terminal:write', { id, data }),

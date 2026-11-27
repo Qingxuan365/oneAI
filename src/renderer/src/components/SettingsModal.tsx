@@ -310,6 +310,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 ))}
               </Section>
 
+              <Section title={t('窗口行为')}>
+                <div className={row}>
+                  <span>
+                    <span className="block">{t('关闭时隐藏到系统托盘')}</span>
+                    <span className="block text-xs text-fg-faint">{t('终端继续在后台运行，双击托盘图标恢复窗口。')}</span>
+                  </span>
+                  <Switch label={t('关闭时隐藏到系统托盘')} checked={settings.closeToTray === true} onChange={(checked) => update({ closeToTray: checked })} />
+                </div>
+              </Section>
+
               <Section title={t('界面缩放')} hint={t('侧栏、顶栏、状态栏与弹窗的文字和元素大小')}>
                 <div className="grid grid-cols-2 gap-2" role="group" aria-label={t('界面全局字体与元素缩放')}>
                   {UI_SCALES.map((scale) => (

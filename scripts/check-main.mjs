@@ -80,6 +80,8 @@ try {
         import fs from 'node:fs';
         import fsp from 'node:fs/promises';
         import path from 'node:path';
+        import { fork } from 'node:child_process';
+        import { once } from 'node:events';
 
         const fixtureRoot = process.env.ONEAI_CHECK_FIXTURE_ROOT!;
         (globalThis as any).__ONEAI_TEST_PATHS__ = {
@@ -93,6 +95,8 @@ try {
         fs.mkdirSync(path.join(fixtureRoot, 'userData'), { recursive: true });
 
         import { PtyManager, PtyOutputBatcher } from './src/main/pty-manager';
+        import { findActiveShellRoots, terminalShellReader } from './src/main/terminal-shell-activity';
+        import { CounterReader } from './src/main/system-stats';
         import { computeSessionUsage, parseAgyUsage, parseAgyUsageGroups, parseTomlStrings, readCodexRateWindows } from './src/main/quota-service';
         import { estimateModelCostUsd } from './src/main/model-pricing';
         import { buildDashboardStats, readDiskCache, scheduleSaveDiskCache } from './src/main/usage-stats';
@@ -152,6 +156,59 @@ try {
           const s2LastSeq = events.filter((e) => e.id === 's2').at(-1)!.seq;
           assert.equal(s2Text, big);
           assert.equal(s2LastSeq, 100 + big.length);
+        });
+
+        test('shell activity belongs to its PTY and ignores service branches and recycled parents', () => {
+          const root = (id: number) => [id + ',1,100,shell', (id + 1) + ',' + id + ',101,cli'];
+          const records = [
+            ...root(10), '12,11,102,shell', '13,11,103,shell',
+            ...root(20), '22,21,102,service', '23,22,103,shell',
+            ...root(30), '32,31,110,other', '33,32,105,shell',
+            ...root(40), '42,41,102,other', '43,42,103,shell',
+            ...root(50), '52,50,102,shell', '53,52,103,cli',
+            '70,71,100,shell', '71,72,100,other', '72,71,100,other',
+          ];
+          const roots = [10, 20, 30, 40, 50];
+          assert.deepEqual([...findActiveShellRoots(records.join(';'), roots)], [10, 40]);
+          assert.deepEqual([...findActiveShellRoots(records.filter((row) => !row.startsWith('12,')).join(';'), roots)], [10, 40]);
+          assert.deepEqual([...findActiveShellRoots(records.filter((row) => !/^1[23],/.test(row)).join(';'), roots)], [40]);
+        });
+
+        test('Windows sampler sees a silent command under a Pi-style Node CLI and clears it after exit', { skip: process.platform !== 'win32' }, async () => {
+          const cliPath = path.join(fixtureRoot, 'pi-coding-agent', 'cli.js');
+          await fsp.mkdir(path.dirname(cliPath), { recursive: true });
+          await fsp.writeFile(path.join(path.dirname(cliPath), 'package.json'), '{"type":"commonjs"}');
+          await fsp.writeFile(cliPath, [
+            "const { spawn } = require('node:child_process');",
+            "const child = spawn('powershell.exe', ['-NoProfile', '-Command', 'Start-Sleep -Seconds 30'], { windowsHide: true, stdio: 'ignore' });",
+            "child.on('spawn', () => process.send('running'));",
+            "child.on('exit', () => process.send('ended'));",
+            "process.on('message', () => child.kill());",
+            "process.on('disconnect', () => child.kill());",
+          ].join('\\n'));
+          const cli = fork(cliPath, [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+          const nextMessage = async () => (await once(cli, 'message', { signal: AbortSignal.timeout(5_000) }))[0];
+          const otherReader = new CounterReader("while ($null -ne [Console]::In.ReadLine()) { [Console]::Out.WriteLine('ok') }");
+          try {
+            assert.equal(await nextMessage(), 'running');
+            const snapshot = await terminalShellReader.read();
+            assert.ok(snapshot);
+            assert.ok(findActiveShellRoots(snapshot, [process.pid]).has(process.pid));
+            assert.equal(await otherReader.read(), 'ok');
+            const inFlight = terminalShellReader.read();
+            otherReader.dispose();
+            assert.ok(await inFlight, 'disabling another sampler does not interrupt shell activity');
+            const ended = nextMessage();
+            cli.send('stop');
+            assert.equal(await ended, 'ended');
+            const after = await terminalShellReader.read();
+            assert.ok(after);
+            assert.equal(findActiveShellRoots(after, [process.pid]).has(process.pid), false);
+          } finally {
+            if (cli.connected) cli.disconnect();
+            otherReader.dispose();
+            terminalShellReader.dispose();
+          }
         });
 
         test('PtyManager snapshot, fast-exit tracking, restart fresh options and command wrapping', async () => {

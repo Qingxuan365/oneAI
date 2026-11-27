@@ -7,6 +7,7 @@ import { buildAccountEnv, SessionAccount } from './account-env';
 import { setBoundedMap } from './fs-utils';
 import { SessionCreateResult, SessionSnapshot } from '../shared/types';
 import { t } from './i18n';
+import { findActiveShellRoots, terminalShellReader } from './terminal-shell-activity';
 
 export interface CreateSessionOptions {
   id: string;
@@ -407,6 +408,19 @@ export class PtyManager {
     return true;
   }
 
+  public async getSessionShellActivity(ids: string[]): Promise<string[] | null> {
+    const requested = new Set(ids);
+    const sessions = [...this.sessions].filter(([id]) => requested.has(id));
+    if (sessions.length === 0) {
+      terminalShellReader.dispose();
+      return [];
+    }
+    const snapshot = await terminalShellReader.read();
+    if (snapshot === null) return null;
+    const active = findActiveShellRoots(snapshot, sessions.map(([, session]) => session.pid));
+    return sessions.filter(([id, session]) => this.sessions.get(id) === session && active.has(session.pid)).map(([id]) => id);
+  }
+
   public resizeSession(id: string, cols: number, rows: number) {
     const safeCols = Math.max(1, cols);
     const safeRows = Math.max(1, rows);
@@ -474,6 +488,7 @@ export class PtyManager {
   }
 
   public destroyAll() {
+    terminalShellReader.dispose();
     this.generations.clear();
     this.starting.clear();
     for (const [id, session] of this.sessions) {

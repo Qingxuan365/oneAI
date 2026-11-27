@@ -145,13 +145,12 @@ function getCounterWorker(): Worker {
  */
 function shutdownCounterWorker(): void {
   const worker = counterWorker;
-  if (!worker) return;
+  if (!worker || counterListeners.size > 0) return;
   counterWorker = null;
   worker.postMessage({ type: 'shutdown' });
-  for (const listener of [...counterListeners.values()]) listener({ type: 'exit', key: -1 });
 }
 
-class CounterReader {
+export class CounterReader {
   /** 当前进程的编号；为 0 表示没有在运行的进程，读取时再启动 */
   private key = 0;
   private waiter: ((line: string | null) => void) | null = null;
@@ -216,6 +215,7 @@ class CounterReader {
   dispose(): void {
     const key = this.release();
     if (key) counterWorker?.postMessage({ type: 'kill', key });
+    shutdownCounterWorker();
   }
 }
 

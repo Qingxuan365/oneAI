@@ -317,6 +317,10 @@ await build({
     };
     // 卸载当前界面：TerminalViewport 在挂载时订阅数据流，换掉 onSessionData 桩后需重新挂载
     window.clearRoot = () => flushSync(() => root.render(<div />));
+    window.drawWorkbench = async () => {
+      const { App } = await import('./src/renderer/src/App');
+      flushSync(() => root.render(<App />));
+    };
     // 两个任务：active 可见，另一个隐藏；用于检查隐藏终端的合并写入
     window.drawTermPair = (active) => {
       const tasks = ['pair-a', 'pair-b'].map((id) => ({ id, groupId: 'codex', title: id, status: 'running', cwd: 'D:/GitHub/OneAI', createdAt: 1 }));
@@ -1073,11 +1077,20 @@ app.whenReady().then(async () => {
       try {
       const tabLabels = () => [...document.querySelectorAll('[role="tab"]')].map(t => t.textContent.trim()).join('|');
       [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.includes('外观')).click(); await tick();
+      const traySwitch = (label) => [...document.querySelectorAll('[role="switch"]')].find(button => button.getAttribute('aria-label') === label);
+      const trayLabel = '关闭时隐藏到系统托盘';
+      check('settings without a tray preference default to closing normally', traySwitch(trayLabel)?.getAttribute('aria-checked') === 'false');
+      traySwitch(trayLabel).click(); await tick();
+      check('the tray switch saves the enabled preference', window.currentSettings().closeToTray === true && traySwitch(trayLabel)?.getAttribute('aria-checked') === 'true');
       const langBtn = name => [...document.querySelectorAll('[aria-label="界面语言"] button, [aria-label="介面語言"] button, [aria-label="Interface language"] button')].find(b => b.textContent.trim() === name);
       check('appearance page offers all three languages with the current one pressed', langBtn('简体中文')?.getAttribute('aria-pressed') === 'true' && langBtn('繁體中文')?.getAttribute('aria-pressed') === 'false' && langBtn('English')?.getAttribute('aria-pressed') === 'false');
       langBtn('繁體中文').click(); await tick(150);
+      check('the tray switch keeps its state in Traditional Chinese', traySwitch('關閉時隱藏至系統匣')?.getAttribute('aria-checked') === 'true');
       check('Traditional Chinese updates settings, renderer locale, and the main-process bridge', window.currentSettings().language === 'zh-TW' && tabLabels() === '外觀|時間|終端|帳號|CLI|提醒|快速鍵|關於' && document.documentElement.lang === 'zh-TW' && window.mainLanguage === 'zh-TW' && window.getDateLocale() === 'zh-TW');
       langBtn('English').click(); await tick(300);
+      const trayLabelEn = 'Hide to the system tray on close';
+      traySwitch(trayLabelEn).click(); await tick();
+      check('the English tray switch can turn the preference off', window.currentSettings().closeToTray === false && traySwitch(trayLabelEn)?.getAttribute('aria-checked') === 'false');
       check('choosing English stores the language setting', window.currentSettings().language === 'en');
       check('settings tabs switch to English at once', tabLabels() === 'Appearance|Time|Terminal|Account|CLI|Reminders|Shortcuts|About');
       check('theme names follow the language', [...document.querySelectorAll('[aria-label="Eye-care theme colors"] button')].map(b => b.textContent.trim()).join('|') === 'Bean Green|Parchment|Lavender|Mist Gray|Warm Night|Arctic Gray Blue|Forest Night|Ink Night');
@@ -1882,6 +1895,132 @@ app.whenReady().then(async () => {
       window.drawUpdateModal({ ...updAvailable, phase: 'downloaded' }); await wait(60);
       check('UpdateModal triggers install on downloaded state', ([...document.querySelectorAll('[role="dialog"] button')].find(b => b.textContent.includes('立即重启并安装')).click(), window.events.includes('update-install')));
       window.clearRoot();
+      return checks;
+    })()\`));
+    result.push(...await win.webContents.executeJavaScript(\`(async () => {
+      const checks = [];
+      const check = (name, ok) => checks.push({ name, ok: Boolean(ok) });
+      const wait = () => new Promise(resolve => setTimeout(resolve, 30));
+      const clis = ['claude', 'codex', 'agy', 'kimi', 'pi'];
+      const cwd = 'D:/workbench-shell-check';
+      const row = id => document.querySelector('[data-task-id="' + id + '"]');
+      const running = id => row(id)?.querySelector('[data-task-neon="running"]');
+      const api = window.electronAPI;
+      const oldDateNow = Date.now;
+      const oldSetInterval = window.setInterval;
+      const oldClearInterval = window.clearInterval;
+      const originalCreateOscillator = AudioContext.prototype.createOscillator;
+      let now = Date.now();
+      let tones = 0;
+      let sampledIds = [];
+      let activeShells = [];
+      let delayedSample;
+      let delaySample = false;
+      const output = new Set();
+      const exits = new Set();
+      const subscribe = listeners => callback => { listeners.add(callback); return () => listeners.delete(callback); };
+      let tickId = 0;
+      const ticks = new Map();
+      Date.now = () => now;
+      window.setInterval = (fn, ms, ...args) => {
+        if (ms !== 1000) return oldSetInterval(fn, ms, ...args);
+        const id = --tickId;
+        ticks.set(id, () => fn(...args));
+        return id;
+      };
+      window.clearInterval = id => { if (!ticks.delete(id)) oldClearInterval(id); };
+      AudioContext.prototype.createOscillator = function () {
+        tones++;
+        return originalCreateOscillator.call(this);
+      };
+      const advance = async (ms) => {
+        now += ms;
+        for (const tick of ticks.values()) tick();
+        await wait();
+      };
+      try {
+        localStorage.setItem('oneai_state_v2', JSON.stringify({
+          tasks: clis.map(id => ({ id, groupId: id, title: id, status: 'stopped', cwd, createdAt: now })),
+          folders: [{ path: cwd, isExpanded: true }],
+          activeTaskId: clis[0], lastFolder: cwd, extraClis: [],
+        }));
+        localStorage.setItem('onedesktop_settings', JSON.stringify({ language: 'zh-CN', onboardingDone: true, taskDoneSoundEnabled: true }));
+        window.electronAPI = {
+          ...api, detectClis: async () => clis.map(id => ({ id, name: id, command: id })),
+          createSession: async () => ({ success: true }),
+          getAllQuotas: async () => ({}), onQuotaUpdate: () => () => {},
+          onSessionData: subscribe(output), onSessionExit: subscribe(exits),
+          getSessionBuffer: async () => '', writeSession: async () => true,
+          resizeSession: async () => {}, setTitleBarOverlay: () => {},
+          getSessionShellActivity: async ids => {
+            sampledIds = ids;
+            if (delaySample) return new Promise(resolve => { delayedSample = resolve; });
+            return activeShells;
+          },
+        };
+        await window.drawWorkbench();
+        await wait();
+        for (const id of clis.slice(1)) {
+          row(id).querySelector('button').click();
+          await wait();
+        }
+        activeShells = clis;
+        for (let i = 0; i < 12; i++) await advance(1000);
+        check('all five CLI sessions remain running for a silent shell', sampledIds.length === 5 && clis.every(id => running(id)));
+        check('silent running shells suppress completion sounds and review marks', tones === 0 && clis.every(id => !row(id)?.textContent.includes('待查看')));
+        activeShells = clis.slice(1);
+        await advance(2000);
+        await advance(5000);
+        await advance(1000);
+        check('ending a shell returns only its own session to waiting and plays one chime', row('claude')?.textContent.includes('等待输入') && clis.slice(1).every(id => running(id)) && tones === 2);
+        await advance(6000);
+        await advance(1000);
+        check('finished background shell gets its review mark without repeating the chime', row('claude')?.textContent.includes('待查看') && tones === 2);
+        now += 1100; // Let any terminal resize echo window expire before simulating command output.
+        for (const callback of output) callback({ id: 'claude', data: 'Command started' });
+        await wait();
+        await advance(2000);
+        delaySample = true;
+        await advance(3000);
+        check('a pending shell sample prevents a premature waiting state and chime', delayedSample && running('claude') && tones === 2);
+        delaySample = false;
+        activeShells = clis;
+        delayedSample(activeShells);
+        await wait();
+        check('a positive shell result keeps the session in running without an extra chime', running('claude') && tones === 2);
+        delaySample = true;
+        await advance(2000);
+        for (const callback of exits) callback({ id: 'codex', exitCode: 0 });
+        await wait();
+        check('terminal exit takes precedence immediately while a shell sample is pending', row('codex')?.textContent.includes('已停止') && !running('codex'));
+        now += 1;
+        row('codex').querySelector('button').click();
+        await wait();
+        delaySample = false;
+        activeShells = clis.filter(id => id !== 'codex');
+        delayedSample(clis);
+        await wait();
+        check('a pre-exit sample cannot promote a relaunched session from idle to running', row('codex')?.textContent.includes('空闲') && !running('codex'));
+        check('terminal exit plays its own chime once while a sample is pending', tones === 4);
+        await advance(6000);
+        now += 1100;
+        for (const callback of output) callback({ id: 'codex', data: 'Command started' });
+        await wait();
+        await advance(2000);
+        delaySample = true;
+        await advance(3000);
+        delaySample = false;
+        delayedSample(activeShells);
+        await wait();
+        check('a negative sample settles an already quiet session without waiting for another timer tick', row('codex')?.textContent.includes('等待输入') && tones === 6);
+      } finally {
+        window.clearRoot();
+        window.electronAPI = api;
+        Date.now = oldDateNow;
+        window.setInterval = oldSetInterval;
+        window.clearInterval = oldClearInterval;
+        AudioContext.prototype.createOscillator = originalCreateOscillator;
+      }
       return checks;
     })()\`));
     {

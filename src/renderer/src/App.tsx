@@ -44,6 +44,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   terminalFontSize: 15,
   terminalLineHeight: 1.3,
   uiScale: 'comfortable',
+  closeToTray: false,
   terminalCursorStyle: 'bar',
   terminalCursorBlink: true,
   terminalSmoothScroll: false,
@@ -66,6 +67,9 @@ const appOpenedAt = Date.now();
 // 状态点较快回到「空闲」；未读标记与提示音用更长的静默时间确认，避免长推理、工具调用间隙误报
 const IDLE_AFTER_MS = 4_000;
 const DONE_NOTIFY_AFTER_MS = 10_000;
+const SHELL_POLL_INTERVAL_MS = 2_000;
+const SHELL_ACTIVITY_TTL_MS = 6_000;
+const SHELL_ACTIVITY_CLIS = new Set(['claude', 'codex', 'agy', 'kimi', 'pi']);
 const STARTUP_GRACE_MS = 5_000;
 const DEFAULT_PREVIEW_WIDTH = 420;
 
@@ -178,18 +182,22 @@ export const App: React.FC = () => {
   };
   const notify = useCallback((title: string, message: string) => askConfirm({ title, message, notice: true, confirmLabel: t('知道了') }), [askConfirm]);
 
-  // 关闭窗口时仍有终端进程在运行：先确认，再通知主进程真正关闭
+  // 退出时仍有终端进程在运行：先确认，再通知主进程关闭窗口
   useEffect(() => window.electronAPI?.onWindowCloseRequest?.(async (aliveCount) => {
     if (await askConfirm({
-      title: t('关闭 OneAI'),
-      message: t('还有 {n} 个终端进程在运行，关闭窗口会全部终止。', { n: aliveCount }),
-      confirmLabel: t('关闭并终止'),
+      title: t('退出 OneAI'),
+      message: t('还有 {n} 个终端进程在运行，退出 OneAI 会终止这些进程。', { n: aliveCount }),
+      confirmLabel: t('退出并终止'),
       danger: true,
     })) window.electronAPI?.confirmWindowClose?.();
     else window.electronAPI?.cancelWindowClose?.();
   }), [askConfirm]);
   // 字体与外观设置状态（自动持久化到 localStorage）
   const [settings, setSettings] = useState<AppSettings>(loadSavedSettings);
+  const closeToTray = settings.closeToTray === true;
+  useEffect(() => {
+    window.electronAPI?.setCloseToTray?.(closeToTray);
+  }, [closeToTray]);
   // 先于子组件渲染切换界面语言，t() 才能在本次渲染里取到新语言的译文
   setLanguage(settings.language);
   // 状态栏关闭时让主进程停止整机资源采样并结束常驻 PowerShell，打开后恢复
@@ -587,6 +595,7 @@ export const App: React.FC = () => {
       // 监听终端进程退出事件，将对应任务状态翻转为 'stopped'
       const unsub = window.electronAPI.onSessionExit(({ id, exitCode }) => {
         const exited = tasksRef.current.find((t) => t.id === id);
+        startedAtRef.current.delete(id);
         if (!exited) {
           if (earlyExitedIdsRef.current.size >= 64) {
             const oldest = earlyExitedIdsRef.current.keys().next().value;
@@ -783,49 +792,132 @@ export const App: React.FC = () => {
     return quota;
   }, [quotas, currentGroup, activeTask, summaries]);
 
-  // 状态检测：任务启动后默认「空闲」，有持续输出时为「运行中」，连续 IDLE_AFTER_MS 没有输出转为「等待输入」，再有输出又回到运行中；
-  // 提示音在转等待输入的那一刻响；静默满 DONE_NOTIFY_AFTER_MS 才标记未读（期间恢复输出则继续等待）。
-  // 只能判断输出静默，无法区分「已完成」与「在等待确认」，两者都显示为等待输入。
+  // 任务有可见输出或检测到命令 Shell 时显示运行中。两种活动都结束后开始计时，
+  // 转为等待输入时响提示音，静默满 DONE_NOTIFY_AFTER_MS 才标记未读。
   useEffect(() => {
     if (!window.electronAPI?.onSessionData) return;
     const lastOutput = lastOutputRef.current;
-    const pendingDone = new Set<string>();
-    const setStatus = (ids: string[], from: TaskSession['status'], to: TaskSession['status']) => {
+    const pendingDone = new Map<string, number>();
+    const activeShells = new Map<string, { startedAt: number; checkedAt: number }>();
+    const readShellActivity = window.electronAPI.getSessionShellActivity;
+    let lastShellPoll = 0;
+    let pollingStarts: Map<string, number | undefined> | null = null;
+    let hadShellCandidates = false;
+    let disposed = false;
+    const setRunning = (ids: string[], starts: ReadonlyMap<string, number | undefined>) => {
       if (ids.length === 0) return;
-      setTasks((prev) => prev.map((t) => ids.includes(t.id) && t.status === from ? { ...t, status: to } : t));
+      setTasks((prev) => prev.map((t) => ids.includes(t.id) &&
+        starts.get(t.id) === startedAtRef.current.get(t.id) &&
+        (t.status === 'idle' || t.status === 'waiting') ? { ...t, status: 'running' } : t));
     };
     const unsub = window.electronAPI.onSessionData(({ id, data }) => {
       if (!hasVisibleOutput(data)) return;
       const now = Date.now();
       lastOutput.set(id, now);
+      const startedAt = startedAtRef.current.get(id);
       // 启动阶段（欢迎横幅、会话恢复等）的输出、键盘输入的回显与改尺寸后的整屏重绘都不算运行中
-      if (now - (startedAtRef.current.get(id) ?? 0) < STARTUP_GRACE_MS || isUserEcho(id, now)) return;
+      if (startedAt === undefined || now - startedAt < STARTUP_GRACE_MS || isUserEcho(id, now)) return;
       const task = tasksRef.current.find((t) => t.id === id);
-      if (task?.status === 'idle' || task?.status === 'waiting') setStatus([id], task.status, 'running');
-      if (task && (task.status === 'idle' || task.status === 'waiting' || task.status === 'running')) pendingDone.add(id);
+      if (task?.status === 'idle' || task?.status === 'waiting') setRunning([id], new Map([[id, startedAt]]));
+      if (task && (task.status === 'idle' || task.status === 'waiting' || task.status === 'running')) pendingDone.set(id, startedAt);
     });
-    const timer = window.setInterval(() => {
-      const now = Date.now();
-      const currentIds = new Set(tasksRef.current.map((t) => t.id));
-      for (const id of [...lastOutput.keys()]) {
-        if (!currentIds.has(id)) { lastOutput.delete(id); startedAtRef.current.delete(id); forgetUserActivity(id); }
+    const pollShells = async (now: number) => {
+      if (!readShellActivity || pollingStarts || now - lastShellPoll < SHELL_POLL_INTERVAL_MS) return;
+      const candidates = tasksRef.current.filter((task) => SHELL_ACTIVITY_CLIS.has(task.groupId) && task.status !== 'starting' && isTaskAlive(task.status));
+      if (!hadShellCandidates && candidates.length === 0) return;
+      hadShellCandidates = candidates.length > 0;
+      const starts = new Map(candidates.map(({ id }) => [id, startedAtRef.current.get(id)]));
+      pollingStarts = starts;
+      try {
+        const ids = await readShellActivity([...starts.keys()]).catch(() => null);
+        if (disposed) return;
+        const checkedAt = Date.now();
+        if (ids === null) {
+          // On a missed sample, keep a recent positive result. After a longer
+          // loss of the sampler, let terminal output determine the status.
+          for (const [id, info] of activeShells) {
+            if (checkedAt - info.checkedAt > SHELL_ACTIVITY_TTL_MS) activeShells.delete(id);
+          }
+          return;
+        }
+        const active = new Set(ids);
+        const runningIds: string[] = [];
+        for (const task of tasksRef.current) {
+          const { id, status } = task;
+          const startedAt = startedAtRef.current.get(id);
+          if (startedAt === undefined || startedAt !== starts.get(id) || status === 'starting' || !isTaskAlive(status)) continue;
+          if (active.has(id)) {
+            activeShells.set(id, { startedAt, checkedAt });
+            lastOutput.set(id, checkedAt);
+            pendingDone.set(id, startedAt);
+            if (status === 'idle' || status === 'waiting') runningIds.push(id);
+          } else if (activeShells.get(id)?.startedAt === startedAt) {
+            activeShells.delete(id);
+            lastOutput.set(id, checkedAt);
+          }
+        }
+        setRunning(runningIds, starts);
+      } finally {
+        lastShellPoll = Date.now();
+        pollingStarts = null;
+        if (!disposed) settleQuietTasks(lastShellPoll);
       }
-      for (const id of [...pendingDone]) if (!currentIds.has(id)) pendingDone.delete(id);
-      const quietFor = (id: string) => now - (lastOutput.get(id) ?? now);
-      const waitingIds = tasksRef.current
-        .filter((t) => t.status === 'running' && quietFor(t.id) > IDLE_AFTER_MS)
-        .map((t) => t.id);
-      const doneIds = [...pendingDone].filter((id) => quietFor(id) > DONE_NOTIFY_AFTER_MS);
-      // 尚无输出记录的任务从现在开始计时
-      tasksRef.current.forEach((t) => { if (!lastOutput.has(t.id)) lastOutput.set(t.id, now); });
-      setStatus(waitingIds, 'running', 'waiting');
+    };
+    const quietFor = (id: string, now: number) => {
+      const startedAt = startedAtRef.current.get(id);
+      // A completion decision must wait for an in-flight sample of this PTY.
+      if (startedAt === undefined || activeShells.get(id)?.startedAt === startedAt || pollingStarts?.get(id) === startedAt) return 0;
+      return now - (lastOutput.get(id) ?? now);
+    };
+    const settleQuietTasks = (now: number) => {
+      const waiting = new Map(tasksRef.current
+        .filter((t) => t.status === 'running' && quietFor(t.id, now) > IDLE_AFTER_MS)
+        .map(({ id }) => [id, startedAtRef.current.get(id)]));
+      if (waiting.size > 0) {
+        setTasks((prev) => prev.map((t) => t.status === 'running' && waiting.has(t.id) &&
+          waiting.get(t.id) === startedAtRef.current.get(t.id) &&
+          quietFor(t.id, now) > IDLE_AFTER_MS ? { ...t, status: 'waiting' } : t));
+      }
+      const doneIds = [...pendingDone].filter(([id, startedAt]) =>
+        startedAt === startedAtRef.current.get(id) && quietFor(id, now) > DONE_NOTIFY_AFTER_MS).map(([id]) => id);
       doneIds.forEach((id) => pendingDone.delete(id));
       markUnread(doneIds);
-      // 提示音与状态点同步：运行中转等待输入的那一刻响
-      notifyDoneSound(waitingIds);
+    };
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      const current = new Map(tasksRef.current.map((t) => [t.id, t]));
+      for (const id of [...lastOutput.keys()]) {
+        if (!current.has(id)) { lastOutput.delete(id); startedAtRef.current.delete(id); forgetUserActivity(id); }
+      }
+      for (const [id, startedAt] of pendingDone) {
+        const task = current.get(id);
+        if (!task || task.status === 'starting' || !isTaskAlive(task.status) || startedAt !== startedAtRef.current.get(id)) pendingDone.delete(id);
+      }
+      for (const [id, info] of activeShells) {
+        const task = current.get(id);
+        if (!task || task.status === 'starting' || !isTaskAlive(task.status) ||
+            info.startedAt !== startedAtRef.current.get(id)) {
+          activeShells.delete(id);
+        }
+      }
+      // 尚无输出记录的任务从现在开始计时
+      tasksRef.current.forEach((t) => { if (!lastOutput.has(t.id)) lastOutput.set(t.id, now); });
+      void pollShells(now);
+      settleQuietTasks(now);
     }, 1000);
-    return () => { unsub?.(); window.clearInterval(timer); };
-  }, [markUnread, notifyDoneSound]);
+    return () => { disposed = true; unsub?.(); window.clearInterval(timer); };
+  }, [markUnread]);
+
+  const previousTasksForChime = useRef(tasks);
+  useEffect(() => {
+    const previous = previousTasksForChime.current;
+    previousTasksForChime.current = tasks;
+    if (!tasks.some((task) => task.status === 'waiting')) return;
+    const wasRunning = new Set(previous.filter((task) => task.status === 'running').map((task) => task.id));
+    // 只为实际提交的运行中 → 等待输入转换响铃，终端退出由退出事件处理。
+    notifyDoneSound(tasks.filter((task) => task.status === 'waiting' && wasRunning.has(task.id) &&
+      startedAtRef.current.has(task.id)).map((task) => task.id));
+  }, [tasks, notifyDoneSound]);
 
   const foldersRef = useRef(folders);
   foldersRef.current = folders;
