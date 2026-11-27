@@ -45,11 +45,13 @@ d:/GitHub/OneAI/
 │   │   ├── model-pricing.ts   # 公开模型 API 等值费率表，供 Dashboard 估算已收录模型的成本与价格覆盖率
 │   │   ├── usage-stats.ts     # 本周用量与 Dashboard 统计：流式解析 Claude Code / Codex（含 archived_sessions 与 .jsonl.zst，用 fzstd 解压）/ Antigravity（优先紧凑版 transcript.jsonl）/ Pi 本机会话记录（按文件 mtime + 大小缓存解析结果并持久化到 userData）
 │   │   ├── git-branch.ts      # 分支徽标读取 .git/HEAD，目录树通过本机 Git 列出并切换本地分支
+│   │   ├── git-commit.ts      # 目录树 Git 提交：读取仓库变更状态、单文件差异并精确提交所选文件到本地仓库
 │   │   ├── git-conflicts.ts   # 只读列出未解决 Git 冲突及其合并差异
 │   │   ├── account-env.ts     # 多账号：各 CLI 的配置目录环境变量、路径校验与目录创建，只创建目录不读凭据
 │   │   ├── account-login.ts   # 多账号：调用 CLI 自带状态命令判断登录状态（Kimi Code 只检查凭据文件是否存在）
-│   │   ├── cli-detect.ts      # 按 PATH 检测已知 CLI（清单取自 known-clis.json）与用户自定义 CLI 是否已安装，决定「+」菜单里可新建的 CLI
-│   │   ├── known-clis.json    # 已知 AI 编程 CLI 清单（id / 名称 / 命令），新增支持的 CLI 只改这里
+│   │   ├── cli-detect.ts      # 按 PATH 检测已知 CLI（清单取自 known-clis.json）与用户自定义 CLI 是否已安装，支持刷新 Windows 注册表 PATH 与检测 Git
+│   │   ├── cli-installer.ts   # 按队列串行执行已知推荐 CLI 的官方 Windows PowerShell 安装脚本、推送实时日志、支持中止并在装完刷新 PATH
+│   │   ├── known-clis.json    # 已知 AI 编程 CLI 清单（id / 名称 / 命令 / 可选 installer 元数据），新增支持的 CLI 只改这里
 │   │   ├── i18n.ts            # 主进程文案翻译（t()），语言由渲染进程通过 IPC 同步
 │   │   ├── file-preview.ts    # 文件预览：异步路径解析与只读读取，限制在任务 cwd 内（及粘贴/拖入图片白名单）
 │   │   ├── project-tree.ts    # 项目目录树：按层懒加载读取项目内目录（含实路径边界与符号链接防循环校验）
@@ -83,6 +85,8 @@ d:/GitHub/OneAI/
 │           ├── musicStreams.ts           # 在线音乐：id 生成、读取过滤与添加前校验
 │           ├── workspaceState.ts         # 文件夹树的状态：folderKey、排序、旧数据迁移、状态校验、最近任务归类与读写
 │           ├── accounts.ts               # 多账号：支持的 CLI 与登录命令、环境变量文本解析、账号校验
+│           ├── reviewPrompt.ts           # 任务右键「一键审核」：生成审核任务标题与单行代码审核提示词
+│           ├── workGreeting.ts           # 工作时间段与四时段问候语计算、格式校验与时间区间预览
 │           ├── previewHighlight.ts       # 文件预览语法高亮：按扩展名或文件名调用 highlight.js 分词并保留跨行作用域，跳过压缩单行与 > 1 MB 文件
 │           ├── components/
 │           │   ├── Sidebar.tsx           # 左侧品牌头部（Logo、标语、版本号）、Dashboard 入口、文件夹树（Git 分支、任务）与最近任务
@@ -97,6 +101,7 @@ d:/GitHub/OneAI/
 │           │   ├── FilePreviewPanel.tsx  # 终端右侧只读文件预览面板（Ctrl+单击终端路径打开，宽度可拖拽、持久化并支持双击重置）
 │           │   ├── HistoryModal.tsx      # 历史会话抽屉（顶栏右上角入口）：按日期分段，显示文件夹、分支与「已打开」
 │           │   ├── ProjectTreeDrawer.tsx # 项目目录树抽屉（顶栏右上角入口 / Ctrl+Shift+E）：懒加载目录树、筛选、预览与插入路径
+│           │   ├── GitCommitModal.tsx    # 目录树入口的本地 Git 提交弹窗（勾选变更文件、查看单文件差异、输入说明并提交）
 │           │   ├── GitConflictDiffModal.tsx # 目录树入口的只读 Git 冲突文件与合并差异
 │           │   ├── UsageModal.tsx        # 本周用量弹窗（快捷键 Ctrl+Shift+U）：按 CLI → 账号 → 模型分组的用量表与近 26 周每日请求数方块图
 │           │   ├── DashboardView.tsx     # Dashboard 主分析页面（侧栏顶部入口 / Ctrl+Shift+D）：跨周期 KPI、12 个月活跃热力图、趋势图、Top 5 分布、Token 构成、多组实时账号配额与模型明细，终端后台保活

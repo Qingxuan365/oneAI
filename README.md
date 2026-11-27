@@ -32,7 +32,7 @@ See [docs/features.md](docs/features.md) for the detailed behavior of every feat
 
 OneAI looks up these commands on your `PATH` at startup and offers the ones it finds. The list lives in [`src/main/known-clis.json`](src/main/known-clis.json), and Settings → CLI shows the detection state of each.
 
-Codex, Claude Code, Kimi Code, OpenCode, Grok Build, Antigravity, Qwen Code, Aider, Cursor Agent, GitHub Copilot, Amp, Droid, Crush, Goose, iFlow CLI, Auggie, Kiro CLI, Cline and Pi.
+Aider, Amp, Antigravity, Auggie, Claude Code, Cline, CodeBuddy, Codex, Continue, Crush, Cursor Agent, Droid, Gemini CLI, GitHub Copilot, Goose, Grok Build, iFlow CLI, Junie CLI, Kilo Code, Kimi Code, Kiro CLI, Mistral Vibe, OpenCode, OpenHands, Pi and Qwen Code.
 
 A CLI that is not listed can be added under Settings → CLI with a name and a start command. All CLIs run in a normal terminal. Extra features depend on each CLI's local session format:
 

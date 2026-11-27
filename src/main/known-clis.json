@@ -1,13 +1,51 @@
 [
-  { "id": "kimi", "name": "Kimi Code", "command": "kimi" },
-  { "id": "codex", "name": "Codex", "command": "codex" },
-  { "id": "claude", "name": "Claude Code", "command": "claude" },
+  {
+    "id": "kimi",
+    "name": "Kimi Code",
+    "command": "kimi",
+    "installer": {
+      "featuredOrder": 5,
+      "powershellCommand": "irm https://code.kimi.com/kimi-code/install.ps1 | iex",
+      "docsUrl": "https://code.kimi.com",
+      "requiresGit": true
+    }
+  },
+  {
+    "id": "codex",
+    "name": "Codex",
+    "command": "codex",
+    "installer": {
+      "featuredOrder": 2,
+      "powershellCommand": "irm https://chatgpt.com/codex/install.ps1 | iex",
+      "docsUrl": "https://developers.openai.com/codex/cli"
+    }
+  },
+  {
+    "id": "claude",
+    "name": "Claude Code",
+    "command": "claude",
+    "installer": {
+      "featuredOrder": 1,
+      "powershellCommand": "irm https://claude.ai/install.ps1 | iex",
+      "docsUrl": "https://code.claude.com/docs/en/overview",
+      "requiresGit": true
+    }
+  },
   { "id": "opencode", "name": "OpenCode", "command": "opencode" },
   { "id": "grok", "name": "Grok Build", "command": "grok" },
-  { "id": "agy", "name": "Antigravity", "command": "agy" },
+  {
+    "id": "agy",
+    "name": "Antigravity",
+    "command": "agy",
+    "installer": {
+      "featuredOrder": 3,
+      "powershellCommand": "irm https://antigravity.google/cli/install.ps1 | iex",
+      "docsUrl": "https://antigravity.google/docs/getting-started"
+    }
+  },
   { "id": "qwen", "name": "Qwen Code", "command": "qwen" },
   { "id": "aider", "name": "Aider", "command": "aider" },
-  { "id": "cursor-agent", "name": "Cursor Agent", "command": "cursor-agent" },
+  { "id": "cursor-agent", "name": "Cursor Agent", "command": "agent", "aliases": ["cursor-agent"] },
   { "id": "copilot", "name": "GitHub Copilot", "command": "copilot" },
   { "id": "amp", "name": "Amp", "command": "amp" },
   { "id": "droid", "name": "Droid", "command": "droid" },
@@ -17,5 +55,23 @@
   { "id": "auggie", "name": "Auggie", "command": "auggie" },
   { "id": "kiro-cli", "name": "Kiro CLI", "command": "kiro-cli" },
   { "id": "cline", "name": "Cline", "command": "cline" },
-  { "id": "pi", "name": "Pi", "command": "pi" }
+  { "id": "gemini", "name": "Gemini CLI", "command": "gemini" },
+  { "id": "vibe", "name": "Mistral Vibe", "command": "vibe" },
+  { "id": "kilo", "name": "Kilo Code", "command": "kilo", "aliases": ["kilocode"] },
+  { "id": "continue", "name": "Continue", "command": "cn" },
+  { "id": "openhands", "name": "OpenHands", "command": "openhands" },
+  { "id": "junie", "name": "Junie CLI", "command": "junie" },
+  { "id": "codebuddy", "name": "CodeBuddy", "command": "codebuddy" },
+  {
+    "id": "pi",
+    "name": "Pi",
+    "command": "pi",
+    "installer": {
+      "featuredOrder": 4,
+      "powershellCommand": "irm https://pi.dev/install.ps1 | iex",
+      "docsUrl": "https://pi.dev",
+      "requiresNode": true,
+      "minNodeVersion": "22.19.0"
+    }
+  }
 ]

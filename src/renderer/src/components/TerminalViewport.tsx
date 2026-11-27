@@ -8,7 +8,7 @@ import '@xterm/xterm/css/xterm.css';
 import { RestartSessionOptions, TaskSession, ThemeId } from '../types';
 import { TerminalSearchBar } from './TerminalSearchBar';
 import { t } from '../i18n';
-import { noteUserActivity } from '../taskStatus';
+import { hasVisibleOutput, noteUserActivity } from '../taskStatus';
 import { extractPathMatches, PathMatchItem, quoteTerminalPath } from '../../../shared/paths';
 
 // 发给 PTY 的键盘输入与尺寸变化都记一笔，紧随其后的回显 / 重绘输出不算任务在干活（见 taskStatus.ts 的 USER_ECHO_MS）
@@ -26,6 +26,7 @@ export interface TerminalViewportRef {
   exportActiveTerminalLog: (mode: 'copy' | 'save') => Promise<{ success: boolean; filePath?: string; canceled?: boolean; error?: string }>;
   insertTextToActiveTerminal: (text: string) => boolean;
   runCommandInActiveTerminal: (taskId: string, command: string) => Promise<boolean>;
+  queuePromptOnReady: (taskId: string, prompt: string) => void;
 }
 
 /** 把终端里实际渲染出来的文字（含回滚区）导出为纯文本，折行的物理行合并为一行。 */
@@ -800,6 +801,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
   // 重启指定任务的 CLI 进程，未指定时为当前活动任务
   const restartActiveTerminal = async (taskId: string | null = activeTaskId, options?: RestartSessionOptions) => {
     if (!taskId) return undefined;
+    cancelQueuedPrompt(taskId);
     const instance = instancesRef.current.get(taskId);
     if (instance) {
       // reset 而不是 clear：旧进程退出时可能停在备用屏、鼠标上报、隐藏光标或 bracketed paste 状态，
@@ -884,6 +886,75 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
     return submitted === true;
   };
 
+  const pendingPromptsRef = useRef<Map<string, {
+    prompt: string;
+    sawOutput: boolean;
+    baselineInputVersion: number | null;
+    quietTimer: number | null;
+    maxTimer: number | null;
+  }>>(new Map());
+
+  const cancelQueuedPrompt = (taskId: string) => {
+    const pending = pendingPromptsRef.current.get(taskId);
+    if (!pending) return;
+    if (pending.quietTimer !== null) window.clearTimeout(pending.quietTimer);
+    if (pending.maxTimer !== null) window.clearTimeout(pending.maxTimer);
+    pendingPromptsRef.current.delete(taskId);
+  };
+
+  const flushQueuedPrompt = async (taskId: string) => {
+    const pending = pendingPromptsRef.current.get(taskId);
+    if (!pending) return;
+    cancelQueuedPrompt(taskId);
+    const instance = instancesRef.current.get(taskId);
+    if (!instance) return;
+    if (pending.baselineInputVersion !== null && instance.inputVersion !== pending.baselineInputVersion) return;
+    const inputVersion = ++instance.inputVersion;
+    const input = instance.term.modes.bracketedPasteMode ? `\x1b[200~${pending.prompt}\x1b[201~` : pending.prompt;
+    if (await writePty(taskId, input) !== true) return;
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
+    if (instancesRef.current.get(taskId) !== instance || instance.inputVersion !== inputVersion) return;
+    await writePty(taskId, '\r');
+    if (activeTaskIdRef.current === taskId && !hiddenRef.current) instance.term.focus();
+  };
+
+  const noteQueuedPromptOutput = (taskId: string, data: string) => {
+    if (pendingPromptsRef.current.size === 0) return;
+    const pending = pendingPromptsRef.current.get(taskId);
+    if (!pending) return;
+    // 只采样前 512 字符判断是否含可见输出，避免对 64 KB 大块 PTY 输出做全量正则替换
+    const sample = data.length > 512 ? data.slice(0, 512) : data;
+    if (!hasVisibleOutput(sample)) return;
+    const instance = instancesRef.current.get(taskId);
+    if (pending.baselineInputVersion === null && instance) {
+      pending.baselineInputVersion = instance.inputVersion;
+    }
+    pending.sawOutput = true;
+    if (pending.quietTimer !== null) window.clearTimeout(pending.quietTimer);
+    pending.quietTimer = window.setTimeout(() => { void flushQueuedPrompt(taskId); }, 1200);
+  };
+
+  const queuePromptOnReady = (taskId: string, prompt: string) => {
+    const trimmed = prompt.trim();
+    if (!taskId || !trimmed) return;
+    cancelQueuedPrompt(taskId);
+    const instance = instancesRef.current.get(taskId);
+    const entry = {
+      prompt: trimmed,
+      sawOutput: false,
+      baselineInputVersion: instance ? instance.inputVersion : null,
+      quietTimer: null as number | null,
+      maxTimer: null as number | null,
+    };
+    entry.maxTimer = window.setTimeout(() => {
+      const current = pendingPromptsRef.current.get(taskId);
+      if (!current) return;
+      if (current.sawOutput) void flushQueuedPrompt(taskId);
+      else cancelQueuedPrompt(taskId);
+    }, 8000);
+    pendingPromptsRef.current.set(taskId, entry);
+  };
+
   // 暴露给外层 Topbar 控制
   useImperativeHandle(ref, () => ({
     openSearch: () => setIsSearchOpen(true),
@@ -893,6 +964,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
     exportActiveTerminalLog,
     insertTextToActiveTerminal,
     runCommandInActiveTerminal,
+    queuePromptOnReady,
   }));
 
   // 动态更新所有已有终端的字体大小、行高与光标样式，实时触发自适应排版
@@ -947,8 +1019,12 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
           // ignore
         }
         instancesRef.current.delete(id);
+        cancelQueuedPrompt(id);
       }
     });
+    for (const id of [...pendingPromptsRef.current.keys()]) {
+      if (!currentTaskIds.has(id)) cancelQueuedPrompt(id);
+    }
 
     // 2. 按需创建：任务第一次被选中时才创建 xterm 实例（之后隐藏保活，不销毁）。
     //    启动时不为所有任务一次性创建，避免实例和 WebGL 上下文随任务数量线性增长；
@@ -1410,6 +1486,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
               instance.lastSeq = snap.seq;
               if (snap.buffer) {
                 term.write(sanitizeTerminalData(snap.buffer), () => window.electronAPI?.acknowledgeSession?.(task.id, snap.seq));
+                noteQueuedPromptOutput(task.id, snap.buffer);
               }
             }
             const chunks = instance.earlyChunks.splice(0);
@@ -1573,6 +1650,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
   // 监听来自 Electron 主进程的 PTY stdout 数据流，通过微帧缓冲合并写入对应终端
   useEffect(() => {
     const unsubData = window.electronAPI?.onSessionData(({ id, data, seq }) => {
+      noteQueuedPromptOutput(id, data);
       const instance = instancesRef.current.get(id);
       if (instance) {
         if (!instance.snapshotLoaded) {
@@ -1614,6 +1692,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
     });
 
     const unsubExit = window.electronAPI?.onSessionExit(({ id, exitCode }) => {
+      cancelQueuedPrompt(id);
       const instance = instancesRef.current.get(id);
       if (!instance) return;
       if (!instance.snapshotLoaded) {
@@ -1629,6 +1708,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
     return () => {
       unsubData?.();
       unsubExit?.();
+      for (const taskId of [...pendingPromptsRef.current.keys()]) cancelQueuedPrompt(taskId);
       instancesRef.current.forEach((instance) => {
         if (instance.flushTimer) {
           clearTimeout(instance.flushTimer);

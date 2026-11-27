@@ -1,13 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Pencil, Plus, RotateCw, Trash2 } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Download, Pencil, Plus, RotateCw, Trash2 } from 'lucide-react';
 import { CustomCli } from '../types';
+import { sortClisAlphabetically } from '../clis';
 import { newCustomCliId, validateCustomCli } from '../customClis';
 import { t } from '../i18n';
+import { BrandIcon } from './BrandIcon';
 
 interface KnownCli {
   id: string;
   name: string;
   command: string;
+  aliases?: string[];
 }
 
 interface CliSettingsProps {
@@ -18,6 +21,8 @@ interface CliSettingsProps {
   installed: Record<string, boolean> | null;
   onChange: (customClis: CustomCli[]) => void;
   onRedetect: () => void | Promise<void>;
+  /** 打开常用 CLI 多选一键安装页 */
+  onOpenInstaller?: () => void;
 }
 
 interface Draft {
@@ -36,7 +41,7 @@ function InstalledBadge({ installed, id }: { installed: Record<string, boolean> 
 }
 
 /** 设置 → CLI：查看自动检测结果，并添加自己的 CLI（名称 + 启动命令） */
-export const CliSettings: React.FC<CliSettingsProps> = ({ fallbackKnownClis, customClis, installed, onChange, onRedetect }) => {
+export const CliSettings: React.FC<CliSettingsProps> = ({ fallbackKnownClis, customClis, installed, onChange, onRedetect, onOpenInstaller }) => {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -47,6 +52,8 @@ export const CliSettings: React.FC<CliSettingsProps> = ({ fallbackKnownClis, cus
     window.electronAPI?.listKnownClis?.().then((list) => { if (active && Array.isArray(list) && list.length > 0) setKnownClis(list); }).catch(() => {});
     return () => { active = false; };
   }, []);
+  const sortedKnownClis = useMemo(() => sortClisAlphabetically(knownClis), [knownClis]);
+  const sortedCustomClis = useMemo(() => sortClisAlphabetically(customClis), [customClis]);
 
   // 检测本身是瞬间完成的同步查找，结果没变时界面毫无变化；用旋转图标和完成提示让点击有反馈
   const [checking, setChecking] = useState(false);
@@ -91,17 +98,27 @@ export const CliSettings: React.FC<CliSettingsProps> = ({ fallbackKnownClis, cus
           </h3>
           <div className="flex shrink-0 items-center gap-2">
             <span className="text-xs text-success" role="status" aria-live="polite">{checkedDone ? t('已重新检测') : ''}</span>
+            {onOpenInstaller && (
+              <button type="button" onClick={onOpenInstaller} className="btn-secondary px-2.5 py-1 text-xs" data-settings-open-cli-installer>
+                <Download size={12} />{t('安装常用 CLI')}
+              </button>
+            )}
             <button type="button" onClick={() => void redetect()} disabled={checking} className="btn-secondary px-2.5 py-1 text-xs" title={t('重新检测已安装的 CLI，新装 CLI 后点这里即可，不必重启')}>
               <RotateCw size={12} className={checking ? 'animate-spin' : ''} />{checking ? t('检测中…') : t('重新检测')}
             </button>
           </div>
         </div>
         <ul className="divide-y divide-line overflow-hidden rounded-md border border-line">
-          {knownClis.map((cli) => (
+          {sortedKnownClis.map((cli) => (
             <li key={cli.id} data-cli-id={cli.id} className="flex items-center justify-between gap-3 bg-muted px-3 py-2 text-ui text-fg-muted">
-              <span className="min-w-0">
-                <span className="block truncate text-fg">{cli.name}</span>
-                <span className="block truncate font-mono text-xs text-fg-faint">{cli.command}</span>
+              <span className="flex min-w-0 items-center gap-2.5">
+                <BrandIcon icon={cli.id} size={16} />
+                <span className="min-w-0">
+                  <span className="block truncate text-fg">{cli.name}</span>
+                  <span className="block truncate font-mono text-xs text-fg-faint">
+                    {cli.aliases?.length ? `${cli.command} / ${cli.aliases.join(' / ')}` : cli.command}
+                  </span>
+                </span>
               </span>
               <InstalledBadge installed={installed} id={cli.id} />
             </li>
@@ -129,9 +146,9 @@ export const CliSettings: React.FC<CliSettingsProps> = ({ fallbackKnownClis, cus
           </p>
         )}
 
-        {customClis.length > 0 && (
+        {sortedCustomClis.length > 0 && (
           <ul className="divide-y divide-line overflow-hidden rounded-md border border-line">
-            {customClis.map((cli) => (
+            {sortedCustomClis.map((cli) => (
               <li key={cli.id} data-custom-cli-id={cli.id} className="flex items-center justify-between gap-3 bg-muted px-3 py-2 text-ui text-fg-muted">
                 <span className="min-w-0">
                   <span className="flex items-center gap-2">

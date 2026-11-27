@@ -202,6 +202,33 @@ export type GitBranchSwitchResult = { ok: true } | { ok: false; error: string; c
 export type GitConflictFilesResult = { ok: true; files: string[] } | { ok: false; error: string };
 export type GitConflictDiffResult = { ok: true; diff: string } | { ok: false; error: string };
 
+export type GitChangeStatus = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'conflicted';
+
+export interface GitStatusEntry {
+  path: string;
+  originalPath?: string;
+  indexStatus: string;
+  worktreeStatus: string;
+  status: GitChangeStatus;
+}
+
+export type GitStatusResult =
+  | {
+      ok: true;
+      branch: string | null;
+      entries: GitStatusEntry[];
+      hasConflicts: boolean;
+      truncated?: boolean;
+      totalCount?: number;
+    }
+  | { ok: false; error: string };
+
+export type GitChangeDiffResult = { ok: true; diff: string } | { ok: false; error: string };
+
+export type GitCommitResult =
+  | { ok: true; hash: string; summary: string }
+  | { ok: false; error: string };
+
 export interface SessionCreateResult {
   success: boolean;
   reused?: boolean;
@@ -245,6 +272,52 @@ export interface UpdateState {
   progress?: UpdateProgress;
   error?: string;
   checkedAt?: number;
+}
+
+export interface CliInstallerMeta {
+  featuredOrder: number;
+  powershellCommand: string;
+  docsUrl: string;
+  requiresGit?: boolean;
+  requiresNode?: boolean;
+  minNodeVersion?: string;
+}
+
+export interface KnownCliInfo {
+  id: string;
+  name: string;
+  command: string;
+  aliases?: string[];
+  installer?: CliInstallerMeta;
+}
+
+export type CliInstallPhase = 'idle' | 'queued' | 'installing' | 'done' | 'error' | 'canceled';
+
+export interface CliInstallOutcome {
+  ok: boolean;
+  alreadyInstalled?: boolean;
+  detectedAfterInstall?: boolean;
+  canceled?: boolean;
+  error?: string;
+}
+
+export type CliInstallEvent =
+  | { type: 'status'; cliId: string; status: CliInstallPhase; error?: string; detectedAfterInstall?: boolean }
+  | { type: 'log'; cliId: string; chunk: string }
+  | { type: 'complete'; results: Record<string, CliInstallOutcome>; installedIds: string[] };
+
+export interface CliInstallBatchResult {
+  ok: boolean;
+  error?: string;
+  results?: Record<string, CliInstallOutcome>;
+  installedIds?: string[];
+}
+
+export interface CliEnvironmentInfo {
+  hasGit: boolean;
+  hasNode: boolean;
+  nodeVersion?: string;
+  platform: string;
 }
 
 /** 全部内置主题 ID 单一事实源；新增主题须同步 themes.ts、index.css、index.html 与 TerminalViewport.tsx */

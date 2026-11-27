@@ -7,11 +7,13 @@ import { quotaService } from './quota-service';
 import { setSystemStatsEnabled, startSystemStats } from './system-stats';
 import { checkAccountLogin } from './account-login';
 import { setupGitBranch } from './git-branch';
+import { setupGitCommit } from './git-commit';
 import { setupGitConflicts } from './git-conflicts';
 import { setupTaskSummary } from './task-summary';
 import { listSessionHistory, deleteSessionHistory } from './session-history';
 import { getDashboardStats, getUsageStats } from './usage-stats';
 import { detectInstalledClis, listKnownClis } from './cli-detect';
+import { cliInstallerService, setupCliInstaller } from './cli-installer';
 import { setupWorkspaceStore } from './workspace-store';
 import { registerMusicScheme, setupMusicLibrary } from './music-library';
 import { allowPreviewFilePaths, isImageExtension, setupFilePreview } from './file-preview';
@@ -226,6 +228,7 @@ function createWindow() {
     stopSystemStats?.();
     stopSystemStats = null;
     quotaService.stopPolling();
+    cliInstallerService.cancel();
     ptyManager.destroyAll();
   });
 }
@@ -237,10 +240,13 @@ function setupIPC() {
   setupFilePreview();
   setupProjectTree();
   setupGitBranch();
+  setupGitCommit();
   setupGitConflicts();
   setupTaskSummary();
+  setupCliInstaller(() => mainWindow);
   setupUpdater(() => mainWindow, () => {
     appQuitting = true;
+    cliInstallerService.cancel();
     ptyManager.destroyAll();
   });
   ipcMain.handle('history:list', (_event, accounts) => listSessionHistory(Array.isArray(accounts) ? accounts : []));
@@ -258,7 +264,7 @@ function setupIPC() {
   });
   ipcMain.on('app:home-dir', (event) => { event.returnValue = app.getPath('home'); });
   ipcMain.handle('cli:known', () => listKnownClis());
-  ipcMain.handle('cli:detect', (_event, custom) => detectInstalledClis(Array.isArray(custom) ? custom : []));
+  ipcMain.handle('cli:detect', (_event, custom, refreshPath) => detectInstalledClis(Array.isArray(custom) ? custom : [], { refreshPath: refreshPath === true }));
   ipcMain.handle('window:is-maximized', () => mainWindow?.isMaximized() ?? false);
   ipcMain.handle('workspace:select-directory', async (_event, currentPath?: string) => {
     if (!mainWindow) return null;

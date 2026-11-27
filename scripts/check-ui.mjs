@@ -21,12 +21,15 @@ await build({
     import { NewTaskModal } from './src/renderer/src/components/NewTaskModal';
     import { HistoryModal } from './src/renderer/src/components/HistoryModal';
     import { ProjectTreeDrawer } from './src/renderer/src/components/ProjectTreeDrawer';
+    import { GitCommitModal } from './src/renderer/src/components/GitCommitModal';
     import { GitConflictDiffModal } from './src/renderer/src/components/GitConflictDiffModal';
     import { UsageModal } from './src/renderer/src/components/UsageModal';
     import { DashboardView } from './src/renderer/src/components/DashboardView';
     import { SettingsModal } from './src/renderer/src/components/SettingsModal';
     import { OnboardingModal } from './src/renderer/src/components/OnboardingModal';
     import { UpdateModal } from './src/renderer/src/components/UpdateModal';
+    import { BrandIcon } from './src/renderer/src/components/BrandIcon';
+    import knownClisFixture from './src/main/known-clis.json';
     import { THEME_IDS } from './src/shared/types';
     import { dateLocale, getLanguage, setLanguage, t } from './src/renderer/src/i18n';
     window.ALL_THEMES = [...THEME_IDS];
@@ -35,12 +38,23 @@ await build({
     import { isUserEcho } from './src/renderer/src/taskStatus';
     window.isUserEcho = isUserEcho;
     installDropGuard();
+    window.cliEnvFixture = { hasGit: true, hasNode: true, nodeVersion: '22.20.0', platform: 'win32' };
+    window.cliInstallHandler = async () => ({ ok: true, results: {}, installedIds: [] });
+    window.cliInstallListeners = new Set();
+    window.emitCliInstallEvent = (event) => { window.cliInstallListeners.forEach((cb) => cb(event)); };
     window.setMaximized = () => {}; window.electronAPI = { getHomeDir: () => 'C:/Users/tester', onWindowMaximizedChange: callback => { window.setMaximized = callback; return () => {}; }, isWindowMaximized: async () => false,
       setLanguage: async language => { window.mainLanguage = language; },
       onSystemStats: callback => { window.pushStats = callback; return () => {}; },
       // 路径里带 logged 的账号视为已登录；账号相关桩不使用反斜杠，避免外层模板字符串转义
       checkAccountLogin: async account => ({ loggedIn: account.configDir.indexOf('logged') >= 0, detail: account.configDir.indexOf('logged') >= 0 ? 'me@example.com' : undefined }),
       selectWorkspaceDirectory: async () => 'C:/picked/dir',
+      listKnownClis: async () => window.knownClisMock ?? [],
+      getCliEnvInfo: async () => window.cliEnvFixture,
+      installClis: async (ids) => window.cliInstallHandler(ids),
+      cancelCliInstall: async () => { window.events.push('cli-install-cancel'); return true; },
+      onCliInstallEvent: (cb) => { window.cliInstallListeners.add(cb); return () => window.cliInstallListeners.delete(cb); },
+      writeClipboardText: async (text) => { window.events.push('copy:' + text); },
+      openExternal: async (url) => { window.events.push('open:' + url); },
       listSessionHistory: async (accounts) => { const h = (id, cliId, title, cwd, ago, extra = {}) => ({ id, cliId, title, cwd, updatedAt: Date.now() - ago, command: 'x', ...extra }); const base = [h('h1', 'codex', 'Today one', 'D:/GitHub/OneAI', 60000), h('h2', 'claude', 'Yesterday one', 'D:/plan', Date.now() - (new Date().setHours(0, 0, 0, 0) - 3600000 * 2)), h('h2', 'kimi', 'Old one', 'D:/old', 10 * 86400000)]; return Array.isArray(accounts) && accounts.length ? [h('h-acc', 'codex', 'Account session', 'D:/acc', 30000, { accountId: accounts[0].id, accountName: accounts[0].name }), ...base] : base; },
       getGitBranches: async (dirs) => Object.fromEntries(dirs.map((d) => [d, d === 'D:/GitHub/OneAI' ? 'main' : null])),
       getUsageStats: async () => window.usageFixture(window.usageEmpty),
@@ -184,7 +198,7 @@ await build({
     const mkTask = (id, groupId, cwd, extra = {}) => ({ id, groupId, title: id, status: 'idle', cwd, createdAt: 1, ...extra });
     // withMusic：带一条在线音乐，用于检查折叠侧栏时播放器不被卸载
     const MUSIC_STREAMS = [{ id: 'm1', name: 'Test radio', url: 'https://example.com/test.mp3' }];
-    window.drawSidebar = (isCollapsed = false, clockOffset = 0, withMusic = false, customWidth = null, isDashboardActive = false, runningIds = []) => {
+    window.drawSidebar = (isCollapsed = false, clockOffset = 0, withMusic = false, customWidth = null, isDashboardActive = false, runningIds = [], greetingOpts = null) => {
       const runningSet = new Set(runningIds);
       const st = (id, fallback = 'idle') => runningSet.has(id) ? 'running' : fallback;
       const tasks = [mkTask('side-a', 'codex', 'D:/GitHub/OneAI', { title: 'Side a', status: st('side-a') }), mkTask('side-b', 'codex', 'D:/GitHub/OneAI', { title: 'Side b', status: st('side-b') }), mkTask('side-c', 'claude', 'D:/sports', { title: 'Side c', status: st('side-c') }), mkTask('side-d', 'claude', 'D:/sports', { title: 'Side d', status: st('side-d', 'stopped') }), mkTask('side-t', 'terminal', 'D:/sports', { title: 'Side t', status: st('side-t') })];
@@ -194,7 +208,11 @@ await build({
       flushSync(() => root.render(<div className="workbench-ui flex h-screen">
         <Sidebar isCollapsed={isCollapsed} isDashboardActive={isDashboardActive} width={customWidth} clis={CLIS} folders={folders} tasks={tasks} activeTaskId="side-a" unreadTaskIds={new Set(['side-a', 'side-b'])}
           gitBranches={{ [keyOf('D:/GitHub/OneAI')]: 'main', [keyOf('D:/sports')]: 'feature/x', [keyOf('D:/plan')]: 'dev' }} recentFolders={recent}
-          clockOffsetHours={clockOffset} summaries={{ 'side-a': { text: 'Fix the login bug' }, 'side-b': { text: null }, 'side-c': { text: 'long '.repeat(40).trim() } }}
+          clockOffsetHours={clockOffset}
+          workStartTime={greetingOpts?.workStartTime}
+          workEndTime={greetingOpts?.workEndTime}
+          greetingMessages={greetingOpts?.greetingMessages}
+          summaries={{ 'side-a': { text: 'Fix the login bug' }, 'side-b': { text: null }, 'side-c': { text: 'long '.repeat(40).trim() } }}
           onResizeWidth={(w) => window.events.push('resize:' + w)} onResetWidth={() => window.events.push('reset-width')}
           onToggleCollapse={() => window.events.push('toggle-collapse')}
           onToggleAllFolders={(expand) => window.events.push('toggle-all:' + expand)}
@@ -204,6 +222,7 @@ await build({
           onToggleFolder={(p) => window.events.push('toggle:' + p)} onReorderFolder={(s, t) => window.events.push('reorder-folder:' + s + '>' + t)}
           onNewTask={(p, cli, acc) => window.events.push('quick:' + p + ':' + cli + (acc ? ':' + acc : ''))} onCustomNewTask={(p) => window.events.push('custom:' + p)}
           onCloseTask={(id) => window.events.push('close:' + id)} onRenameTask={() => {}}
+          onReviewTask={(taskId, cliId, acc) => window.events.push('review:' + taskId + ':' + cliId + (acc ? ':' + acc : ''))}
           onReorderTask={(s, t) => window.events.push('reorder:' + s + '>' + t)}
           onRestartTask={(id) => window.events.push('restart:' + id)} onOpenFolder={(p) => window.events.push('open:' + p)} onRemoveFolder={(p) => window.events.push('remove:' + p)}
           onResumeHistory={(e) => window.events.push('resume:' + e.id)} onOpenHistory={() => window.events.push('history')}
@@ -229,23 +248,33 @@ await build({
       </div>));
     };
     function SettingsHarness() {
-      const [settings, setSettings] = React.useState({ theme: 'dark', voiceReminderEnabled: true, workReminderHours: 1, terminalFontSize: 15, terminalLineHeight: 1.3, uiScale: 'comfortable', terminalCursorStyle: 'bar', terminalCursorBlink: true, previewMinimap: true, musicDirectory: '', musicPlayerVisible: true, musicStreams: [], clockOffsetHours: 0, topbarDateVisible: true, language: 'zh-CN', onboardingDone: true, accounts: [], customClis: [] });
+      const [settings, setSettings] = React.useState({ theme: 'dark', voiceReminderEnabled: true, workReminderHours: 1, workStartTime: '09:00', workEndTime: '18:00', greetingMessages: { morning: '', noon: '', afternoon: '', evening: '' }, terminalFontSize: 15, terminalLineHeight: 1.3, uiScale: 'comfortable', terminalCursorStyle: 'bar', terminalCursorBlink: true, previewMinimap: true, musicDirectory: '', musicPlayerVisible: true, musicStreams: [], clockOffsetHours: 0, topbarDateVisible: true, language: 'zh-CN', onboardingDone: true, accounts: [], customClis: [] });
       setLanguage(settings.language);
       window.currentSettings = () => settings;
       window.currentCustomClis = () => settings.customClis;
       window.currentAccounts = () => settings.accounts;
       return <SettingsModal isOpen onClose={() => {}} settings={settings} onUpdateSettings={setSettings} onResetDefault={() => {}} onLoginAccount={(a) => window.events.push('login:' + a.name)}
         fallbackKnownClis={[{ id: 'codex', name: 'Codex', command: 'codex' }, { id: 'claude', name: 'Claude Code', command: 'claude' }, { id: 'opencode', name: 'OpenCode', command: 'opencode' }, { id: 'grok', name: 'Grok Build', command: 'grok' }]} installed={{ codex: true, claude: true }}
-        onCustomClisChange={(list) => setSettings((prev) => ({ ...prev, customClis: list }))} onRedetectClis={() => window.events.push('redetect')} />;
+        onCustomClisChange={(list) => setSettings((prev) => ({ ...prev, customClis: list }))} onRedetectClis={() => window.events.push('redetect')} onOpenCliInstaller={() => window.events.push('open-cli-installer')} />;
     }
-    function OnboardingHarness({ clis }) {
-      const [language, setLang] = React.useState('en');
+    function OnboardingHarness({ clis, mode = 'onboarding', initialLanguage = 'en' }) {
+      const [language, setLang] = React.useState(initialLanguage);
       setLanguage(language);
-      return <OnboardingModal isOpen language={language} onLanguageChange={(l) => { window.events.push('lang:' + l); setLang(l); }} detectedClis={clis} defaultFolder="C:/Users/tester" onAddFolder={() => window.events.push('add-folder')} onFinish={() => window.events.push('onboarding-finish')} />;
+      return <OnboardingModal isOpen mode={mode} language={language} onLanguageChange={(l) => { window.events.push('lang:' + l); setLang(l); }} detectedClis={clis} knownClis={knownClisFixture} defaultFolder="C:/Users/tester" onAddFolder={() => window.events.push('add-folder')} onRedetectClis={() => window.events.push('onboarding-redetect')} onFinish={() => window.events.push('onboarding-finish')} />;
     }
     window.setUiLanguage = setLanguage;
     window.getDateLocale = dateLocale;
-    window.drawOnboarding = (clis) => flushSync(() => root.render(<div className="workbench-ui h-screen"><OnboardingHarness clis={clis} /></div>));
+    window.drawOnboarding = (clis, opts = {}) => flushSync(() => root.render(<div className="workbench-ui h-screen"><OnboardingHarness key={opts.resetKey} clis={clis} mode={opts.mode} initialLanguage={opts.initialLanguage} /></div>));
+    window.drawBrandIcons = () => flushSync(() => root.render(
+      <div id="brand-icon-grid" className="flex flex-wrap gap-2 p-2">
+        {knownClisFixture.map((cli) => (
+          <span key={cli.id} data-brand-icon={cli.id}><BrandIcon icon={cli.id} size={20} /></span>
+        ))}
+        <span data-brand-icon-dup="gemini"><BrandIcon icon="gemini" size={20} /></span>
+        <span data-brand-icon-dup="codebuddy"><BrandIcon icon="codebuddy" size={20} /></span>
+        <span data-brand-icon-dup="iflow"><BrandIcon icon="iflow" size={20} /></span>
+      </div>,
+    ));
     window.drawSettings = () => flushSync(() => root.render(<div className="workbench-ui h-screen"><SettingsHarness /></div>));
     window.drawUsage = () => flushSync(() => root.render(<div className="workbench-ui h-screen"><UsageModal key={String(window.usageEmpty) + String(window.usageMany)} isOpen onClose={() => {}} accounts={[]} /></div>));
     window.drawDashboard = (withTasks = true) => {
@@ -301,9 +330,17 @@ await build({
       <ProjectTreeDrawer isOpen={isOpen} onClose={() => window.events.push('tree-close')} rootPath="D:/GitHub/OneAI" gitBranch="main"
         activePreviewPath={activePreviewPath} hasActiveTerminal={hasActiveTerminal}
         onGitBranchChanged={(dir, branch) => window.events.push('tree-branch-changed:' + dir + '|' + branch)}
+        onOpenGitCommit={() => window.events.push('tree-open-commit')}
+        onOpenGitConflicts={() => window.events.push('tree-open-conflicts')}
         onPreviewFile={(cwd, filePath) => window.events.push('tree-preview:' + cwd + '|' + filePath)}
         onInsertPath={(relPath) => window.events.push('tree-insert:' + relPath)}
         onRevealInExplorer={(targetPath) => window.events.push('tree-reveal:' + targetPath)} />
+    </div>));
+    window.drawGitCommit = () => flushSync(() => root.render(<div className="workbench-ui h-screen">
+      <GitCommitModal rootPath="D:/GitHub/OneAI"
+        onClose={() => window.events.push('close-git-commit')}
+        onOpenConflicts={() => window.events.push('commit-open-conflicts')}
+        onCommitted={(branch) => window.events.push('git-committed:' + (branch || ''))} />
     </div>));
     window.drawGitConflicts = () => flushSync(() => root.render(<div className="workbench-ui h-screen">
       <GitConflictDiffModal rootPath="D:/GitHub/OneAI" onClose={() => window.events.push('close-git-conflicts')} />
@@ -1038,7 +1075,7 @@ app.whenReady().then(async () => {
       cliTab.click(); await tick();
       const detectedRows = [...document.querySelectorAll('section[aria-label="自动检测的 CLI"] li')];
       const rowOf = id => document.querySelector('li[data-cli-id="' + id + '"]');
-      check('CLI page lists the known CLIs without the system terminal', detectedRows.length === 4 && !rowOf('terminal') && rowOf('codex') && rowOf('grok'));
+      check('CLI page lists the known CLIs alphabetically without the system terminal', detectedRows.length === 4 && !rowOf('terminal') && detectedRows.map(li => li.getAttribute('data-cli-id')).join('|') === 'claude|codex|grok|opencode');
       check('CLI page marks detected and missing CLIs', rowOf('codex').textContent.includes('已安装') && rowOf('opencode').textContent.includes('未检测到'));
       [...document.querySelectorAll('section[aria-label="自动检测的 CLI"] button')].find(b => b.textContent.includes('重新检测')).click();
       check('re-detect button asks the app to detect again', window.events.includes('redetect'));
@@ -1184,7 +1221,7 @@ app.whenReady().then(async () => {
       langButtons().find(b => b.textContent.trim() === '简体中文').click(); await tick();
       check('picking a language applies it to the dialog straight away', window.events.includes('lang:zh-CN') && dialog().querySelector('[data-onboarding-next]').textContent.trim() === '下一步');
       dialog().querySelector('[data-onboarding-next]').click(); await tick();
-      check('the welcome step lists the CLIs detected on this machine', dialog().querySelector('[data-onboarding-step="welcome"]') && [...dialog().querySelectorAll('[data-onboarding-clis] li')].map(li => li.textContent.trim()).join('|') === 'Codex|Claude Code');
+      check('the welcome step lists the CLIs detected on this machine in alphabetical order', dialog().querySelector('[data-onboarding-step="welcome"]') && [...dialog().querySelectorAll('[data-onboarding-clis] li')].map(li => li.textContent.trim()).join('|') === 'Claude Code|Codex');
       check('the welcome step shows the local default folder', dialog().textContent.includes('C:/Users/tester'));
       [...dialog().querySelectorAll('button')].find(b => b.textContent.includes('添加文件夹')).click();
       check('the add folder button asks the app to pick a folder', window.events.includes('add-folder'));
@@ -1192,6 +1229,79 @@ app.whenReady().then(async () => {
       check('get started finishes the onboarding', window.events.includes('onboarding-finish'));
       window.drawOnboarding([]); await tick();
       check('with no CLI found the welcome step explains what to do', dialog().querySelector('[data-onboarding-no-cli]') && !dialog().querySelector('[data-onboarding-clis]'));
+
+      // 欢迎页常用 CLI 自动安装流程：已安装过滤、首字母排序、Git 与 Node.js 提示、多选/全选、复制/文档、队列进度/停止/失败回退、全部已安装态与 install 模式
+      window.events.length = 0;
+      window.cliEnvFixture = { hasGit: false, hasNode: false, platform: 'win32' };
+      window.drawOnboarding([{ id: 'codex', name: 'Codex', icon: 'codex' }, { id: 'claude', name: 'Claude Code', icon: 'claude' }], { mode: 'install', initialLanguage: 'zh-CN', resetKey: 'install-1' }); await tick();
+      const installCards = () => [...dialog().querySelectorAll('[data-installable-cli]')].map(el => el.getAttribute('data-installable-cli'));
+      check('install mode opens directly on the welcome installer with dismissible close button and no Back button', dialog().querySelector('[data-onboarding-step="welcome"]') && dialog().querySelector('button[aria-label="关闭"]')?.disabled === false && !dialog().textContent.includes('上一步') && !dialog().textContent.includes('工作文件夹'));
+      check('already installed CLIs are filtered out and remaining CLIs are sorted alphabetically', installCards().join('|') === 'agy|kimi|pi' && dialog().querySelectorAll('[data-showcase-cli]').length >= 5);
+      check('Git and Node warnings stay hidden until a dependent CLI is checked while Pi card shows Node requirement badge', !dialog().querySelector('[data-cli-git-warning]') && !dialog().querySelector('[data-cli-node-warning]') && dialog().querySelector('[data-cli-node-badge="pi"]')?.getAttribute('data-node-problem') === 'true' && dialog().querySelector('[data-cli-node-badge="pi"]')?.textContent.includes('22.19.0+'));
+      dialog().querySelector('#cli-install-check-kimi').click(); await tick();
+      check('checking Kimi without Git shows the Git for Windows warning and updates install button count', Boolean(dialog().querySelector('[data-cli-git-warning]')) && dialog().querySelector('[data-cli-install-start]')?.textContent.includes('1'));
+      dialog().querySelector('#cli-install-check-pi').click(); await tick();
+      check('checking Pi without Node.js shows the Node.js warning with download link', Boolean(dialog().querySelector('[data-cli-node-warning]')) && dialog().querySelector('[data-cli-node-warning]').textContent.includes('22.19.0') && (dialog().querySelector('[data-cli-node-warning] button').click(), window.events.includes('open:https://nodejs.org/')));
+      dialog().querySelector('#cli-install-check-pi').click(); await tick();
+      dialog().querySelector('[data-cli-select-all]').click(); await tick();
+      check('select all checks every remaining installable CLI', dialog().querySelector('[data-cli-install-start]')?.textContent.includes('3') && dialog().querySelector('[data-cli-select-all]')?.textContent.includes('取消全选'));
+      dialog().querySelector('[aria-label="复制 Antigravity 安装命令"]').click(); await tick();
+      dialog().querySelector('[aria-label="查看 Antigravity 官方文档"]').click(); await tick();
+      check('copy command and open docs actions invoke clipboard and shell APIs', window.events.some(e => e.startsWith('copy:irm https://antigravity.google/cli/install.ps1')) && window.events.includes('open:https://antigravity.google/docs/getting-started'));
+
+      let resolveInstall;
+      window.cliInstallHandler = (ids) => new Promise((resolve) => {
+        window.events.push('install:' + ids.join(','));
+        resolveInstall = resolve;
+      });
+      dialog().querySelector('[data-cli-select-all]').click(); await tick();
+      dialog().querySelector('#cli-install-check-agy').click();
+      dialog().querySelector('#cli-install-check-pi').click(); await tick();
+      dialog().querySelector('[data-cli-install-start]').click(); await tick();
+      check('starting install locks close button, shows cancel button and calls installClis', window.events.includes('install:agy,pi') && dialog().querySelector('button[aria-label="关闭"]')?.disabled === true && Boolean(dialog().querySelector('[data-cli-install-cancel]')));
+      window.emitCliInstallEvent({ type: 'status', cliId: 'agy', status: 'installing' });
+      window.emitCliInstallEvent({ type: 'log', cliId: 'agy', chunk: 'Downloading Antigravity...' });
+      await tick();
+      check('live status and log stream update the active card and log viewer', dialog().querySelector('[data-installable-cli="agy"]')?.getAttribute('data-install-status') === 'installing' && dialog().querySelector('[data-cli-install-log]')?.textContent.includes('Downloading Antigravity'));
+      dialog().querySelector('[data-cli-install-cancel]').click(); await tick();
+      check('clicking stop install requests cancellation', window.events.includes('cli-install-cancel'));
+      window.emitCliInstallEvent({ type: 'status', cliId: 'agy', status: 'done', detectedAfterInstall: true });
+      window.emitCliInstallEvent({ type: 'status', cliId: 'pi', status: 'error', error: 'Network error', detectedAfterInstall: false });
+      resolveInstall({ ok: true, results: { agy: { ok: true, detectedAfterInstall: true }, pi: { ok: false, error: 'Network error' } }, installedIds: ['codex', 'claude', 'agy'] });
+      await tick();
+      check('finished batch refreshes detected CLIs, marks done and shows retry on failed item', window.events.includes('onboarding-redetect') && dialog().querySelector('[data-installable-cli="agy"]')?.getAttribute('data-install-status') === 'done' && dialog().querySelector('[data-installable-cli="pi"]')?.getAttribute('data-install-status') === 'error' && dialog().querySelector('[data-installable-cli="pi"]')?.textContent.includes('Network error') && dialog().querySelector('[data-installable-cli="pi"]')?.textContent.includes('重试'));
+
+      // 提前返回 ok: false 时不应卡在 queued，而是转为 error 并展示错误原因
+      window.cliInstallHandler = async () => ({ ok: false, error: 'Unsupported platform' });
+      dialog().querySelector('#cli-install-check-kimi').click(); await tick();
+      dialog().querySelector('[data-cli-install-start]').click(); await tick();
+      check('early install rejection marks queued items as error instead of hanging in queued', dialog().querySelector('[data-installable-cli="kimi"]')?.getAttribute('data-install-status') === 'error' && dialog().querySelector('[data-installable-cli="kimi"]')?.textContent.includes('Unsupported platform'));
+
+      // 旧版本 Node.js 同样触发升级提示
+      window.cliEnvFixture = { hasGit: true, hasNode: true, nodeVersion: '20.18.0', platform: 'win32' };
+      window.drawOnboarding([{ id: 'codex', name: 'Codex', icon: 'codex' }, { id: 'claude', name: 'Claude Code', icon: 'claude' }], { mode: 'install', initialLanguage: 'zh-CN', resetKey: 'install-old-node' }); await tick();
+      dialog().querySelector('#cli-install-check-pi').click(); await tick();
+      check('outdated Node.js triggers upgrade warning when Pi is checked', Boolean(dialog().querySelector('[data-cli-node-warning]')) && dialog().querySelector('[data-cli-node-warning]').textContent.includes('v20.18.0'));
+
+      // 全部推荐 CLI 已安装时显示完成态
+      window.drawOnboarding([
+        { id: 'claude', name: 'Claude Code', icon: 'claude' },
+        { id: 'codex', name: 'Codex', icon: 'codex' },
+        { id: 'agy', name: 'Antigravity', icon: 'agy' },
+        { id: 'pi', name: 'Pi', icon: 'pi' },
+        { id: 'kimi', name: 'Kimi Code', icon: 'kimi' },
+      ], { mode: 'install', initialLanguage: 'zh-CN', resetKey: 'install-all-done' }); await tick();
+      check('when all recommended CLIs are installed the empty-ready panel is shown', Boolean(dialog().querySelector('[data-all-clis-installed]')));
+      window.cliEnvFixture = { hasGit: true, hasNode: true, nodeVersion: '22.20.0', platform: 'win32' };
+      window.cliInstallHandler = async () => ({ ok: true, results: {}, installedIds: [] });
+
+      // 设置 → CLI 中的「安装常用 CLI」入口
+      window.events.length = 0;
+      window.drawSettings(); await tick();
+      document.getElementById('settings-tab-clis')?.click(); await tick();
+      dialog().querySelector('[data-settings-open-cli-installer]')?.click(); await tick();
+      check('Settings CLI tab exposes an Install popular CLIs entry', window.events.includes('open-cli-installer'));
+
       // 英文界面里不应残留中文：扫描文本与 title / aria-label / placeholder 属性
       const hasCjk = (txt) => [...txt].some(c => c.charCodeAt(0) >= 0x2e80);
       const findCjk = (root) => {
@@ -1202,7 +1312,7 @@ app.whenReady().then(async () => {
         return '...' + [...hit].slice(Math.max(0, at - 25), at + 25).join('');
       };
       window.setUiLanguage('en');
-      for (const [name, fn] of [['main layout', () => window.draw()], ['sidebar', () => window.drawSidebar()], ['collapsed sidebar', () => window.drawSidebar(true)], ['account sidebar', () => window.drawAccountSidebar()], ['usage', () => window.drawUsage()], ['dashboard', () => window.drawDashboard()], ['history', () => window.drawHistory([])]]) {
+      for (const [name, fn] of [['main layout', () => window.draw()], ['sidebar', () => window.drawSidebar()], ['collapsed sidebar', () => window.drawSidebar(true)], ['account sidebar', () => window.drawAccountSidebar()], ['usage', () => window.drawUsage()], ['dashboard', () => window.drawDashboard()], ['history', () => window.drawHistory([])], ['onboarding installer', () => window.drawOnboarding([{ id: 'codex', name: 'Codex', icon: 'codex' }], { mode: 'install', initialLanguage: 'en', resetKey: 'en-cjk-check' })]]) {
         fn(); await tick(300);
         const bad = findCjk(document.body);
         check('English ' + name + ' has no Chinese' + (bad ? ': ' + bad : ''), !bad);
@@ -1222,7 +1332,7 @@ app.whenReady().then(async () => {
         return (cs.overflowX !== 'visible' && !ellipsis && !scrolls && el.scrollWidth > el.clientWidth + 1) || r.right > window.innerWidth + (el.closest('.drawer-panel') ? 25 : 1);
       }).slice(0, 5).map((el) => el.tagName.toLowerCase() + '.' + el.className.toString().split(' ').slice(0, 3).join('.') + '[' + el.textContent.trim().slice(0, 30) + ']');
       window.setUiLanguage('en');
-      for (const [name, fn] of [['main layout', () => window.draw()], ['sidebar', () => window.drawSidebar()], ['account sidebar', () => window.drawAccountSidebar()], ['usage', () => window.drawUsage()], ['dashboard', () => window.drawDashboard()], ['history', () => window.drawHistory([])], ['settings', () => window.drawSettings()], ['onboarding', () => window.drawOnboarding([{ id: 'codex', name: 'Codex', icon: 'codex' }])], ['new task', () => window.drawNewTask([])]]) {
+      for (const [name, fn] of [['main layout', () => window.draw()], ['sidebar', () => window.drawSidebar()], ['account sidebar', () => window.drawAccountSidebar()], ['usage', () => window.drawUsage()], ['dashboard', () => window.drawDashboard()], ['history', () => window.drawHistory([])], ['settings', () => window.drawSettings()], ['onboarding', () => window.drawOnboarding([{ id: 'codex', name: 'Codex', icon: 'codex' }], { resetKey: 'en-clip-step1' })], ['onboarding installer', () => window.drawOnboarding([{ id: 'codex', name: 'Codex', icon: 'codex' }], { mode: 'install', initialLanguage: 'en', resetKey: 'en-clip-step2' })], ['new task', () => window.drawNewTask([])]]) {
         fn(); await tick(name === 'history' ? 900 : 300);
         const bad = clipped(document.body);
         check('English ' + name + ' has no clipped or overflowing text' + (bad.length ? ': ' + bad.join(' | ') : ''), bad.length === 0);
@@ -1626,9 +1736,9 @@ app.whenReady().then(async () => {
 
       const hour = new Date().getHours();
       window.drawSidebar(false, (26 - hour) % 24); await wait();
-      check('greeting follows the clock offset', document.getElementById('oneai-sidebar').textContent.includes('午夜好'));
+      check('greeting follows the clock offset', document.getElementById('oneai-sidebar').textContent.includes('晚上好，注意休息'));
       window.drawSidebar(false, (15 - hour + 24) % 24); await wait();
-      check('greeting updates when the clock offset changes', document.getElementById('oneai-sidebar').textContent.includes('下午好'));
+      check('greeting updates when the clock offset changes', document.getElementById('oneai-sidebar').textContent.includes('下午好，聚精会神'));
       window.clearRoot();
       return checks;
     })()\`));
@@ -1776,6 +1886,15 @@ app.whenReady().then(async () => {
       window.electronAPI.switchLocalGitBranch = async (root, branch) => branch === 'conflict'
         ? { ok: false, error: 'Local changes would be overwritten' }
         : { ok: true };
+      window.electronAPI.readGitStatus = async () => ({
+        ok: true,
+        branch: 'main',
+        hasConflicts: false,
+        entries: [
+          { path: 'src/App.tsx', indexStatus: ' ', worktreeStatus: 'M', status: 'modified' },
+          { path: 'README.md', indexStatus: '?', worktreeStatus: '?', status: 'untracked' },
+        ],
+      });
       let dirListCalls = 0;
       window.electronAPI.listDirectory = async (rootPath, relDir = '') => {
         dirListCalls++;
@@ -1813,6 +1932,8 @@ app.whenReady().then(async () => {
       const itemOf = (rel) => rowOf(rel).querySelector('button[role="treeitem"]');
       const branchSelect = treeDlg.querySelector('select[data-git-branch]');
       check('project tree drawer renders below 44px topbar with title and a local branch selector', treeRect.top >= 44 && treeDlg.textContent.includes('OneAI') && branchSelect?.value === 'main' && [...branchSelect.options].some(option => option.value === 'feature/test'));
+      const commitTrigger = treeDlg.querySelector('button[data-git-commit-trigger]');
+      check('project tree toolbar shows Git commit button with change badge and fires onOpenGitCommit', Boolean(commitTrigger) && commitTrigger.querySelector('[data-git-change-count]')?.textContent === '2' && (commitTrigger.click(), window.events.includes('tree-open-commit')));
       const chooseBranch = (branch) => {
         branchSelect.value = branch;
         branchSelect.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1863,6 +1984,72 @@ app.whenReady().then(async () => {
       delete window.electronAPI.copyProjectFile;
       delete window.electronAPI.listLocalGitBranches;
       delete window.electronAPI.switchLocalGitBranch;
+      delete window.electronAPI.readGitStatus;
+      window.clearRoot();
+
+      // 目录树入口的 Git 提交弹窗：变更清单、勾选、差异查看、提交与冲突阻断
+      window.events = [];
+      let commitEntries = [
+        { path: 'src/App.tsx', indexStatus: ' ', worktreeStatus: 'M', status: 'modified' },
+        { path: 'notes.md', indexStatus: '?', worktreeStatus: '?', status: 'untracked' },
+      ];
+      let commitHasConflicts = false;
+      let commitShouldFail = false;
+      let lastCommitCall = null;
+      window.electronAPI.readGitStatus = async () => ({
+        ok: true,
+        branch: 'main',
+        hasConflicts: commitHasConflicts,
+        entries: commitEntries,
+      });
+      window.electronAPI.readGitChangeDiff = async (_dir, file) => ({
+        ok: true,
+        diff: ['@@ -1,2 +1,2 @@', '-old ' + file, '+new ' + file].join(String.fromCharCode(10)),
+      });
+      window.electronAPI.commitGitChanges = async (_dir, files, message) => {
+        lastCommitCall = { files, message };
+        if (commitShouldFail) return { ok: false, error: 'hook rejected' };
+        commitEntries = commitEntries.filter((e) => !files.includes(e.path));
+        return { ok: true, hash: 'a1b2c3d', summary: message.split(String.fromCharCode(10))[0] };
+      };
+      window.drawGitCommit(); await wait(100);
+      const commitDialog = () => document.querySelector('[aria-labelledby="git-commit-title"]');
+      const commitBtn = () => commitDialog().querySelector('button[data-git-commit-submit]');
+      const commitMsgBox = () => commitDialog().querySelector('textarea[aria-label="提交说明"]');
+      const setTextarea = (el, val) => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(el, val);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      check('GitCommitModal lists changed files, checks all by default and previews the first diff', commitDialog()?.textContent.includes('已选 2 / 2 个文件') && commitDialog().querySelector('[data-git-change-diff]')?.textContent.includes('+new src/App.tsx') && commitBtn()?.disabled === true);
+      commitDialog().querySelector('[data-git-change-row="notes.md"] button').click(); await wait(70);
+      check('clicking another changed file switches the diff preview', commitDialog().querySelector('[data-git-change-diff]')?.textContent.includes('+new notes.md'));
+      commitDialog().querySelector('[data-git-change-row="notes.md"] input[type="checkbox"]').click(); await wait(50);
+      check('unchecking a file updates the selection count and commit button count', commitDialog().textContent.includes('已选 1 / 2 个文件') && commitBtn().textContent.includes('提交 (1)'));
+      setTextarea(commitMsgBox(), 'feat: commit app'); await wait(50);
+      check('commit button enables once files and commit message are present', commitBtn().disabled === false);
+      commitShouldFail = true;
+      commitBtn().click(); await wait(80);
+      check('commit failure shows Git error without clearing the commit message', commitDialog().querySelector('[data-git-commit-error]')?.textContent.includes('hook rejected') && commitMsgBox().value === 'feat: commit app');
+      commitShouldFail = false;
+      commitMsgBox().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true })); await wait(120);
+      check('Ctrl+Enter commits only checked files, shows hash summary and refreshes remaining files', JSON.stringify(lastCommitCall) === JSON.stringify({ files: ['src/App.tsx'], message: 'feat: commit app' }) && commitDialog().querySelector('[data-git-commit-success]')?.textContent.includes('a1b2c3d') && commitDialog().querySelectorAll('[data-git-change-row]').length === 1 && window.events.includes('git-committed:main'));
+      commitHasConflicts = true;
+      commitEntries = [{ path: 'clash.ts', indexStatus: 'U', worktreeStatus: 'U', status: 'conflicted' }];
+      commitDialog().querySelector('button[aria-label="刷新变更"]').click(); await wait(80);
+      const conflictJump = [...commitDialog().querySelectorAll('[data-git-commit-conflict-banner] button')][0];
+      check('merge conflicts show blocking banner, disable commit and jump to conflict diff', Boolean(conflictJump) && commitBtn().disabled === true && (conflictJump.click(), window.events.includes('commit-open-conflicts')));
+      commitHasConflicts = false;
+      commitEntries = [{ path: 'src/App.tsx', indexStatus: ' ', worktreeStatus: 'M', status: 'modified' }];
+      window.setUiLanguage('en');
+      window.drawGitCommit(); await wait(80);
+      const hasCjkCommit = (txt) => [...txt].some(c => c.charCodeAt(0) >= 0x2e80);
+      const commitEnParts = [commitDialog().textContent, ...[...commitDialog().querySelectorAll('[title],[aria-label],[placeholder]')].flatMap(e => ['title', 'aria-label', 'placeholder'].map(a => e.getAttribute(a) || ''))];
+      const badCommitEn = commitEnParts.find(hasCjkCommit) || '';
+      check('English GitCommitModal has no Chinese' + (badCommitEn ? ': ' + badCommitEn : ''), !badCommitEn);
+      window.setUiLanguage('zh-CN');
+      delete window.electronAPI.readGitStatus;
+      delete window.electronAPI.readGitChangeDiff;
+      delete window.electronAPI.commitGitChanges;
       window.clearRoot();
 
       let conflictFiles = ['current.ts', 'incoming.ts'];
@@ -1880,11 +2067,18 @@ app.whenReady().then(async () => {
       delete window.electronAPI.readGitConflictDiff;
       window.clearRoot();
 
-      // 侧栏 Dashboard 菜单与 Dashboard 全量分析页面
+      // 侧栏数据面板菜单（三语切换）与数据面板全量分析页面
       window.events = [];
       window.drawSidebar(false, 0, false, null, false); await wait(100);
       const navBtn = document.querySelector('[data-dashboard-nav]');
-      check('expanded sidebar shows Dashboard menu below brand header and triggers onOpenDashboard', Boolean(navBtn) && navBtn.getBoundingClientRect().top >= document.querySelector('aside > div').getBoundingClientRect().bottom - 1 && (navBtn.click(), window.events.includes('open-dashboard')));
+      check('expanded sidebar shows 数据面板 in Simplified Chinese below brand header and triggers onOpenDashboard', Boolean(navBtn) && navBtn.textContent.trim() === '数据面板' && navBtn.getBoundingClientRect().top >= document.querySelector('aside > div').getBoundingClientRect().bottom - 1 && (navBtn.click(), window.events.includes('open-dashboard')));
+      window.setUiLanguage('zh-TW');
+      window.drawSidebar(false, 0, false, null, false); await wait(60);
+      check('expanded sidebar shows 數據面板 in Traditional Chinese', document.querySelector('[data-dashboard-nav]')?.textContent.trim() === '數據面板');
+      window.setUiLanguage('en');
+      window.drawSidebar(false, 0, false, null, false); await wait(60);
+      check('expanded sidebar shows Dashboard in English', document.querySelector('[data-dashboard-nav]')?.textContent.trim() === 'Dashboard');
+      window.setUiLanguage('zh-CN');
       window.events = [];
       window.drawSidebar(false, 0, false, null, true); await wait(100);
       check('active Dashboard clears task active highlight', document.querySelector('[data-dashboard-nav]')?.getAttribute('aria-current') === 'page' && !document.querySelector('[data-task-id="side-a"] button[aria-current]'));
@@ -1896,7 +2090,7 @@ app.whenReady().then(async () => {
       window.dashboardEmpty = false;
       window.drawDashboard(true); await wait(250);
       const dash = document.getElementById('oneai-dashboard-view');
-      check('Dashboard topbar shows Dashboard breadcrumb and hides terminal tools and quota strip', document.querySelector('header').textContent.includes('Dashboard') && !document.getElementById('oneai-terminal-tools') && !document.querySelector('header .quota-bar') && !document.querySelector('header').textContent.includes('Ctx') && document.querySelector('header [data-topbar-neon]')?.dataset.topbarNeon === 'idle' && getComputedStyle(document.querySelector('header .topbar-neon-beam')).animationName === 'none');
+      check('Dashboard topbar shows 数据面板 breadcrumb and hides terminal tools and quota strip', document.querySelector('header').textContent.includes('数据面板') && !document.getElementById('oneai-terminal-tools') && !document.querySelector('header .quota-bar') && !document.querySelector('header').textContent.includes('Ctx') && document.querySelector('header [data-topbar-neon]')?.dataset.topbarNeon === 'idle' && getComputedStyle(document.querySelector('header .topbar-neon-beam')).animationName === 'none');
       check('Dashboard renders 4 KPI cards with deduplicated session count and estimated USD cost', dash.querySelector('[data-kpi="tokens"]').textContent.includes('4.33 M') && dash.querySelector('[data-kpi="sessions"]').textContent.includes('5') && dash.querySelector('[data-kpi="cost"]').textContent.includes('$6.45') && dash.querySelector('[data-kpi="cache"]').textContent.includes('%'));
       check('Dashboard renders 12-month heatmap with active and hatched missing cells', dash.querySelectorAll('[data-dashboard-cell]').length >= 364 && dash.querySelectorAll('[data-dashboard-cell][data-status="active"]').length === 6 && dash.querySelectorAll('[data-dashboard-cell][data-status="missing"]').length > 200);
       const dashHeader = dash.querySelector('[data-dashboard-header]');
@@ -1954,8 +2148,101 @@ app.whenReady().then(async () => {
       window.dashboardEmpty = true;
       window.drawDashboard(false); await wait(200);
       const emptyDashText = document.getElementById('oneai-dashboard-view').textContent;
-      check('empty Dashboard renders cleanly without NaN', emptyDashText.includes('Dashboard.') && !emptyDashText.includes('NaN'));
+      check('empty Dashboard renders cleanly without NaN', emptyDashText.includes('数据面板') && !emptyDashText.includes('NaN'));
       window.dashboardEmpty = false;
+
+      // 校验全部内置已知 CLI 均有官方矢量图标（无通用终端回退），且多实例渐变 ID 不冲突
+      window.drawBrandIcons(); await wait(60);
+      const iconNodes = [...document.querySelectorAll('#brand-icon-grid [data-brand-icon]')];
+      const fallbackIcons = iconNodes.filter((el) => Boolean(el.querySelector('polyline[points="4 17 10 11 4 5"]'))).map((el) => el.getAttribute('data-brand-icon'));
+      const gradIds = [...document.querySelectorAll('#brand-icon-grid linearGradient, #brand-icon-grid radialGradient')].map((el) => el.getAttribute('id'));
+      check('every known CLI renders a dedicated official brand icon without generic fallback', iconNodes.length === 26 && fallbackIcons.length === 0);
+      check('duplicate gradient brand icons keep unique SVG gradient IDs', gradIds.length >= 12 && new Set(gradIds).size === gradIds.length);
+
+      // 右键任务卡片：版本号紧跟 OneAI 右侧；AI 任务按需检测改动并展示角标且短缓存复用，系统终端任务不显示「一键审核」
+      window.events = [];
+      let reviewGitCalls = 0;
+      window.electronAPI.readGitStatus = async (dir) => {
+        reviewGitCalls += 1;
+        if (String(dir).includes('OneAI')) {
+          return {
+            ok: true,
+            branch: 'main',
+            hasConflicts: false,
+            entries: [
+              { path: 'src/a.ts', indexStatus: ' ', worktreeStatus: 'M', status: 'modified' },
+              { path: 'src/b.ts', indexStatus: '?', worktreeStatus: '?', status: 'untracked' },
+            ],
+          };
+        }
+        return { ok: true, branch: 'feature/x', hasConflicts: false, entries: [] };
+      };
+      window.drawSidebar(false, 0, false, null, false, [], {
+        workStartTime: '09:00',
+        workEndTime: '18:00',
+        greetingMessages: { morning: '自定义早安', noon: '自定义午安', afternoon: '自定义下午', evening: '自定义晚安' },
+      }); await wait(80);
+      const sidebarGreeting = document.querySelector('[data-sidebar-greeting]')?.textContent?.trim() || '';
+      check('sidebar displays custom greeting message matching the active work period', sidebarGreeting.startsWith('自定义'));
+      const brandTitleRow = document.querySelector('[data-sidebar-brand-title]');
+      const brandVersionEl = brandTitleRow?.querySelector('[data-sidebar-version]');
+      const brandNameEl = brandTitleRow?.querySelector('span');
+      check('sidebar version badge sits right after the OneAI title on the same brand row', Boolean(brandVersionEl && brandNameEl)
+        && brandVersionEl.getBoundingClientRect().left >= brandNameEl.getBoundingClientRect().right - 1
+        && !document.querySelector('[data-sidebar-greeting]')?.parentElement?.contains(brandVersionEl));
+      // 1) 系统终端任务不显示「一键审核」，也不触发 readGitStatus
+      const sideTTaskBtn = document.querySelector('[data-task-id="side-t"] button');
+      sideTTaskBtn.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 80, clientY: 220 }));
+      await wait(80);
+      check('system terminal task context menu omits One-click review and skips git status check', !document.querySelector('[data-task-review-trigger]') && reviewGitCalls === 0);
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      await wait(40);
+      // 2) AI 任务有未提交改动：显示「2 个改动」并支持展开审核 Agent 列表；短时间内再次右键命中缓存不重复调用 git
+      const sideATaskBtn = document.querySelector('[data-task-id="side-a"] button');
+      sideATaskBtn.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 80, clientY: 160 }));
+      await wait(80);
+      const taskMenu = document.querySelector('[role="menu"]');
+      const menuButtons = [...taskMenu.querySelectorAll('[role="menuitem"]')].map((b) => b.textContent.trim());
+      const reviewIdx = menuButtons.findIndex((txt) => txt.includes('一键审核'));
+      const renameIdx = menuButtons.findIndex((txt) => txt.includes('重命名'));
+      check('task context menu puts One-click review directly above Rename with live change count badge', reviewIdx >= 0 && renameIdx > reviewIdx && taskMenu.querySelector('[data-task-review-badge]')?.textContent?.trim() === '2 个改动' && reviewGitCalls === 1);
+      taskMenu.querySelector('[data-task-review-trigger]').click();
+      await wait(80);
+      const reviewSub = document.querySelector('[data-task-review-submenu]');
+      const reviewCliIds = [...(reviewSub?.querySelectorAll('[data-review-cli]') ?? [])].map((b) => b.getAttribute('data-review-cli'));
+      check('clicking One-click review opens existing AI CLI list without system terminal', Boolean(reviewSub) && reviewCliIds.length >= 2 && !reviewCliIds.includes('terminal'));
+      reviewSub.querySelector('[data-review-cli="claude"]').click();
+      await wait(60);
+      check('choosing a review agent fires onReviewTask and closes the menu', window.events.includes('review:side-a:claude') && !document.querySelector('[data-task-review-submenu]'));
+      sideATaskBtn.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 80, clientY: 160 }));
+      await wait(60);
+      check('reopening context menu within cache TTL reuses git status without extra git call', reviewGitCalls === 1 && document.querySelector('[data-task-review-badge]')?.textContent?.trim() === '2 个改动');
+      // 3) 工作区干净的 AI 任务：仍保留入口并标明「审最近提交」
+      const sideCTaskBtn = document.querySelector('[data-task-id="side-c"] button');
+      sideCTaskBtn.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 80, clientY: 200 }));
+      await wait(80);
+      check('clean Git repo AI task labels One-click review as reviewing latest commit', reviewGitCalls === 2 && document.querySelector('[data-task-review-badge]')?.textContent?.trim() === '审最近提交');
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      delete window.electronAPI.readGitStatus;
+
+      // 设置 → 时间：工作时间段与 4 个时段自定义提示语
+      window.drawSettings(); await wait(80);
+      document.getElementById('settings-tab-time')?.click(); await wait(80);
+      const endInput = document.querySelector('[data-work-end-time]');
+      const setNativeValue = (el, val) => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(el, val);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+      setNativeValue(endInput, '20:00'); await wait(80);
+      check('changing work end time updates afternoon and evening greeting ranges in Settings', document.querySelector('[data-greeting-range="afternoon"]')?.textContent === '13:30–20:00' && document.querySelector('[data-greeting-range="evening"]')?.textContent === '20:00–05:00');
+      const morningInput = document.querySelector('[data-greeting-input="morning"]');
+      setNativeValue(morningInput, '早起写代码'); await wait(80);
+      const resetMorningBtn = document.querySelector('button[aria-label="恢复早上默认提示语"]');
+      check('customizing a period greeting shows a reset button and saves input value', morningInput.value === '早起写代码' && Boolean(resetMorningBtn));
+      resetMorningBtn.click(); await wait(60);
+      check('resetting a period greeting clears custom text back to default placeholder', morningInput.value === '' && morningInput.placeholder === '早上好，元气满满');
       window.clearRoot();
 
       // 软件更新：侧栏徽标（可用、忽略、下载中、已下载、折叠态）与更新弹窗各状态
@@ -2152,8 +2439,13 @@ app.whenReady().then(async () => {
         await new Promise(resolve => setTimeout(resolve, 260));
         check('Antigravity sends /model and Enter to its own terminal', JSON.stringify(pickerWrites.slice(beforeGeminiPicker)) === JSON.stringify([['agy', '/model'], ['agy', String.fromCharCode(13)]]));
         document.querySelector('button[aria-label="在 workbench-shell-check 中新建任务"]').click(); await wait();
-        const cliMenuNames = [...document.querySelectorAll('[role="menuitem"] > span.truncate')].map(node => node.textContent);
-        check('folder plus ranks the preferred installed CLIs first, retains other CLI order and ends the list with the terminal', cliMenuNames.join('|') === 'Claude Code|Codex|Antigravity|Kimi Code|Pi|OpenCode|Qwen Code|Aider|系统终端');
+        const cliMenuButtons = [...document.querySelectorAll('[role="menuitem"][data-cli-menu-item]')];
+        const cliMenuNames = cliMenuButtons.map(node => node.querySelector('span.truncate')?.textContent);
+        check('folder plus sorts CLIs alphabetically by name and ends the list with the terminal', cliMenuNames.join('|') === 'Aider|Antigravity|Claude Code|Codex|Kimi Code|OpenCode|Pi|Qwen Code|系统终端');
+        const firstCliItem = cliMenuButtons[0];
+        const neonRing = firstCliItem?.querySelector('[data-cli-menu-neon]');
+        const menuEl = document.querySelector('[role="menu"]');
+        check('folder plus CLI items carry a neon ring element that stays hidden until hover/focus without horizontal overflow', Boolean(firstCliItem?.classList.contains('cli-menu-neon-item')) && Boolean(neonRing) && getComputedStyle(neonRing).opacity === '0' && menuEl.scrollWidth <= menuEl.clientWidth);
         document.body.click(); await wait();
         row('codex').querySelector('button').click(); await wait();
         const tonesBeforeExit = tones;

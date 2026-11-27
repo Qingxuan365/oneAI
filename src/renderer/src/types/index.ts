@@ -1,5 +1,11 @@
 import type {
   AccountCliId,
+  CliEnvironmentInfo,
+  CliInstallBatchResult,
+  CliInstallEvent,
+  CliInstallOutcome,
+  CliInstallPhase,
+  CliInstallerMeta,
   DashboardDailyRecord,
   DashboardProjectInfo,
   DashboardSessionMeta,
@@ -8,11 +14,15 @@ import type {
   DirectoryTreeEntry,
   FilePreviewResult,
   GitBranchSwitchResult,
+  GitChangeDiffResult,
+  GitCommitResult,
   GitConflictDiffResult,
   GitConflictFilesResult,
   GitLocalBranchesResult,
+  GitStatusResult,
   HistoryAccountRef,
   HistoryEntry,
+  KnownCliInfo,
   LoginStatus,
   QuotaData,
   QuotaGroupSnapshot,
@@ -38,6 +48,12 @@ import type { Language } from '../../../shared/i18n';
 export { THEME_IDS };
 export type {
   AccountCliId,
+  CliEnvironmentInfo,
+  CliInstallBatchResult,
+  CliInstallEvent,
+  CliInstallOutcome,
+  CliInstallPhase,
+  CliInstallerMeta,
   DashboardDailyRecord,
   DashboardProjectInfo,
   DashboardSessionMeta,
@@ -45,8 +61,10 @@ export type {
   DirectoryListResult,
   DirectoryTreeEntry,
   FilePreviewResult,
+  GitStatusResult,
   HistoryAccountRef,
   HistoryEntry,
+  KnownCliInfo,
   LoginStatus,
   QuotaData,
   QuotaGroupSnapshot,
@@ -119,6 +137,15 @@ export interface FolderEntry {
   isExpanded: boolean;
 }
 
+export type GreetingSlot = 'morning' | 'noon' | 'afternoon' | 'evening';
+
+export interface WorkScheduleGreetings {
+  morning: string;
+  noon: string;
+  afternoon: string;
+  evening: string;
+}
+
 export interface AppSettings {
   language: Language; // 首次启动按系统语言预选，之后可在设置 → 外观切换
   onboardingDone: boolean; // 首次引导（选择语言、认识各入口）是否已完成；完成后不再弹出
@@ -128,6 +155,9 @@ export interface AppSettings {
   taskDoneSoundVolume: number; // 提示音音量 (0 ~ 100, 默认 60)
   taskDoneSoundBackgroundOnly: boolean; // 仅当该任务不在当前视窗（非当前任务或窗口失焦）时才响，默认 false
   workReminderHours: number; // 工作时长提醒的间隔小时数，默认 1（1 ~ 12 的整数）
+  workStartTime: string; // 工作开始时间（HH:MM），默认 '09:00'
+  workEndTime: string; // 工作结束时间（HH:MM），默认 '18:00'
+  greetingMessages: WorkScheduleGreetings; // 各时段自定义提示语；空串使用默认提示语
   terminalFontSize: number;   // 终端代码字体大小 (12 ~ 24, 默认 15)
   terminalLineHeight: number; // 终端行高 (1.2 ~ 1.6, 默认 1.3)
   uiScale: 'compact' | 'standard' | 'comfortable' | 'large'; // 界面全局字体缩放
@@ -181,14 +211,22 @@ export interface ElectronTerminalAPI {
   getUsageStats?: (accounts: UsageAccountRef[]) => Promise<UsageStats>;
   /** 全量 Dashboard 统计（按会话与本地日期聚合，供区间/Agent/项目/账号多维过滤与等值成本估算） */
   getDashboardStats?: (accounts: UsageAccountRef[]) => Promise<DashboardStats>;
-  /** 主进程里的已知 CLI 清单（设置 → CLI 显示用），不是写死在界面里 */
-  listKnownClis?: () => Promise<Array<{ id: string; name: string; command: string }>>;
+  /** 主进程里的已知 CLI 清单（设置 → CLI 与欢迎安装页共用），不是写死在界面里 */
+  listKnownClis?: () => Promise<KnownCliInfo[]>;
+  /** 读取安装前环境信息（例如本机是否已有 Git） */
+  getCliEnvInfo?: () => Promise<CliEnvironmentInfo>;
+  /** 按队列串行执行选中 CLI 的官方安装脚本 */
+  installClis?: (cliIds: string[]) => Promise<CliInstallBatchResult>;
+  /** 停止当前正在执行的 CLI 安装队列 */
+  cancelCliInstall?: () => Promise<boolean>;
+  /** 订阅 CLI 安装进度与实时输出日志 */
+  onCliInstallEvent?: (callback: (event: CliInstallEvent) => void) => () => void;
   /** 通知主进程当前界面语言，主进程里会显示到界面的文案（错误、额度提示等）跟随它 */
   setLanguage?: (language: string) => Promise<void>;
   /** 当前用户的主目录，新用户首次启动时作为默认文件夹 */
   getHomeDir?: () => string;
-  /** 按 PATH 检测已安装的 CLI；custom 为用户自定义 CLI，检测到的会一并返回（name 为空） */
-  detectClis: (custom?: Array<{ id: string; command: string }>) => Promise<Array<{ id: string; name: string; command: string }>>;
+  /** 按 PATH 检测已安装的 CLI；custom 为用户自定义 CLI，检测到的会一并返回（name 为空）；refreshPath 为 true 时先刷新系统 PATH */
+  detectClis: (custom?: Array<{ id: string; command: string }>, refreshPath?: boolean) => Promise<Array<{ id: string; name: string; command: string }>>;
   createSession: (options: { id: string; command?: string; cwd?: string; shell?: boolean; account?: SessionAccount; cols?: number; rows?: number }) => Promise<SessionCreateResult>;
   getSessionBuffer: (id: string) => Promise<string>;
   acknowledgeSession?: (id: string, seq: number) => void;
@@ -228,6 +266,9 @@ export interface ElectronTerminalAPI {
   switchLocalGitBranch?: (dir: string, branch: string) => Promise<GitBranchSwitchResult>;
   listGitConflicts?: (dir: string) => Promise<GitConflictFilesResult>;
   readGitConflictDiff?: (dir: string, file: string) => Promise<GitConflictDiffResult>;
+  readGitStatus?: (dir: string) => Promise<GitStatusResult>;
+  readGitChangeDiff?: (dir: string, file: string) => Promise<GitChangeDiffResult>;
+  commitGitChanges?: (dir: string, files: string[], message: string) => Promise<GitCommitResult>;
   /** 在该账号的环境下运行 CLI 的状态命令，判断是否已登录 */
   checkAccountLogin?: (account: SessionAccount) => Promise<LoginStatus | { error: string }>;
   onQuotaUpdate: (callback: (quotas: Record<string, QuotaData>) => void) => () => void;

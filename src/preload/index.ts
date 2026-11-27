@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type {
+  CliInstallEvent,
   ElectronTerminalAPI,
   HistoryAccountRef,
   HistoryEntry,
@@ -53,8 +54,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteSessionHistory: (items: Array<{ cliId: HistoryEntry['cliId']; id: string; accountId?: string }>) => ipcRenderer.invoke('history:delete', items),
   getUsageStats: (accounts: UsageAccountRef[]) => ipcRenderer.invoke('usage:stats', accounts),
   getDashboardStats: (accounts: UsageAccountRef[]) => ipcRenderer.invoke('dashboard:stats', accounts),
-  detectClis: (custom?: Array<{ id: string; command: string }>) => ipcRenderer.invoke('cli:detect', custom),
+  detectClis: (custom?: Array<{ id: string; command: string }>, refreshPath?: boolean) => ipcRenderer.invoke('cli:detect', custom, refreshPath),
   listKnownClis: () => ipcRenderer.invoke('cli:known'),
+  getCliEnvInfo: () => ipcRenderer.invoke('cli:env-info'),
+  installClis: (cliIds: string[]) => ipcRenderer.invoke('cli:install', cliIds),
+  cancelCliInstall: () => ipcRenderer.invoke('cli:install-cancel'),
+  onCliInstallEvent: (callback: (event: CliInstallEvent) => void) => {
+    const subscription = (_event: Electron.IpcRendererEvent, value: CliInstallEvent) => callback(value);
+    ipcRenderer.on('cli:install-event', subscription);
+    return () => {
+      ipcRenderer.removeListener('cli:install-event', subscription);
+    };
+  },
   setLanguage: (language: string) => ipcRenderer.invoke('app:set-language', language),
   getHomeDir: () => {
     if (cachedHomeDir === null) cachedHomeDir = ipcRenderer.sendSync('app:home-dir') as string;
@@ -149,6 +160,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   switchLocalGitBranch: (dir: string, branch: string) => ipcRenderer.invoke('git:switch-local-branch', dir, branch),
   listGitConflicts: (dir: string) => ipcRenderer.invoke('git:list-conflicts', dir),
   readGitConflictDiff: (dir: string, file: string) => ipcRenderer.invoke('git:conflict-diff', dir, file),
+  readGitStatus: (dir: string) => ipcRenderer.invoke('git:status', dir),
+  readGitChangeDiff: (dir: string, file: string) => ipcRenderer.invoke('git:change-diff', dir, file),
+  commitGitChanges: (dir: string, files: string[], message: string) => ipcRenderer.invoke('git:commit', dir, files, message),
   getTaskSummaries: (tasks: Array<{ id: string; cliId: string; cwd: string; createdAt: number; historyId?: string; configDir?: string; includeUsage?: boolean }>) => ipcRenderer.invoke('task:summaries', tasks),
 
   onQuotaUpdate: (callback: (quotas: Record<string, QuotaData>) => void) => {

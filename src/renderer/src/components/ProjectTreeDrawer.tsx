@@ -18,6 +18,7 @@ import {
   FolderOpen,
   FolderTree,
   GitBranch,
+  GitCommitHorizontal,
   GitMerge,
   Loader2,
   RefreshCw,
@@ -36,6 +37,7 @@ interface ProjectTreeDrawerProps {
   rootPath: string;
   gitBranch?: string | null;
   onGitBranchChanged?: (dir: string, branch: string) => void;
+  onOpenGitCommit?: () => void;
   onOpenGitConflicts?: () => void;
   activePreviewPath?: string | null;
   hasActiveTerminal: boolean;
@@ -134,6 +136,7 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
   rootPath,
   gitBranch,
   onGitBranchChanged,
+  onOpenGitCommit,
   onOpenGitConflicts,
   activePreviewPath,
   hasActiveTerminal,
@@ -160,6 +163,7 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
   } | null>(null);
   const [gitSwitchError, setGitSwitchError] = useState<{ root: string; message: string; switched?: boolean } | null>(null);
   const [switchingGitBranch, setSwitchingGitBranch] = useState(false);
+  const [gitChangeCount, setGitChangeCount] = useState<{ root: string; count: number } | null>(null);
 
   const bump = useCallback(() => {
     if (mountedRef.current) setVersion((v) => v + 1);
@@ -305,6 +309,26 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
     return () => { disposed = true; };
   }, [isOpen, rootPath, gitBranch]);
 
+  const refreshGitChangeCount = useCallback((targetRoot: string) => {
+    const readStatus = window.electronAPI?.readGitStatus;
+    if (!gitBranch || !readStatus) return;
+    void readStatus(targetRoot).then((result) => {
+      if (!mountedRef.current) return;
+      if (result.ok) {
+        setGitChangeCount({ root: targetRoot, count: result.totalCount ?? result.entries.length });
+      } else {
+        setGitChangeCount(null);
+      }
+    }).catch(() => {
+      if (mountedRef.current) setGitChangeCount(null);
+    });
+  }, [gitBranch]);
+
+  useEffect(() => {
+    if (!isOpen || !gitBranch) return;
+    refreshGitChangeCount(rootPath);
+  }, [isOpen, rootPath, gitBranch, refreshGitChangeCount]);
+
   useEffect(() => {
     if (isOpen) setGitSwitchError(null);
   }, [isOpen, rootPath]);
@@ -326,6 +350,7 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
         : state);
       onGitBranchChanged?.(rootPath, currentBranch);
       await refreshAll(rootPath, false);
+      refreshGitChangeCount(rootPath);
     } catch {
       setGitSwitchError({ root: rootPath, message: '' });
     } finally {
@@ -604,6 +629,30 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
               <span className="truncate font-mono">{gitBranch}</span>
             </span>
           ))}
+          {gitBranch && onOpenGitCommit && (
+            <button
+              type="button"
+              className="icon-btn relative h-6 w-6 shrink-0"
+              onClick={onOpenGitCommit}
+              aria-label={t('Git 提交')}
+              title={
+                gitChangeCount?.root === rootPath && gitChangeCount.count > 0
+                  ? t('Git 提交（{n} 个变更）', { n: gitChangeCount.count })
+                  : t('Git 提交')
+              }
+              data-git-commit-trigger
+            >
+              <GitCommitHorizontal size={13} aria-hidden="true" />
+              {gitChangeCount?.root === rootPath && gitChangeCount.count > 0 && (
+                <span
+                  data-git-change-count
+                  className="pointer-events-none absolute -right-1 -top-1 flex h-3.5 min-w-[0.875rem] items-center justify-center rounded-full bg-accent px-0.5 text-[9px] font-semibold leading-none text-white"
+                >
+                  {gitChangeCount.count > 99 ? '99+' : gitChangeCount.count}
+                </span>
+              )}
+            </button>
+          )}
           {gitBranch && onOpenGitConflicts && (
             <button type="button" className="icon-btn h-6 w-6 shrink-0" onClick={onOpenGitConflicts}
               aria-label={t('Git 冲突对比')} title={t('Git 冲突对比')}>
@@ -612,7 +661,10 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
           )}
           <button
             type="button"
-            onClick={() => void refreshAll(rootPath, false)}
+            onClick={() => {
+              void refreshAll(rootPath, false);
+              refreshGitChangeCount(rootPath);
+            }}
             aria-label={t('刷新目录')}
             title={t('刷新目录')}
             className="icon-btn h-6 w-6"

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowUpCircle, Clock, ExternalLink, Info, Keyboard, LucideIcon, Minus, Monitor, Moon, Palette, Plus, RefreshCw, RotateCcw, Settings, SlidersHorizontal, SquareTerminal, Sun, TerminalSquare, Users } from 'lucide-react';
-import { Account, AppSettings, CustomCli, UpdateState } from '../types';
+import { Account, AppSettings, CustomCli, GreetingSlot, UpdateState } from '../types';
 import { version as appVersion } from '../../../../package.json';
 import { THEME_OPTIONS } from '../themes';
 import { playTaskDoneSound } from '../taskDoneSound';
@@ -10,6 +10,16 @@ import { AccountsSettings } from './AccountsSettings';
 import { CliSettings } from './CliSettings';
 import { MusicStreamsSettings } from './MusicStreamsSettings';
 import { TERMINAL_FONT_FAMILY } from './TerminalViewport';
+import {
+  DEFAULT_GREETING_MESSAGES,
+  DEFAULT_WORK_END_TIME,
+  DEFAULT_WORK_START_TIME,
+  GREETING_SLOT_ORDER,
+  defaultGreetingText,
+  describeGreetingSlotRanges,
+  greetingSlotLabel,
+  normalizeTimeString,
+} from '../workGreeting';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -24,6 +34,7 @@ interface SettingsModalProps {
   installed: Record<string, boolean> | null;
   onCustomClisChange: (customClis: CustomCli[]) => void;
   onRedetectClis: () => void | Promise<void>;
+  onOpenCliInstaller?: () => void;
   /** 各账号当前的任务数（键为账号 id） */
   accountTaskCounts?: Record<string, number>;
   /** 软件更新状态与操作 */
@@ -81,7 +92,7 @@ const SHORTCUTS: { title: string; items: [string, string][] }[] = [
       ['Ctrl + Shift + B', T('折叠或展开左侧导航栏')],
       ['Ctrl + Shift + H', T('打开历史会话')],
       ['Ctrl + Shift + U', T('打开本周用量')],
-      ['Ctrl + Shift + D', T('打开或关闭 Dashboard')],
+      ['Ctrl + Shift + D', T('打开或关闭数据面板')],
       ['Ctrl + Shift + E', T('打开或关闭项目目录树')],
       ['Ctrl + ,', T('打开设置')],
       [T('F2 / 双击任务'), T('重命名任务')],
@@ -185,6 +196,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   installed,
   onCustomClisChange,
   onRedetectClis,
+  onOpenCliInstaller,
   accountTaskCounts,
   updateState = null,
   onCheckForUpdates,
@@ -577,44 +589,137 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               installed={installed}
               onChange={onCustomClisChange}
               onRedetect={onRedetectClis}
+              onOpenInstaller={onOpenCliInstaller}
             />
           )}
 
-          {tab === 'time' && (
-            <Section title={t('状态栏时钟')} hint={t('在系统时间上增加的小时数')}>
-              <div className={row}>
-                <span>
-                  <span className="block">{t('增加小时数')}</span>
-                  <span className="block text-xs text-fg-faint">{t('默认 0，显示系统时间；可填 -24 到 24 的整数')}</span>
-                </span>
-                <span className="flex shrink-0 items-center gap-1.5">
-                  <button type="button" onClick={() => setClockOffset(clockOffset - 1)} disabled={clockOffset <= -24} className="icon-btn border border-line-strong bg-canvas" title={t('减少 1 小时')} aria-label={t('减少 1 小时')}>
-                    <Minus size={13} />
-                  </button>
-                  <IntField label={t('状态栏时钟增加的小时数')} value={clockOffset} min={-24} max={24} onCommit={setClockOffset} />
-                  <button type="button" onClick={() => setClockOffset(clockOffset + 1)} disabled={clockOffset >= 24} className="icon-btn border border-line-strong bg-canvas" title={t('增加 1 小时')} aria-label={t('增加 1 小时')}>
-                    <Plus size={13} />
-                  </button>
-                  <span className="text-xs text-fg-faint">{t('小时')}</span>
-                </span>
-              </div>
-              <div className={row}>
-                <span>
-                  <span className="block">{t('显示年月日')}</span>
-                  <span className="block text-xs text-fg-faint">{t('状态栏时钟显示年月日（中文界面含农历）与星期，窗口过窄时自动收起；关闭后只显示时间')}</span>
-                </span>
-                <Switch label={t('显示年月日')} checked={settings.topbarDateVisible !== false} onChange={(checked) => update({ topbarDateVisible: checked })} />
-              </div>
-              <ClockPreview offsetHours={clockOffset} />
-              <div className={row}>
-                <span>
-                  <span className="block">{t('显示状态栏')}</span>
-                  <span className="block text-xs text-fg-faint">{t('终端下方的两行状态栏：任务状态、额度进度条、模型、会话用量、系统资源与时钟；关闭后终端多出两行高度')}</span>
-                </span>
-                <Switch label={t('显示状态栏')} checked={settings.statusBarVisible !== false} onChange={(checked) => update({ statusBarVisible: checked })} />
-              </div>
-            </Section>
-          )}
+          {tab === 'time' && (() => {
+            const workStartTime = normalizeTimeString(settings.workStartTime, DEFAULT_WORK_START_TIME);
+            const workEndTime = normalizeTimeString(settings.workEndTime, DEFAULT_WORK_END_TIME);
+            const greetingMessages = settings.greetingMessages ?? DEFAULT_GREETING_MESSAGES;
+            const slotRanges = describeGreetingSlotRanges(workStartTime, workEndTime);
+            const updateGreeting = (slot: GreetingSlot, value: string) => {
+              update({
+                greetingMessages: {
+                  ...DEFAULT_GREETING_MESSAGES,
+                  ...greetingMessages,
+                  [slot]: value.replace(/[\r\n]+/g, ' ').slice(0, 60),
+                },
+              });
+            };
+            return (
+              <>
+                <Section title={t('工作时间与问候语')} hint={t('影响侧栏左上角提示语')}>
+                  <div className={row}>
+                    <span>
+                      <span className="block">{t('工作时间段')}</span>
+                      <span className="block text-xs text-fg-faint">{t('例如 09:00 - 18:00，左上角提示语会按工作时段自动切换')}</span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      <input
+                        type="time"
+                        data-work-start-time
+                        aria-label={t('上班时间')}
+                        value={workStartTime}
+                        onChange={(e) => {
+                          const next = normalizeTimeString(e.target.value, '');
+                          if (next) update({ workStartTime: next });
+                        }}
+                        className="input h-8 w-28 px-2 font-mono text-xs tabular-nums"
+                      />
+                      <span className="text-xs text-fg-faint" aria-hidden="true">--</span>
+                      <input
+                        type="time"
+                        data-work-end-time
+                        aria-label={t('下班时间')}
+                        value={workEndTime}
+                        onChange={(e) => {
+                          const next = normalizeTimeString(e.target.value, '');
+                          if (next) update({ workEndTime: next });
+                        }}
+                        className="input h-8 w-28 px-2 font-mono text-xs tabular-nums"
+                      />
+                    </span>
+                  </div>
+                  <div className="space-y-2 rounded-md border border-line bg-muted p-3">
+                    <div>
+                      <span className="block text-ui text-fg-muted">{t('各时段提示语')}</span>
+                      <span className="block text-xs text-fg-faint">{t('留空则使用默认提示语，可为每个时段自定义文案')}</span>
+                    </div>
+                    <div className="space-y-2">
+                      {GREETING_SLOT_ORDER.map((slot) => {
+                        const slotName = greetingSlotLabel(slot);
+                        const customValue = greetingMessages[slot] ?? '';
+                        return (
+                          <div key={slot} className="flex items-center gap-2">
+                            <span className="flex w-28 shrink-0 items-center justify-between gap-1 text-xs">
+                              <span className="font-medium text-fg">{slotName}</span>
+                              <span data-greeting-range={slot} className="font-mono text-2xs tabular-nums text-fg-faint">{slotRanges[slot]}</span>
+                            </span>
+                            <input
+                              type="text"
+                              data-greeting-input={slot}
+                              aria-label={t('{slot}提示语', { slot: slotName })}
+                              value={customValue}
+                              maxLength={60}
+                              placeholder={defaultGreetingText(slot)}
+                              onChange={(e) => updateGreeting(slot, e.target.value)}
+                              className="input h-8 min-w-0 flex-1 select-text px-2.5 text-xs"
+                            />
+                            {customValue && (
+                              <button
+                                type="button"
+                                onClick={() => updateGreeting(slot, '')}
+                                className="icon-btn h-8 w-8 shrink-0"
+                                title={t('恢复默认')}
+                                aria-label={t('恢复{slot}默认提示语', { slot: slotName })}
+                              >
+                                <RotateCcw size={12} />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </Section>
+
+                <Section title={t('状态栏时钟')} hint={t('在系统时间上增加的小时数')}>
+                  <div className={row}>
+                    <span>
+                      <span className="block">{t('增加小时数')}</span>
+                      <span className="block text-xs text-fg-faint">{t('默认 0，显示系统时间；可填 -24 到 24 的整数')}</span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      <button type="button" onClick={() => setClockOffset(clockOffset - 1)} disabled={clockOffset <= -24} className="icon-btn border border-line-strong bg-canvas" title={t('减少 1 小时')} aria-label={t('减少 1 小时')}>
+                        <Minus size={13} />
+                      </button>
+                      <IntField label={t('状态栏时钟增加的小时数')} value={clockOffset} min={-24} max={24} onCommit={setClockOffset} />
+                      <button type="button" onClick={() => setClockOffset(clockOffset + 1)} disabled={clockOffset >= 24} className="icon-btn border border-line-strong bg-canvas" title={t('增加 1 小时')} aria-label={t('增加 1 小时')}>
+                        <Plus size={13} />
+                      </button>
+                      <span className="text-xs text-fg-faint">{t('小时')}</span>
+                    </span>
+                  </div>
+                  <div className={row}>
+                    <span>
+                      <span className="block">{t('显示年月日')}</span>
+                      <span className="block text-xs text-fg-faint">{t('状态栏时钟显示年月日（中文界面含农历）与星期，窗口过窄时自动收起；关闭后只显示时间')}</span>
+                    </span>
+                    <Switch label={t('显示年月日')} checked={settings.topbarDateVisible !== false} onChange={(checked) => update({ topbarDateVisible: checked })} />
+                  </div>
+                  <ClockPreview offsetHours={clockOffset} />
+                  <div className={row}>
+                    <span>
+                      <span className="block">{t('显示状态栏')}</span>
+                      <span className="block text-xs text-fg-faint">{t('终端下方的两行状态栏：任务状态、额度进度条、模型、会话用量、系统资源与时钟；关闭后终端多出两行高度')}</span>
+                    </span>
+                    <Switch label={t('显示状态栏')} checked={settings.statusBarVisible !== false} onChange={(checked) => update({ statusBarVisible: checked })} />
+                  </div>
+                </Section>
+              </>
+            );
+          })()}
 
           {tab === 'shortcuts' && SHORTCUTS.map((group) => (
             <Section key={group.title} title={t(group.title)}>

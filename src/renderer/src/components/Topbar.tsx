@@ -109,7 +109,7 @@ export const Topbar: React.FC<TopbarProps> = React.memo(({
         {isDashboardOpen ? (
           <div data-topbar-breadcrumb className="flex min-w-0 items-center gap-1.5">
             <LayoutDashboard size={15} className="shrink-0 text-accent" aria-hidden="true" />
-            <span data-topbar-truncatable className="truncate font-medium text-fg">Dashboard</span>
+            <span data-topbar-truncatable className="truncate font-medium text-fg">{t('数据面板')}</span>
           </div>
         ) : currentGroup ? (
           <div data-topbar-breadcrumb className="flex min-w-0 items-center gap-1.5">

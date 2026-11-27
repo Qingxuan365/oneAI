@@ -1,10 +1,18 @@
 import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUpCircle, BedDouble, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Folder, FolderOpen, FolderPlus, GitBranch, GripVertical, History, House, LayoutDashboard, Moon, PanelLeftOpen, Pencil, Plus, RotateCcw, Settings, SlidersHorizontal, Sun, Trash2, User, X } from 'lucide-react';
-import { Account, CliDef, FolderEntry, HistoryEntry, MusicStream, TaskSession, UpdateState } from '../types';
+import { ArrowUpCircle, BedDouble, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Folder, FolderOpen, FolderPlus, GitBranch, GripVertical, History, House, LayoutDashboard, Moon, PanelLeftOpen, Pencil, Plus, RotateCcw, Settings, ShieldCheck, SlidersHorizontal, Sun, Trash2, User, X } from 'lucide-react';
+import { Account, CliDef, FolderEntry, GitStatusResult, HistoryEntry, MusicStream, TaskSession, UpdateState, WorkScheduleGreetings } from '../types';
 
 const NO_STREAMS: MusicStream[] = [];
 // 一个文件夹的任务数超过这个值时，侧栏对屏幕外的任务行启用 content-visibility
 const LARGE_FOLDER_TASKS = 30;
+// 右键任务菜单按需读取 Git 状态的短缓存：避免重复右键或点选审核 Agent 时重复拉起 git 子进程
+const REVIEW_STATUS_CACHE_TTL_MS = 3_000;
+const REVIEW_STATUS_CACHE_MAX = 24;
+
+type ReviewGitHint =
+  | { kind: 'changes'; count: number; status: GitStatusResult }
+  | { kind: 'clean'; status: GitStatusResult }
+  | { kind: 'non-git' };
 import { TASK_STATUS_META, isTaskAlive } from '../taskStatus';
 import { folderKey, folderName, historySessionKey, orderedTasks, RecentFolder } from '../workspaceState';
 import { SUMMARY_CLIS, formatAgo, formatClock } from '../taskSummary';
@@ -12,10 +20,9 @@ import { BrandIcon } from './BrandIcon';
 import { AppLogo } from './AppLogo';
 import { MusicPlayer } from './MusicPlayer';
 import { version } from '../../../../package.json';
-import { T, t } from '../i18n';
-
-const NEW_TASK_CLI_PRIORITY = new Map(['claude', 'codex', 'agy', 'kimi', 'pi', 'opencode'].map((id, index) => [id, index]));
-const newTaskCliRank = (id: string) => NEW_TASK_CLI_PRIORITY.get(id) ?? NEW_TASK_CLI_PRIORITY.size + Number(id === 'terminal');
+import { t } from '../i18n';
+import { sortClisAlphabetically } from '../clis';
+import { defaultGreetingText, resolveGreetingSlot } from '../workGreeting';
 
 function FolderTaskPulses({ runningIds, layoutKey }: { runningIds: string; layoutKey: string }) {
   const svg = useRef<SVGSVGElement>(null);
@@ -81,8 +88,13 @@ interface SidebarProps {
   gitBranches?: Record<string, string | null>;
   /** 任务行第二行：任务会话里最近一条用户消息；text 为 null 表示新会话，缺省表示尚未读到（仅 Claude / Codex / Kimi 任务显示这一行） */
   summaries?: Record<string, { text: string | null }>;
-  /** 「新会话 · 时间」使用的时钟偏移（小时），与顶栏时钟一致 */
+  /** 「新会话 · 时间」与左上角问候语使用的时钟偏移（小时），与状态栏时钟一致 */
   clockOffsetHours?: number;
+  /** 工作时间段（HH:MM），用于驱动左上角按时段切换的提示语 */
+  workStartTime?: string;
+  workEndTime?: string;
+  /** 各时段自定义提示语，空串使用默认提示语 */
+  greetingMessages?: Partial<WorkScheduleGreetings>;
   /** 由历史会话归类出的「最近任务」文件夹 */
   recentFolders?: RecentFolder[];
   activeTaskId: string | null;
@@ -115,6 +127,8 @@ interface SidebarProps {
   onRemoveFolder?: (folderPath: string) => void;
   onCloseTask: (taskId: string, e: React.MouseEvent) => void;
   onRenameTask?: (taskId: string, title: string) => void;
+  /** 一键审核：把指定任务当前完成的功能交给另一个 CLI Agent 审核；可复用右键菜单已按需读到的 Git 状态 */
+  onReviewTask?: (taskId: string, cliId: string, accountId?: string, prefetchedGitStatus?: GitStatusResult | null) => void;
   onResumeHistory?: (entry: HistoryEntry) => void;
   onOpenHistory?: () => void;
   onOpenSettings?: () => void;
@@ -127,16 +141,6 @@ interface SidebarProps {
   showMusicPlayer?: boolean;
   /** 传入当前语言，使 React.memo 在切换语言时同步重绘 */
   language?: string;
-}
-
-/** 按顶栏时钟的小时数（含设置里的时钟偏移）选择问候语，与顶栏和「新会话 · 时间」一致 */
-function getGreeting(offsetHours = 0): { text: string; period: 'day' | 'evening' | 'midnight' } {
-  const hour = new Date(Date.now() + (Number.isFinite(offsetHours) ? offsetHours : 0) * 3_600_000).getHours();
-  if (hour < 5) return { text: T('午夜好，早休息。'), period: 'midnight' };
-  if (hour < 11) return { text: T('早上好，你最棒。'), period: 'day' };
-  if (hour < 13) return { text: T('中午好，你最棒。'), period: 'day' };
-  if (hour < 18) return { text: T('下午好，你最棒。'), period: 'day' };
-  return { text: T('晚上好，你最棒。'), period: 'evening' };
 }
 
 const BranchBadge: React.FC<{ branch?: string | null }> = ({ branch }) => (branch ? (
@@ -166,6 +170,9 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   gitBranches = {},
   summaries = {},
   clockOffsetHours = 0,
+  workStartTime,
+  workEndTime,
+  greetingMessages,
   recentFolders = [],
   activeTaskId,
   isDashboardActive = false,
@@ -191,6 +198,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   onRemoveFolder,
   onCloseTask,
   onRenameTask,
+  onReviewTask,
   onResumeHistory,
   onOpenHistory,
   onOpenSettings,
@@ -221,7 +229,9 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
       cancelResizeRef.current?.();
     };
   }, [isCollapsed, onResizeWidth]);
-  const [greeting, setGreeting] = useState(() => getGreeting(clockOffsetHours));
+  // 仅当跨时段（slot 或 icon 变化）时才更新 state，避免每分钟无谓触发整个侧栏重渲染
+  const [greetingSlot, setGreetingSlot] = useState(() => resolveGreetingSlot(clockOffsetHours, workStartTime, workEndTime));
+  const greetingText = greetingMessages?.[greetingSlot.slot]?.trim() || defaultGreetingText(greetingSlot.slot);
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
   const [openRecent, setOpenRecent] = useState<ReadonlySet<string>>(() => new Set());
   // 文件夹拖拽排序：以手柄拖动整行；任务拖拽排序：只在所属文件夹内
@@ -244,10 +254,14 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   const finishingRef = useRef(false);
 
   useEffect(() => {
-    setGreeting(getGreeting(clockOffsetHours));
-    const timer = window.setInterval(() => setGreeting(getGreeting(clockOffsetHours)), 60_000);
+    const sync = () => {
+      const next = resolveGreetingSlot(clockOffsetHours, workStartTime, workEndTime);
+      setGreetingSlot((prev) => (prev.slot === next.slot && prev.icon === next.icon ? prev : next));
+    };
+    sync();
+    const timer = window.setInterval(sync, 60_000);
     return () => window.clearInterval(timer);
-  }, [clockOffsetHours]);
+  }, [clockOffsetHours, workStartTime, workEndTime]);
 
   // 结束重命名：Esc 取消、Enter / 失焦保存；键盘结束时把焦点还给任务行，避免落到 body
   const finishRename = (save: boolean, refocus: boolean) => {
@@ -286,7 +300,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   }, [folders, tasks]);
   const tasksOf = (folderPath: string) => tasksByFolder.get(folderKey(folderPath)) ?? [];
   const cliMap = useMemo(() => new Map(clis.map((cli) => [cli.id, cli])), [clis]);
-  const newTaskClis = useMemo(() => [...clis].sort((a, b) => newTaskCliRank(a.id) - newTaskCliRank(b.id)), [clis]);
+  const newTaskClis = useMemo(() => sortClisAlphabetically(clis), [clis]);
   const accountMap = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
   const cliOf = (task: TaskSession) => cliMap.get(task.groupId);
   const accountOf = (task: TaskSession) => (task.accountId ? accountMap.get(task.accountId) : undefined);
@@ -318,11 +332,28 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   const menuRef = useRef<HTMLDivElement>(null);
   const menuTriggerRef = useRef<HTMLElement | null>(null);
   const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
+  const [reviewSubmenuOpen, setReviewSubmenuOpen] = useState(false);
+  const reviewSubmenuOpenRef = useRef(false);
+  reviewSubmenuOpenRef.current = reviewSubmenuOpen;
+  const reviewTriggerRef = useRef<HTMLButtonElement>(null);
+  const reviewSubmenuRef = useRef<HTMLDivElement>(null);
+  const [reviewSubmenuPos, setReviewSubmenuPos] = useState<{ left: number; top: number } | null>(null);
+  useEffect(() => {
+    setReviewSubmenuOpen(false);
+    setReviewSubmenuPos(null);
+  }, [menu]);
   useEffect(() => {
     if (!menu) return;
-    const close = () => setMenu(null);
+    const close = () => { setReviewSubmenuOpen(false); setMenu(null); };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (reviewSubmenuOpenRef.current) {
+          setReviewSubmenuOpen(false);
+          requestAnimationFrame(() => {
+            if (reviewTriggerRef.current?.isConnected) reviewTriggerRef.current.focus();
+          });
+          return;
+        }
         const trigger = menuTriggerRef.current;
         close();
         requestAnimationFrame(() => {
@@ -347,6 +378,21 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
       top: Math.max(8, Math.min(menu.y, window.innerHeight - rect.height - 8)),
     });
   }, [menu]);
+  useLayoutEffect(() => {
+    if (!reviewSubmenuOpen || !menuRef.current || !reviewSubmenuRef.current) {
+      setReviewSubmenuPos(null);
+      return;
+    }
+    const parentRect = menuRef.current.getBoundingClientRect();
+    const triggerRect = reviewTriggerRef.current?.getBoundingClientRect() ?? parentRect;
+    const subRect = reviewSubmenuRef.current.getBoundingClientRect();
+    const fitsRight = parentRect.right + 4 + subRect.width <= window.innerWidth - 8;
+    const left = fitsRight
+      ? parentRect.right + 4
+      : Math.max(8, parentRect.left - subRect.width - 4);
+    const top = Math.max(8, Math.min(triggerRect.top - 4, window.innerHeight - subRect.height - 8));
+    setReviewSubmenuPos({ left, top });
+  }, [reviewSubmenuOpen, menuPos]);
   useEffect(() => {
     if (!menu || !menuRef.current) return;
     const target = menu.focusFirst
@@ -355,8 +401,105 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
     requestAnimationFrame(() => target.focus());
   }, [menu]);
   const menuTask = menu?.taskId ? tasks.find((task) => task.id === menu.taskId) : undefined;
+  const reviewClis = useMemo(() => newTaskClis.filter((cli) => cli.id !== 'terminal'), [newTaskClis]);
+  const canShowReview = Boolean(onReviewTask && reviewClis.length > 0 && menuTask && menuTask.groupId !== 'terminal');
+  const reviewTargetCwd = menu?.kind === 'task' && canShowReview && menuTask ? menuTask.cwd : null;
+  const reviewTargetKnownNonGit = reviewTargetCwd
+    ? Object.prototype.hasOwnProperty.call(gitBranches, folderKey(reviewTargetCwd)) && gitBranches[folderKey(reviewTargetCwd)] === null
+    : false;
+  const reviewStatusCacheRef = useRef(new Map<string, { at: number; hint: ReviewGitHint }>());
+  const [reviewGitHint, setReviewGitHint] = useState<ReviewGitHint | null>(null);
+  useEffect(() => {
+    if (!reviewTargetCwd) {
+      setReviewGitHint(null);
+      return;
+    }
+    if (reviewTargetKnownNonGit) {
+      setReviewGitHint({ kind: 'non-git' });
+      return;
+    }
+    const key = folderKey(reviewTargetCwd);
+    const cached = reviewStatusCacheRef.current.get(key);
+    if (cached && Date.now() - cached.at < REVIEW_STATUS_CACHE_TTL_MS) {
+      setReviewGitHint(cached.hint);
+      return;
+    }
+    const readStatus = window.electronAPI?.readGitStatus;
+    if (!readStatus) {
+      setReviewGitHint(null);
+      return;
+    }
+    setReviewGitHint(null);
+    let cancelled = false;
+    void readStatus(reviewTargetCwd).then((res) => {
+      if (cancelled) return;
+      const hint: ReviewGitHint = res && res.ok
+        ? (() => {
+            const count = res.totalCount ?? res.entries.length;
+            return count > 0
+              ? { kind: 'changes', count, status: res }
+              : { kind: 'clean', status: res };
+          })()
+        : { kind: 'non-git' };
+      const cache = reviewStatusCacheRef.current;
+      if (cache.size >= REVIEW_STATUS_CACHE_MAX) {
+        const oldestKey = cache.keys().next().value;
+        if (oldestKey !== undefined) cache.delete(oldestKey);
+      }
+      cache.set(key, { at: Date.now(), hint });
+      setReviewGitHint(hint);
+    }).catch(() => {
+      if (!cancelled) setReviewGitHint({ kind: 'non-git' });
+    });
+    return () => { cancelled = true; };
+  }, [reviewTargetCwd, reviewTargetKnownNonGit]);
+  const reviewPrefetchedStatus: GitStatusResult | null | undefined = reviewGitHint
+    ? (reviewGitHint.kind === 'non-git' ? null : reviewGitHint.status)
+    : undefined;
+  const reviewStatusBadge = reviewGitHint?.kind === 'changes'
+    ? t('{n} 个改动', { n: reviewGitHint.count })
+    : reviewGitHint?.kind === 'clean'
+      ? t('审最近提交')
+      : null;
+  const reviewButtonTitle = reviewGitHint?.kind === 'changes'
+    ? t('当前工作区有 {n} 个未提交改动', { n: reviewGitHint.count })
+    : reviewGitHint?.kind === 'clean'
+      ? t('当前工作区无未提交改动，将审核最近一次提交（HEAD）')
+      : undefined;
   const menuItemClass = 'flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-hover focus-visible:bg-hover focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40';
   const accountedClis = (cliId: string) => accounts.filter((account) => account.cliId === cliId);
+
+  const handleReviewSubmenuKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const items = reviewSubmenuRef.current
+      ? [...reviewSubmenuRef.current.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')]
+      : [];
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      e.stopPropagation();
+      setReviewSubmenuOpen(false);
+      reviewTriggerRef.current?.focus();
+      return;
+    }
+    if (items.length === 0) return;
+    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      e.stopPropagation();
+      items[(currentIndex + 1) % items.length]?.focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      e.stopPropagation();
+      items[(currentIndex <= 0 ? items.length : currentIndex) - 1]?.focus();
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      e.stopPropagation();
+      items[0]?.focus();
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      e.stopPropagation();
+      items[items.length - 1]?.focus();
+    }
+  };
 
   const openNewMenu = (e: React.MouseEvent, folderPath: string) => {
     e.stopPropagation();
@@ -431,25 +574,28 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
     window.addEventListener('keydown', onKey);
   };
 
+  const cliMenuItemClass = 'cli-menu-neon-item flex items-center gap-2 px-2.5 py-1.5 text-left disabled:cursor-not-allowed disabled:opacity-40';
   const newTaskItems = (folderPath: string) => (
     <>
       {newTaskClis.map((cli, idx) => (
         <React.Fragment key={cli.id}>
           {idx > 0 && accountedClis(newTaskClis[idx - 1].id).length > 0 && <div className="my-1 border-t border-line/60" role="separator" />}
-          <button type="button" role="menuitem" className={menuItemClass}
+          <button type="button" role="menuitem" data-cli-menu-item={cli.id} className={cliMenuItemClass}
             onClick={() => { setMenu(null); onNewTask(folderPath, cli.id); }}>
+            <span className="cli-menu-neon-ring" aria-hidden="true" data-cli-menu-neon />
             <BrandIcon icon={cli.icon} size={14} /><span className="truncate">{cli.name}</span>
           </button>
           {accountedClis(cli.id).map((account) => (
-            <button key={account.id} type="button" role="menuitem" className={`${menuItemClass} pl-8 text-fg-subtle`}
+            <button key={account.id} type="button" role="menuitem" data-cli-menu-item={`${cli.id}:${account.id}`} className={`${cliMenuItemClass} pl-7 text-fg-subtle`}
               onClick={() => { setMenu(null); onNewTask(folderPath, cli.id, account.id); }}>
+              <span className="cli-menu-neon-ring" aria-hidden="true" data-cli-menu-neon />
               <User size={12} /><span className="truncate">{t('用 {name} 新建', { name: account.name })}</span>
             </button>
           ))}
         </React.Fragment>
       ))}
       {onCustomNewTask && (
-        <button type="button" role="menuitem" className={`${menuItemClass} border-t border-line`}
+        <button type="button" role="menuitem" className={`${menuItemClass} mt-0.5 border-t border-line`}
           onClick={() => { setMenu(null); onCustomNewTask(folderPath); }}>
           <SlidersHorizontal size={13} />{t('自定义命令与目录…')}
         </button>
@@ -476,7 +622,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
       role="menu"
       tabIndex={-1}
       style={menuPos ?? fallbackPos}
-      className="fixed z-50 max-h-[calc(100vh-16px)] w-56 overflow-y-auto rounded-md border border-line-strong bg-elevated py-1 text-ui text-fg shadow-xl outline-none"
+      className={`fixed z-50 max-h-[calc(100vh-16px)] ${menu.kind === 'task' ? 'w-60' : 'w-56'} overflow-y-auto overflow-x-hidden rounded-md border border-line-strong bg-elevated py-1 text-ui text-fg shadow-xl outline-none`}
       onClick={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
       onKeyDown={handleMenuKeyDown}
@@ -531,35 +677,137 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
       )}
       {menu.kind === 'task' && menuTask && (
         <>
+          {canShowReview && (
+            <>
+              <button
+                ref={reviewTriggerRef}
+                type="button"
+                role="menuitem"
+                aria-haspopup="menu"
+                aria-expanded={reviewSubmenuOpen}
+                data-task-review-trigger
+                data-review-git-state={reviewGitHint?.kind ?? 'idle'}
+                title={reviewButtonTitle}
+                className={`${menuItemClass} justify-between ${reviewSubmenuOpen ? 'bg-hover text-fg' : ''}`}
+                onMouseEnter={() => setReviewSubmenuOpen(true)}
+                onClick={() => setReviewSubmenuOpen((open) => !open)}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowRight') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setReviewSubmenuOpen(true);
+                    requestAnimationFrame(() => {
+                      reviewSubmenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus();
+                    });
+                  }
+                }}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <ShieldCheck size={13} className="shrink-0 text-accent" />
+                  <span className="truncate">{t('一键审核')}</span>
+                </span>
+                <span className="flex shrink-0 items-center gap-1">
+                  {reviewStatusBadge && (
+                    <span
+                      data-task-review-badge
+                      className={`rounded px-1.5 py-0.5 text-2xs leading-none ${
+                        reviewGitHint?.kind === 'changes'
+                          ? 'bg-accent/15 text-accent'
+                          : 'bg-hover text-fg-faint'
+                      }`}
+                    >
+                      {reviewStatusBadge}
+                    </span>
+                  )}
+                  <ChevronRight size={13} className="shrink-0 text-fg-faint" aria-hidden="true" />
+                </span>
+              </button>
+              <div className="my-1 border-t border-line" role="separator" />
+            </>
+          )}
           {!isCollapsed && onRenameTask && (
             <button type="button" role="menuitem" className={menuItemClass}
+              onMouseEnter={() => setReviewSubmenuOpen(false)}
               onClick={() => { setEditing({ id: menuTask.id, draft: menuTask.title }); setMenu(null); }}>
               <Pencil size={13} />{t('重命名')}
             </button>
           )}
           {onRestartTask && (
             <button type="button" role="menuitem" className={menuItemClass} disabled={menuTask.status === 'starting'}
+              onMouseEnter={() => setReviewSubmenuOpen(false)}
               onClick={() => { setMenu(null); onRestartTask(menuTask.id); }}>
               <RotateCcw size={13} />{isTaskAlive(menuTask.status) ? t('重启终端') : t('启动终端')}
             </button>
           )}
           <button type="button" role="menuitem" className={menuItemClass}
+            onMouseEnter={() => setReviewSubmenuOpen(false)}
             onClick={() => { void window.electronAPI?.writeClipboardText?.(menuTask.cwd); setMenu(null); }}>
             <Copy size={13} />{t('复制工作目录')}
           </button>
           {onOpenFolder && (
             <button type="button" role="menuitem" className={menuItemClass}
+              onMouseEnter={() => setReviewSubmenuOpen(false)}
               onClick={() => { setMenu(null); onOpenFolder(menuTask.cwd); }}>
               <FolderOpen size={13} />{t('在资源管理器中打开')}
             </button>
           )}
           <div className="my-1 border-t border-line" role="separator" />
           <button type="button" role="menuitem" className={`${menuItemClass} text-danger`}
+            onMouseEnter={() => setReviewSubmenuOpen(false)}
             onClick={(e) => { setMenu(null); onCloseTask(menuTask.id, e); }}>
             <X size={13} />{t('关闭任务')}
           </button>
         </>
       )}
+    </div>
+  );
+  const reviewSubmenuNode = menuVisible && menu?.kind === 'task' && menuTask && reviewSubmenuOpen && canShowReview && onReviewTask && (
+    <div
+      ref={reviewSubmenuRef}
+      role="menu"
+      aria-label={t('选择审核 Agent')}
+      data-task-review-submenu
+      tabIndex={-1}
+      style={reviewSubmenuPos ?? {
+        left: Math.min((menuPos ?? fallbackPos).left + 244, window.innerWidth - 232),
+        top: (menuPos ?? fallbackPos).top,
+      }}
+      className="fixed z-50 max-h-[calc(100vh-16px)] w-56 overflow-y-auto overflow-x-hidden rounded-md border border-line-strong bg-elevated py-1 text-ui text-fg shadow-xl outline-none"
+      onClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.preventDefault()}
+      onKeyDown={handleReviewSubmenuKeyDown}
+    >
+      <div className="px-3 py-1 text-2xs font-medium text-fg-faint">{t('选择审核 Agent')}</div>
+      {reviewClis.map((cli, idx) => (
+        <React.Fragment key={cli.id}>
+          {idx > 0 && accountedClis(reviewClis[idx - 1].id).length > 0 && <div className="my-1 border-t border-line/60" role="separator" />}
+          <button
+            type="button"
+            role="menuitem"
+            data-review-cli={cli.id}
+            className={cliMenuItemClass}
+            onClick={() => { setReviewSubmenuOpen(false); setMenu(null); onReviewTask(menuTask.id, cli.id, undefined, reviewPrefetchedStatus); }}
+          >
+            <span className="cli-menu-neon-ring" aria-hidden="true" data-cli-menu-neon />
+            <BrandIcon icon={cli.icon} size={14} />
+            <span className="truncate">{cli.name}</span>
+          </button>
+          {accountedClis(cli.id).map((account) => (
+            <button
+              key={account.id}
+              type="button"
+              role="menuitem"
+              data-review-cli={`${cli.id}:${account.id}`}
+              className={`${cliMenuItemClass} pl-7 text-fg-subtle`}
+              onClick={() => { setReviewSubmenuOpen(false); setMenu(null); onReviewTask(menuTask.id, cli.id, account.id, reviewPrefetchedStatus); }}
+            >
+              <span className="cli-menu-neon-ring" aria-hidden="true" data-cli-menu-neon />
+              <User size={12} />
+              <span className="truncate">{t('用 {name} 审核', { name: account.name })}</span>
+            </button>
+          ))}
+        </React.Fragment>
+      ))}
     </div>
   );
 
@@ -598,8 +846,8 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
               data-dashboard-nav
               onClick={onOpenDashboard}
               aria-current={isDashboardActive ? 'page' : undefined}
-              title="Dashboard (Ctrl+Shift+D)"
-              aria-label="Dashboard"
+              title={t('数据面板 (Ctrl+Shift+D)')}
+              aria-label={t('数据面板')}
               className={`relative flex h-9 w-9 items-center justify-center rounded-md transition-colors ${
                 isDashboardActive ? 'bg-selected text-accent' : 'text-fg-subtle hover:bg-hover hover:text-fg'
               }`}
@@ -698,6 +946,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
           )}
         </div>
         {menuNode}
+      {reviewSubmenuNode}
         {/* 与展开状态使用同一个 key：两种状态的根都是同一个 aside，React 会复用这个播放器实例，折叠时只隐藏、播放不中断 */}
         {showMusicPlayer && <MusicPlayer key="music-player" directory={musicDirectory} streams={musicStreams} hidden />}
       </aside>
@@ -706,38 +955,39 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
 
   return (
     <aside ref={asideRef} id="oneai-sidebar" style={width ? { width } : undefined} className={`relative flex ${width ? '' : 'w-80'} bg-surface border-r border-line flex-col h-full select-none shrink-0 text-fg-muted`}>
-      {/* 侧边栏顶部：应用品牌、标语、版本号与问候语 */}
+      {/* 侧边栏顶部：应用品牌、版本号、标语与问候语 */}
       <div className="window-drag shrink-0 border-b border-line bg-panel px-3.5 pb-3 pt-4 text-center">
-        <div className="flex items-center justify-center gap-2.5">
+        <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1">
           <AppLogo size={34} />
-          <span className="text-2xl font-semibold tracking-tight text-fg">OneAI</span>
+          <div className="flex min-w-0 items-baseline gap-1.5" data-sidebar-brand-title>
+            <span className="text-2xl font-semibold leading-none tracking-tight text-fg">OneAI</span>
+            <span data-sidebar-version className="shrink-0 font-mono text-2xs leading-none text-fg-faint">v{version}</span>
+            {showUpdateBadge && onOpenUpdate && (
+              <button
+                type="button"
+                data-update-badge
+                onClick={onOpenUpdate}
+                title={updateBadgeTitle}
+                aria-label={updateBadgeTitle}
+                style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                className={`inline-flex shrink-0 items-center gap-1 self-center rounded-full border px-1.5 py-0 font-mono text-2xs leading-4 transition-colors ${
+                  updateState?.phase === 'downloaded'
+                    ? 'border-success/40 bg-success/15 text-success hover:bg-success/25'
+                    : 'border-accent/40 bg-accent/15 text-accent hover:bg-accent/25'
+                }`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${updateState?.phase === 'downloaded' ? 'bg-success' : 'bg-accent'}`} aria-hidden="true" />
+                <span>{updateBadgeText}</span>
+              </button>
+            )}
+          </div>
         </div>
         <p className="mt-1.5 text-ui text-fg-subtle">All agents in one.</p>
         <div className="mt-0.5 flex min-w-0 items-center justify-center gap-1 overflow-hidden whitespace-nowrap text-2xs text-fg-faint" aria-live="polite">
-          <span className="shrink-0 font-mono">v{version}</span>
-          {showUpdateBadge && onOpenUpdate && (
-            <button
-              type="button"
-              data-update-badge
-              onClick={onOpenUpdate}
-              title={updateBadgeTitle}
-              aria-label={updateBadgeTitle}
-              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-              className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0 font-mono text-2xs leading-4 transition-colors ${
-                updateState?.phase === 'downloaded'
-                  ? 'border-success/40 bg-success/15 text-success hover:bg-success/25'
-                  : 'border-accent/40 bg-accent/15 text-accent hover:bg-accent/25'
-              }`}
-            >
-              <span className={`h-1.5 w-1.5 rounded-full ${updateState?.phase === 'downloaded' ? 'bg-success' : 'bg-accent'}`} aria-hidden="true" />
-              <span>{updateBadgeText}</span>
-            </button>
-          )}
-          <span className="shrink-0" aria-hidden="true">·</span>
-          {greeting.period === 'day' ? <Sun size={12} className="text-warning shrink-0" aria-hidden="true" />
-            : greeting.period === 'evening' ? <Moon size={12} className="text-fg-muted shrink-0" aria-hidden="true" />
+          {greetingSlot.icon === 'day' ? <Sun size={12} className="text-warning shrink-0" aria-hidden="true" />
+            : greetingSlot.icon === 'evening' ? <Moon size={12} className="text-fg-muted shrink-0" aria-hidden="true" />
               : <BedDouble size={12} className="text-accent shrink-0" aria-hidden="true" />}
-          <span className="min-w-0 truncate">{t(greeting.text)}</span>
+          <span data-sidebar-greeting className="min-w-0 truncate">{greetingText}</span>
         </div>
       </div>
 
@@ -748,7 +998,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
             data-dashboard-nav
             onClick={onOpenDashboard}
             aria-current={isDashboardActive ? 'page' : undefined}
-            title="Dashboard (Ctrl+Shift+D)"
+            title={t('数据面板 (Ctrl+Shift+D)')}
             className={`relative flex h-8 min-w-0 flex-1 items-center gap-2.5 rounded-md px-2.5 text-left text-ui transition-colors ${
               isDashboardActive
                 ? 'bg-selected font-medium text-fg'
@@ -757,7 +1007,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
           >
             {isDashboardActive && <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-accent" aria-hidden="true" />}
             <LayoutDashboard size={15} className={`shrink-0 ${isDashboardActive ? 'text-accent' : 'text-fg-subtle'}`} aria-hidden="true" />
-            <span className="truncate">Dashboard</span>
+            <span className="truncate">{t('数据面板')}</span>
           </button>}
           {homeButton}
         </div>
@@ -1213,6 +1463,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
         </button>
       </div>
       {menuNode}
+      {reviewSubmenuNode}
       {onResizeWidth && (
         <div
           ref={resizeHandleRef}

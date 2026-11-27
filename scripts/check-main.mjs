@@ -109,10 +109,16 @@ try {
         import { allowPreviewFilePaths, readPreview, resolveInside } from './src/main/file-preview';
         import { copyProjectFile, listProjectDirectory } from './src/main/project-tree';
         import { listLocalGitBranches, readGitBranch, switchLocalGitBranch } from './src/main/git-branch';
+        import { commitGitChanges, parseGitStatusPorcelain, readGitChangeDiff, readGitStatus } from './src/main/git-commit';
         import { listGitConflicts, readGitConflictDiff } from './src/main/git-conflicts';
         import { setBoundedMap } from './src/main/fs-utils';
         import { folderKey, quoteTerminalPath, extractPathMatches } from './src/shared/paths';
         import { buildReleaseUrl, canUseAutoUpdater, compareSemver, extractVersionFromReleaseUrl, normalizeReleaseNotes, selectLocalizedReleaseNotes } from './src/main/updater';
+        import { detectInstalledClis, isNodeVersionAtLeast, listKnownClis, mergePathStrings, parseNodeVersion } from './src/main/cli-detect';
+        import { cleanInstallLogChunk, selectInstallableClis } from './src/main/cli-installer';
+        import { buildReviewPrompt, buildReviewTaskTitle } from './src/renderer/src/reviewPrompt';
+        import { describeGreetingSlotRanges, normalizeTimeString, resolveWorkGreeting } from './src/renderer/src/workGreeting';
+        import { setLanguage as setRendererLanguage } from './src/renderer/src/i18n';
 
         test('Traditional Chinese is detected, translated, and accepted by main-process i18n', () => {
           for (const locale of ['zh-TW', 'zh-HK', 'zh_MO', 'zh-Hant', 'zh-Hant-CN']) assert.equal(detectLanguage(locale), 'zh-TW');
@@ -851,6 +857,124 @@ try {
           assert.equal((await readGitConflictDiff(subdir, file)).ok, false);
         });
 
+        test('Git commit lists status, previews diffs, commits selected files without sweeping other staged files, and enforces guards', async () => {
+          // Porcelain parser handles rename pairs, conflicts, untracked and ignores ignored entries
+          const parsed = parseGitStatusPorcelain('R  new.ts\\0old.ts\\0?? untracked.txt\\0UU clash.ts\\0!! ignored.log\\0 M mod.ts\\0');
+          assert.equal(parsed.hasConflicts, true);
+          assert.equal(parsed.entries[0].path, 'clash.ts');
+          assert.equal(parsed.entries[0].status, 'conflicted');
+          assert.deepEqual(
+            parsed.entries.find((e) => e.path === 'new.ts'),
+            { path: 'new.ts', originalPath: 'old.ts', indexStatus: 'R', worktreeStatus: ' ', status: 'renamed' },
+          );
+          assert.ok(!parsed.entries.some((e) => e.path === 'ignored.log'));
+
+          const repo = path.join(fixtureRoot, 'git-commit-flow');
+          const subdir = path.join(repo, 'sub');
+          await fsp.mkdir(subdir, { recursive: true });
+          const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { stdio: 'pipe', encoding: 'utf8', windowsHide: true });
+          git('init', '-q', '-b', 'main');
+          git('config', 'user.name', 'OneAI Check');
+          git('config', 'user.email', 'check@example.invalid');
+          git('config', 'commit.gpgSign', 'false');
+
+          // Unborn HEAD (initial commit): partial selection keeps another pre-staged file in the index
+          await fsp.writeFile(path.join(repo, 'keep-staged.txt'), 'keep me staged\\n');
+          await fsp.writeFile(path.join(repo, 'first.txt'), 'hello initial\\n');
+          git('add', 'keep-staged.txt');
+          const unbornStatus = await readGitStatus(subdir);
+          assert.equal(unbornStatus.ok, true);
+          if (!unbornStatus.ok) return;
+          assert.equal(unbornStatus.entries.length, 2);
+          assert.equal(unbornStatus.entries.find((e) => e.path === 'first.txt')?.status, 'untracked');
+          const firstDiff = await readGitChangeDiff(subdir, 'first.txt');
+          assert.equal(firstDiff.ok, true);
+          if (firstDiff.ok) assert.match(firstDiff.diff, /\\+hello initial/);
+
+          // Invalid inputs rejected cleanly
+          assert.equal((await commitGitChanges(subdir, ['first.txt'], '   ')).ok, false);
+          assert.equal((await commitGitChanges(subdir, [], 'msg')).ok, false);
+          assert.equal((await commitGitChanges(subdir, ['../outside.txt'], 'msg')).ok, false);
+
+          const initialCommit = await commitGitChanges(subdir, ['first.txt'], 'init: add first file');
+          assert.equal(initialCommit.ok, true);
+          if (initialCommit.ok) {
+            assert.ok(initialCommit.hash.length >= 7);
+            assert.equal(initialCommit.summary, 'init: add first file');
+          }
+          // keep-staged.txt was NOT committed and remains staged
+          assert.equal(git('show', '--name-only', '--format=', 'HEAD').trim(), 'first.txt');
+          const afterInitial = await readGitStatus(subdir);
+          assert.equal(afterInitial.ok, true);
+          if (afterInitial.ok) {
+            assert.equal(afterInitial.entries.length, 1);
+            assert.equal(afterInitial.entries[0].path, 'keep-staged.txt');
+            assert.equal(afterInitial.entries[0].indexStatus, 'A');
+          }
+
+          // Existing HEAD: partial selection commits modified + untracked literal path while preserving staged keep-staged.txt
+          await fsp.writeFile(path.join(repo, 'first.txt'), 'updated first\\n');
+          const bracketFile = 'sub/note [1].txt';
+          await fsp.writeFile(path.join(repo, bracketFile), 'literal path\\n');
+          const modDiff = await readGitChangeDiff(subdir, 'first.txt');
+          assert.equal(modDiff.ok, true);
+          if (modDiff.ok) {
+            assert.match(modDiff.diff, /-hello initial/);
+            assert.match(modDiff.diff, /\\+updated first/);
+          }
+          const partialCommit = await commitGitChanges(subdir, ['first.txt', bracketFile], 'feat: update first and add bracket note');
+          assert.equal(partialCommit.ok, true);
+          const committedFiles = git('show', '--name-only', '--format=', 'HEAD').trim().split(/\\r?\\n/).sort();
+          assert.deepEqual(committedFiles, ['first.txt', bracketFile]);
+          // keep-staged.txt is still staged and untouched
+          const remaining = await readGitStatus(subdir);
+          assert.equal(remaining.ok, true);
+          if (remaining.ok) {
+            assert.equal(remaining.entries.length, 1);
+            assert.equal(remaining.entries[0].path, 'keep-staged.txt');
+            assert.equal(remaining.entries[0].indexStatus, 'A');
+          }
+
+          // Commit remaining staged file (full selection) and verify clean repo rejects commit
+          const cleanCommit = await commitGitChanges(subdir, ['keep-staged.txt'], 'chore: commit remaining');
+          assert.equal(cleanCommit.ok, true);
+          const emptyStatus = await readGitStatus(subdir);
+          assert.equal(emptyStatus.ok, true);
+          if (emptyStatus.ok) assert.equal(emptyStatus.entries.length, 0);
+          assert.equal((await commitGitChanges(subdir, ['keep-staged.txt'], 'noop')).ok, false);
+
+          // Pre-commit hook failure surfaces hook stderr and cleans up intent-to-add on untracked files
+          git('config', 'core.hooksPath', '.git/hooks');
+          await fsp.writeFile(path.join(repo, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\\necho "blocked by hook" >&2\\nexit 1\\n', { mode: 0o755 });
+          await fsp.writeFile(path.join(repo, 'hook-new.txt'), 'new\\n');
+          await fsp.writeFile(path.join(repo, 'first.txt'), 'hook-mod\\n');
+          const hookFail = await commitGitChanges(subdir, ['hook-new.txt'], 'should fail');
+          assert.equal(hookFail.ok, false);
+          if (!hookFail.ok) assert.match(hookFail.error, /blocked by hook/);
+          const afterHookFail = await readGitStatus(subdir);
+          assert.equal(afterHookFail.ok, true);
+          if (afterHookFail.ok) {
+            assert.equal(afterHookFail.entries.find((e) => e.path === 'hook-new.txt')?.status, 'untracked');
+          }
+          await fsp.unlink(path.join(repo, '.git', 'hooks', 'pre-commit'));
+          await fsp.unlink(path.join(repo, 'hook-new.txt'));
+          git('checkout', '--', 'first.txt');
+
+          // Merge conflicts block commit
+          git('switch', '-qc', 'side');
+          await fsp.writeFile(path.join(repo, 'first.txt'), 'side change\\n');
+          git('commit', '-qam', 'side');
+          git('switch', '-q', 'main');
+          await fsp.writeFile(path.join(repo, 'first.txt'), 'main change\\n');
+          git('commit', '-qam', 'main');
+          assert.throws(() => git('merge', 'side'));
+          const conflictStatus = await readGitStatus(subdir);
+          assert.equal(conflictStatus.ok, true);
+          if (conflictStatus.ok) assert.equal(conflictStatus.hasConflicts, true);
+          const blockedByConflict = await commitGitChanges(subdir, ['first.txt'], 'try commit');
+          assert.equal(blockedByConflict.ok, false);
+        });
+
         test('quota-service parses Antigravity usage groups and computes universal session metrics', () => {
           const now = Date.parse('2026-11-21T14:00:00Z');
           const raw = [
@@ -1101,6 +1225,163 @@ try {
           assert.equal(canUseAutoUpdater({ isPackaged: false, appUpdateYmlExists: true }), false);
           assert.equal(canUseAutoUpdater({ isPackaged: true, portableDir: 'D:/portable', appUpdateYmlExists: true }), false);
           assert.equal(canUseAutoUpdater({ isPackaged: true, appUpdateYmlExists: false }), false);
+        });
+
+        test('CLI installer validates known-clis manifest, queues installable IDs, cleans logs and merges PATH', () => {
+          const known = listKnownClis();
+          const featured = known
+            .filter((cli) => Boolean(cli.installer?.powershellCommand))
+            .sort((a, b) => a.installer!.featuredOrder - b.installer!.featuredOrder);
+          assert.deepEqual(featured.map((cli) => cli.id), ['claude', 'codex', 'agy', 'pi', 'kimi']);
+          for (const cli of featured) {
+            assert.equal(cli.installer!.powershellCommand.startsWith('irm https://'), true);
+            assert.equal(cli.installer!.powershellCommand.endsWith(' | iex'), true);
+            assert.equal(cli.installer!.docsUrl.startsWith('https://'), true);
+          }
+          assert.equal(featured.find((cli) => cli.id === 'claude')?.installer?.requiresGit, true);
+          assert.equal(featured.find((cli) => cli.id === 'kimi')?.installer?.requiresGit, true);
+          assert.equal(featured.find((cli) => cli.id === 'pi')?.installer?.requiresNode, true);
+          assert.equal(featured.find((cli) => cli.id === 'pi')?.installer?.minNodeVersion, '22.19.0');
+
+          // Node.js version parsing and minimum version comparison
+          assert.equal(parseNodeVersion('v22.19.0\\n'), '22.19.0');
+          assert.equal(parseNodeVersion('20.11.1'), '20.11.1');
+          assert.equal(parseNodeVersion('not-a-version'), undefined);
+          assert.equal(isNodeVersionAtLeast('22.19.0', '22.19.0'), true);
+          assert.equal(isNodeVersionAtLeast('22.20.1', '22.19.0'), true);
+          assert.equal(isNodeVersionAtLeast('23.0.0', '22.19.0'), true);
+          assert.equal(isNodeVersionAtLeast('22.18.9', '22.19.0'), false);
+          assert.equal(isNodeVersionAtLeast('20.18.0', '22.19.0'), false);
+          assert.equal(isNodeVersionAtLeast(undefined, '22.19.0'), false);
+
+          // Preserves request order, deduplicates, and rejects unknown or non-installable IDs
+          const selected = selectInstallableClis(['kimi', 'opencode', 'claude', 'kimi', 'not-a-cli', 42, null]);
+          assert.deepEqual(selected.map((cli) => cli.id), ['kimi', 'claude']);
+          assert.deepEqual(selectInstallableClis('claude'), []);
+
+          // Strips CSI and OSC sequences and normalizes carriage returns
+          assert.equal(
+            cleanInstallLogChunk('\\x1b]0;Installing\\x07\\x1b[32mDone\\x1b[0m\\r\\nline2\\rline3'),
+            'Done\\nline2\\nline3',
+          );
+
+          // Windows PATH merge prefers fresh registry entries, strips trailing slashes/quotes and deduplicates case-insensitively
+          const mergedWin = mergePathStrings(
+            'C:\\\\Users\\\\dev\\\\bin;D:\\\\OldTool\\\\',
+            ['"C:\\\\Users\\\\dev\\\\bin\\\\";C:\\\\Users\\\\dev\\\\.local\\\\bin;'],
+            'win32',
+          );
+          assert.equal(mergedWin, 'C:\\\\Users\\\\dev\\\\bin\\\\;C:\\\\Users\\\\dev\\\\.local\\\\bin;D:\\\\OldTool\\\\');
+
+          // POSIX PATH merge stays case-sensitive
+          assert.equal(
+            mergePathStrings('/usr/bin:/Custom/Bin', ['/usr/local/bin:/custom/bin:/usr/bin/'], 'linux'),
+            '/usr/local/bin:/custom/bin:/usr/bin/:/Custom/Bin',
+          );
+        });
+
+        test('Known CLI manifest covers global CLIs and resolves command aliases on PATH', async () => {
+          const known = listKnownClis();
+          const ids = known.map((cli) => cli.id);
+          assert.equal(new Set(ids).size, ids.length, 'known-clis IDs are unique');
+          for (const expectedId of ['gemini', 'vibe', 'kilo', 'continue', 'openhands', 'junie', 'codebuddy', 'cursor-agent']) {
+            assert.equal(ids.includes(expectedId), true, 'manifest includes ' + expectedId);
+          }
+
+          const origPath = process.env.PATH;
+          const origPathAlt = process.env.Path;
+          const ext = process.platform === 'win32' ? '.cmd' : '';
+          const runWithBin = async (dirName: string, files: string[]) => {
+            const binDir = path.join(fixtureRoot, dirName);
+            await fsp.mkdir(binDir, { recursive: true });
+            for (const f of files) await fsp.writeFile(path.join(binDir, f + ext), '@echo off\\n');
+            process.env.PATH = binDir;
+            process.env.Path = binDir;
+            return detectInstalledClis();
+          };
+          try {
+            const primary = await runWithBin('path-primary', ['agent', 'gemini', 'kilocode']);
+            assert.equal(primary.find((c) => c.id === 'cursor-agent')?.command, 'agent');
+            assert.equal(primary.find((c) => c.id === 'gemini')?.command, 'gemini');
+            assert.equal(primary.find((c) => c.id === 'kilo')?.command, 'kilocode');
+
+            const legacy = await runWithBin('path-legacy', ['cursor-agent', 'kilo', 'cn']);
+            assert.equal(legacy.find((c) => c.id === 'cursor-agent')?.command, 'cursor-agent');
+            assert.equal(legacy.find((c) => c.id === 'kilo')?.command, 'kilo');
+            assert.equal(legacy.find((c) => c.id === 'continue')?.command, 'cn');
+          } finally {
+            process.env.PATH = origPath;
+            process.env.Path = origPathAlt;
+          }
+        });
+
+        test('One-click review builds single-line localized prompts and non-duplicating review titles', () => {
+          setRendererLanguage('zh-CN');
+          assert.equal(buildReviewTaskTitle('Auth Refactor'), '审核：Auth Refactor');
+          assert.equal(buildReviewTaskTitle('审核：Auth Refactor'), '审核：Auth Refactor');
+          const zhPrompt = buildReviewPrompt({
+            taskTitle: 'Auth\\nRefactor',
+            sourceCliName: 'Claude Code',
+            summary: '实现多账号登录与令牌刷新\\n补充单元测试',
+            branch: 'feat/auth',
+            changedFiles: ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts', 'f.ts', 'g.ts', 'h.ts', 'i.ts'],
+          });
+          assert.equal(zhPrompt.includes('\\n'), false);
+          assert.equal(zhPrompt.includes('Auth Refactor'), true);
+          assert.equal(zhPrompt.includes('Claude Code'), true);
+          assert.equal(zhPrompt.includes('feat/auth'), true);
+          assert.equal(zhPrompt.includes('等 9 个文件'), true);
+          assert.equal(zhPrompt.includes('{'), false);
+
+          setRendererLanguage('zh-TW');
+          assert.equal(buildReviewTaskTitle('Auth Refactor'), '審核：Auth Refactor');
+          const twPrompt = buildReviewPrompt({ taskTitle: 'Auth Refactor', sourceCliName: 'Codex' });
+          assert.equal(twPrompt.includes('程式碼審核'), true);
+          assert.equal(twPrompt.includes('{'), false);
+
+          setRendererLanguage('en');
+          assert.equal(buildReviewTaskTitle('Auth Refactor'), 'Review: Auth Refactor');
+          assert.equal(buildReviewTaskTitle('Review: Auth Refactor'), 'Review: Auth Refactor');
+          const enPrompt = buildReviewPrompt({ taskTitle: 'Auth Refactor', sourceCliName: 'Codex', changedFiles: ['src/app.ts'] });
+          assert.equal(enPrompt.includes('code review'), true);
+          assert.equal(enPrompt.includes('src/app.ts'), true);
+          assert.equal(enPrompt.includes('{'), false);
+
+          setRendererLanguage('zh-CN');
+        });
+
+        test('Work schedule greeting resolves periods, custom messages, localized defaults, and overnight shifts', () => {
+          assert.equal(normalizeTimeString('9:05', '09:00'), '09:05');
+          assert.equal(normalizeTimeString('25:00', '09:00'), '09:00');
+          assert.equal(normalizeTimeString('bad', '18:00'), '18:00');
+
+          const defaultRanges = describeGreetingSlotRanges('09:00', '18:00');
+          assert.deepEqual(defaultRanges, {
+            morning: '05:00–12:00',
+            noon: '12:00–13:30',
+            afternoon: '13:30–18:00',
+            evening: '18:00–05:00',
+          });
+
+          const at = (h: number, m = 0) => new Date(2026, 10, 27, h, m, 0).getTime();
+          setRendererLanguage('zh-CN');
+          assert.equal(resolveWorkGreeting({ workStartTime: '09:00', workEndTime: '18:00', nowMs: at(9, 0) }).text, '早上好，元气满满');
+          assert.equal(resolveWorkGreeting({ workStartTime: '09:00', workEndTime: '18:00', nowMs: at(12, 30) }).text, '中午好，小憩一下');
+          assert.equal(resolveWorkGreeting({ workStartTime: '09:00', workEndTime: '18:00', nowMs: at(15, 0) }).text, '下午好，聚精会神');
+          assert.equal(resolveWorkGreeting({ workStartTime: '09:00', workEndTime: '18:00', nowMs: at(18, 0) }).text, '晚上好，注意休息');
+          assert.equal(resolveWorkGreeting({ workStartTime: '09:00', workEndTime: '20:00', nowMs: at(19, 0) }).text, '下午好，聚精会神');
+          assert.equal(resolveWorkGreeting({ workStartTime: '09:00', workEndTime: '18:00', greetingMessages: { afternoon: '冲刺交付' }, nowMs: at(15, 0) }).text, '冲刺交付');
+
+          // Overnight shift (22:00 - 06:00): off-work daytime shows evening rest greeting
+          assert.equal(resolveWorkGreeting({ workStartTime: '22:00', workEndTime: '06:00', nowMs: at(23, 0) }).slot, 'morning');
+          assert.equal(resolveWorkGreeting({ workStartTime: '22:00', workEndTime: '06:00', nowMs: at(14, 0) }).slot, 'evening');
+
+          setRendererLanguage('zh-TW');
+          assert.equal(resolveWorkGreeting({ workStartTime: '09:00', workEndTime: '18:00', nowMs: at(15, 0) }).text, '下午好，聚精會神');
+          setRendererLanguage('en');
+          assert.equal(resolveWorkGreeting({ workStartTime: '09:00', workEndTime: '18:00', nowMs: at(9, 0) }).text, 'Good morning!');
+          assert.equal(resolveWorkGreeting({ workStartTime: '09:00', workEndTime: '18:00', nowMs: at(19, 0) }).text, 'Time to rest');
+          setRendererLanguage('zh-CN');
         });
       `,
     },

@@ -160,7 +160,7 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
     let disposed = false;
     const load = window.electronAPI?.getDashboardStats;
     if (!load) {
-      setError(t('当前版本不支持 Dashboard 统计'));
+      setError(t('当前版本不支持数据面板统计'));
       return;
     }
     setLoading(true);
@@ -170,7 +170,7 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
         if (!disposed) setStats(result);
       })
       .catch((err) => {
-        if (!disposed) setError(err instanceof Error ? err.message : t('读取 Dashboard 数据失败'));
+        if (!disposed) setError(err instanceof Error ? err.message : t('读取数据面板数据失败'));
       })
       .finally(() => {
         if (!disposed) setLoading(false);
@@ -333,7 +333,7 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-2xs font-semibold uppercase tracking-wider text-fg-faint">{t('使用足迹')}</p>
-            <h1 className="mt-1 text-3xl font-bold tracking-tight text-fg">Dashboard.</h1>
+            <h1 className="mt-1 text-3xl font-bold tracking-tight text-fg">{t('数据面板')}</h1>
             <p className="mt-1 text-ui text-fg-subtle">{t('从每日使用，到每一次投入。')}</p>
           </div>
           <div className="flex items-center gap-2">
@@ -347,7 +347,7 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
               type="button"
               onClick={handleRefreshAll}
               disabled={loading}
-              aria-label={t('刷新 Dashboard 数据')}
+              aria-label={t('刷新数据面板数据')}
               className="btn-secondary h-8 px-3 text-xs"
             >
               <RotateCw size={13} className={loading ? 'animate-spin text-accent' : ''} aria-hidden="true" />

@@ -32,8 +32,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteSessionHistory: (items) => ipcRenderer.invoke('history:delete', items),
   getUsageStats: (accounts) => ipcRenderer.invoke('usage:stats', accounts),
   getDashboardStats: (accounts) => ipcRenderer.invoke('dashboard:stats', accounts),
-  detectClis: (custom) => ipcRenderer.invoke('cli:detect', custom),
+  detectClis: (custom, refreshPath) => ipcRenderer.invoke('cli:detect', custom, refreshPath),
   listKnownClis: () => ipcRenderer.invoke('cli:known'),
+  getCliEnvInfo: () => ipcRenderer.invoke('cli:env-info'),
+  installClis: (cliIds) => ipcRenderer.invoke('cli:install', cliIds),
+  cancelCliInstall: () => ipcRenderer.invoke('cli:install-cancel'),
+  onCliInstallEvent: (callback) => {
+    const subscription = (_event, value) => callback(value);
+    ipcRenderer.on('cli:install-event', subscription);
+    return () => {
+      ipcRenderer.removeListener('cli:install-event', subscription);
+    };
+  },
   setLanguage: (language) => ipcRenderer.invoke('app:set-language', language),
   getHomeDir: () => {
     if (cachedHomeDir === null) cachedHomeDir = ipcRenderer.sendSync('app:home-dir');
@@ -84,6 +94,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   switchLocalGitBranch: (dir, branch) => ipcRenderer.invoke('git:switch-local-branch', dir, branch),
   listGitConflicts: (dir) => ipcRenderer.invoke('git:list-conflicts', dir),
   readGitConflictDiff: (dir, file) => ipcRenderer.invoke('git:conflict-diff', dir, file),
+  readGitStatus: (dir) => ipcRenderer.invoke('git:status', dir),
+  readGitChangeDiff: (dir, file) => ipcRenderer.invoke('git:change-diff', dir, file),
+  commitGitChanges: (dir, files, message) => ipcRenderer.invoke('git:commit', dir, files, message),
   getTaskSummaries: (tasks) => ipcRenderer.invoke('task:summaries', tasks),
   onQuotaUpdate: (callback) => {
     const subscription = (_event, value) => callback(value);

@@ -6,13 +6,23 @@ export function defaultWorkspacePath(): string {
   try { return window.electronAPI?.getHomeDir?.() || ''; } catch { return ''; }
 }
 
-/** 内置 CLI 定义（绑定各 AI CLI 的真实执行命令），顺序即默认菜单顺序 */
+/** 统一按 CLI 显示名称首字母顺序排序；系统终端（id === 'terminal'）固定排在最后 */
+export function sortClisAlphabetically<T extends { id: string; name: string }>(list: readonly T[]): T[] {
+  return [...list].sort((a, b) => {
+    if (a.id === 'terminal' && b.id !== 'terminal') return 1;
+    if (b.id === 'terminal' && a.id !== 'terminal') return -1;
+    const byName = a.name.localeCompare(b.name, 'en', { sensitivity: 'base', numeric: true });
+    return byName !== 0 ? byName : a.id.localeCompare(b.id, 'en', { sensitivity: 'base' });
+  });
+}
+
+/** 内置 CLI 定义（绑定各 AI CLI 的真实执行命令），按首字母顺序排列，系统终端固定在末尾 */
 export const BUILTIN_CLIS: CliDef[] = [
-  { id: 'codex', name: 'Codex', icon: 'codex', defaultCommand: 'codex' },
   { id: 'claude', name: 'Claude Code', icon: 'claude', defaultCommand: 'claude' },
+  { id: 'codex', name: 'Codex', icon: 'codex', defaultCommand: 'codex' },
+  { id: 'grok', name: 'Grok Build', icon: 'grok', defaultCommand: 'grok' },
   { id: 'kimi', name: 'Kimi Code', icon: 'kimi', defaultCommand: 'kimi' },
   { id: 'opencode', name: 'OpenCode', icon: 'opencode', defaultCommand: 'opencode' },
-  { id: 'grok', name: 'Grok Build', icon: 'grok', defaultCommand: 'grok' },
   { id: 'terminal', get name() { return t('系统终端'); }, icon: 'terminal', defaultCommand: 'powershell.exe' },
 ];
 

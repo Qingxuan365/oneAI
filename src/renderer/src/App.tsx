@@ -7,9 +7,9 @@ import { Modal } from './components/Modal';
 import { ConfirmDialog, ConfirmOptions } from './components/ConfirmDialog';
 import { BrandIcon } from './components/BrandIcon';
 import { AppLogo } from './components/AppLogo';
-import { CliDef, CustomCli, FolderEntry, TaskSession, QuotaData, AppSettings, ThemeId, HistoryEntry, Account, TaskSummary, UpdateState } from './types';
+import { CliDef, CustomCli, FolderEntry, GitStatusResult, TaskSession, QuotaData, AppSettings, ThemeId, HistoryEntry, Account, TaskSummary, UpdateState, KnownCliInfo } from './types';
 import { version as appVersion } from '../../../package.json';
-import { BUILTIN_CLIS, MODEL_PICKER_COMMANDS } from './clis';
+import { BUILTIN_CLIS, MODEL_PICKER_COMMANDS, sortClisAlphabetically } from './clis';
 import { SUMMARY_CLIS, formatAgo } from './taskSummary';
 import { ensureFolder, folderKey, folderName, groupRecent, historySessionKey, loadAppState, moveBefore, nextTaskTitle, orderedTasks, scheduleSaveAppState, tasksInFolder } from './workspaceState';
 import { accountCli, quotaKey, sanitizeAccounts, toSessionAccount } from './accounts';
@@ -20,6 +20,8 @@ import { quoteTerminalPath } from '../../shared/paths';
 import { THEME_MODE } from './themes';
 import { forgetUserActivity, hasVisibleOutput, isTaskAlive, isUserEcho, startOutcome } from './taskStatus';
 import { playTaskDoneSound } from './taskDoneSound';
+import { buildReviewPrompt, buildReviewTaskTitle } from './reviewPrompt';
+import { DEFAULT_GREETING_MESSAGES, DEFAULT_WORK_END_TIME, DEFAULT_WORK_START_TIME, normalizeTimeString, sanitizeGreetingMessages } from './workGreeting';
 
 // 低频弹窗与代码预览面板（含 highlight.js 词法表）按需异步分包加载，大幅减小首屏主包解析开销
 const NewTaskModal = lazy(() => import('./components/NewTaskModal').then((m) => ({ default: m.NewTaskModal })));
@@ -30,6 +32,7 @@ const UsageModal = lazy(() => import('./components/UsageModal').then((m) => ({ d
 const DashboardView = lazy(() => import('./components/DashboardView').then((m) => ({ default: m.DashboardView })));
 const FilePreviewPanel = lazy(() => import('./components/FilePreviewPanel').then((m) => ({ default: m.FilePreviewPanel })));
 const ProjectTreeDrawer = lazy(() => import('./components/ProjectTreeDrawer').then((m) => ({ default: m.ProjectTreeDrawer })));
+const GitCommitModal = lazy(() => import('./components/GitCommitModal').then((m) => ({ default: m.GitCommitModal })));
 const GitConflictDiffModal = lazy(() => import('./components/GitConflictDiffModal').then((m) => ({ default: m.GitConflictDiffModal })));
 const UpdateModal = lazy(() => import('./components/UpdateModal').then((m) => ({ default: m.UpdateModal })));
 
@@ -44,6 +47,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   taskDoneSoundVolume: 60,
   taskDoneSoundBackgroundOnly: false,
   workReminderHours: 1,
+  workStartTime: DEFAULT_WORK_START_TIME,
+  workEndTime: DEFAULT_WORK_END_TIME,
+  greetingMessages: DEFAULT_GREETING_MESSAGES,
   terminalFontSize: 15,
   terminalLineHeight: 1.3,
   uiScale: 'comfortable',
@@ -95,7 +101,18 @@ function loadSavedSettings(): AppSettings {
     const raw = localStorage.getItem('onedesktop_settings');
     if (raw) {
       const saved = JSON.parse(raw);
-      return { ...DEFAULT_SETTINGS, ...saved, accounts: sanitizeAccounts(saved?.accounts), customClis: sanitizeCustomClis(saved?.customClis), musicStreams: sanitizeMusicStreams(saved?.musicStreams), language: isLanguage(saved?.language) ? saved.language : systemLanguage(), onboardingDone: saved?.onboardingDone === true };
+      return {
+        ...DEFAULT_SETTINGS,
+        ...saved,
+        workStartTime: normalizeTimeString(saved?.workStartTime, DEFAULT_WORK_START_TIME),
+        workEndTime: normalizeTimeString(saved?.workEndTime, DEFAULT_WORK_END_TIME),
+        greetingMessages: sanitizeGreetingMessages(saved?.greetingMessages),
+        accounts: sanitizeAccounts(saved?.accounts),
+        customClis: sanitizeCustomClis(saved?.customClis),
+        musicStreams: sanitizeMusicStreams(saved?.musicStreams),
+        language: isLanguage(saved?.language) ? saved.language : systemLanguage(),
+        onboardingDone: saved?.onboardingDone === true,
+      };
     }
   } catch {}
   return DEFAULT_SETTINGS;
@@ -103,13 +120,32 @@ function loadSavedSettings(): AppSettings {
 
 type DetectedCli = { id: string; name: string; command: string };
 
-// 已检测到、但不在内置列表里的 CLI（如 Antigravity、Pi），自动补成可新建任务的 CLI
+// 已检测到、但不在内置列表里的 CLI（如 Antigravity、Pi），自动补成可新建任务的 CLI；已有条目的命令或名称随检测结果更新（如别名切换）
 // 用户自定义的 CLI 也会出现在检测结果里，但它们来自设置，不能当作自动检测到的 CLI 保存进状态
 function mergeDetectedExtras(current: CliDef[], detected: DetectedCli[], custom: CustomCli[]): CliDef[] {
-  const extras = detected
-    .filter((cli) => !BUILTIN_CLIS.some((builtin) => builtin.id === cli.id) && !current.some((item) => item.id === cli.id) && !custom.some((item) => item.id === cli.id))
-    .map((cli): CliDef => ({ id: cli.id, name: cli.name, icon: cli.id, defaultCommand: cli.command }));
-  return extras.length ? [...current, ...extras] : current;
+  const customIds = new Set(custom.map((item) => item.id));
+  const detectedById = new Map(
+    detected
+      .filter((cli) => !BUILTIN_CLIS.some((builtin) => builtin.id === cli.id) && !customIds.has(cli.id))
+      .map((cli) => [cli.id, cli] as const),
+  );
+  let changed = false;
+  const updated = current.map((item) => {
+    const hit = detectedById.get(item.id);
+    if (!hit) return item;
+    if (item.defaultCommand === hit.command && item.name === hit.name) return item;
+    changed = true;
+    return { ...item, name: hit.name, defaultCommand: hit.command };
+  });
+  const currentIds = new Set(current.map((item) => item.id));
+  const extras: CliDef[] = [];
+  for (const cli of detectedById.values()) {
+    if (!currentIds.has(cli.id)) {
+      extras.push({ id: cli.id, name: cli.name, icon: cli.id, defaultCommand: cli.command });
+    }
+  }
+  if (!changed && extras.length === 0) return current;
+  return extras.length ? [...updated, ...extras] : updated;
 }
 
 // 启动时读取已保存的状态（旧的各工作区数据在首次启动时迁移）
@@ -358,9 +394,12 @@ export const App: React.FC = () => {
     document.documentElement.style.colorScheme = THEME_MODE[resolvedTheme];
   }, [resolvedTheme]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isCliInstallerOpen, setIsCliInstallerOpen] = useState(false);
+  const [knownClis, setKnownClis] = useState<KnownCliInfo[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isUsageOpen, setIsUsageOpen] = useState(false);
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(false);
+  const [gitCommitRoot, setGitCommitRoot] = useState<string | null>(null);
   const [gitConflictRoot, setGitConflictRoot] = useState<string | null>(null);
   const [filePreview, setFilePreview] = useState<{ cwd: string; path: string; line?: number; openedAt: number } | null>(null);
   const [previewWidth, setPreviewWidth] = useState<number>(() => {
@@ -372,7 +411,7 @@ export const App: React.FC = () => {
   // null 表示尚未检测完成（或非 Electron 预览），此时显示全部分组
   const [installed, setInstalled] = useState<Record<string, boolean> | null>(null);
   const customClis = settings.customClis;
-  const allClis = useMemo(() => [...BUILTIN_CLIS, ...extraClis, ...customClis.map(toCliDef)], [extraClis, customClis]);
+  const allClis = useMemo(() => sortClisAlphabetically([...BUILTIN_CLIS, ...extraClis, ...customClis.map(toCliDef)]), [extraClis, customClis]);
   const visibleClis = useMemo(
     () => installed ? allClis.filter((cli) => cli.id === 'terminal' || installed[cli.id]) : allClis,
     [allClis, installed],
@@ -716,6 +755,8 @@ export const App: React.FC = () => {
   // 任务行第二行：任务对应会话里最近一条用户消息（仅 Claude / Codex / Kimi），每 5 秒与窗口获得焦点时刷新。
   // 使用账号的任务读该账号的配置目录；任务进入停止态后再补读最后一次摘要，收敛后不再每 5 秒重扫
   const [summaries, setSummaries] = useState<Record<string, TaskSummary>>({});
+  const summariesRef = useRef(summaries);
+  summariesRef.current = summaries;
   const settledStoppedIdsRef = useRef(new Set<string>());
   const summaryCandidates = useMemo(() => tasks
     .filter((task) => SUMMARY_CLIS.has(task.groupId))
@@ -1024,9 +1065,23 @@ export const App: React.FC = () => {
     }
   }, [startSession]);
 
-  // 重新检测已安装的 CLI（含自定义 CLI）：新装了 CLI、增删自定义 CLI 后不必重启应用
+  // 读取主进程已知 CLI 清单（含可自动安装元数据），用于欢迎页与主页补装入口
+  useEffect(() => {
+    let active = true;
+    window.electronAPI?.listKnownClis?.()
+      .then((list) => { if (active && Array.isArray(list)) setKnownClis(list); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  const handleOpenCliInstaller = useCallback(() => {
+    setIsSettingsOpen(false);
+    setIsCliInstallerOpen(true);
+  }, []);
+
+  // 重新检测已安装的 CLI（含自定义 CLI）：先刷新 Windows 最新 PATH，新装 CLI 或增删自定义 CLI 后不必重启应用
   const redetectClis = useCallback(async () => {
-    const list = await window.electronAPI?.detectClis(customClisRef.current.map(({ id, command }) => ({ id, command }))).catch(() => null);
+    const list = await window.electronAPI?.detectClis(customClisRef.current.map(({ id, command }) => ({ id, command })), true).catch(() => null);
     if (!list) return;
     setInstalled(Object.fromEntries(list.map((cli) => [cli.id, true])));
     setExtraClis((prev) => mergeDetectedExtras(prev, list, customClisRef.current));
@@ -1092,7 +1147,7 @@ export const App: React.FC = () => {
   }, [askConfirm]);
 
   // 创建子任务
-  const handleCreateTask = useCallback(async (groupId: string, title: string, command: string, cwd: string, historyId?: string, accountId?: string): Promise<{ success: boolean; error?: string }> => {
+  const handleCreateTask = useCallback(async (groupId: string, title: string, command: string, cwd: string, historyId?: string, accountId?: string): Promise<{ success: boolean; taskId?: string; error?: string }> => {
     const newTaskId = `${groupId}-task-${Date.now().toString(36)}`;
     const resolvedCwd = cwd || workspacePathRef.current;
     const account = accountId ? accountsRef.current.find((item) => item.id === accountId) : undefined;
@@ -1130,7 +1185,7 @@ export const App: React.FC = () => {
     setIsDashboardOpen(false);
     setActiveTaskId(newTaskId);
 
-    return { success: true };
+    return { success: true, taskId: newTaskId };
   }, []);
 
   // 一键新建：用默认名称、该 CLI 的默认命令在指定文件夹直接启动；失败时转到自定义弹窗修改
@@ -1154,6 +1209,48 @@ export const App: React.FC = () => {
   const handleSidebarNewTask = useCallback((folderPath: string, cliId: string, accountId?: string) => {
     void handleQuickNewTask(folderPath, cliId, accountId);
   }, [handleQuickNewTask]);
+
+  // 一键审核：在同一工作目录启动所选 Agent，并在其就绪后自动投递携带当前任务上下文与 Git 变更的代码审核指令
+  const handleReviewTask = useCallback(async (sourceTaskId: string, targetCliId: string, targetAccountId?: string, prefetchedGitStatus?: GitStatusResult | null) => {
+    const sourceTask = tasksRef.current.find((item) => item.id === sourceTaskId);
+    const targetCli = allClisRef.current.find((item) => item.id === targetCliId);
+    if (!sourceTask || !targetCli) return;
+    const lockKey = `review:${sourceTaskId}:${targetCliId}:${targetAccountId ?? ''}`;
+    if (quickCreatingRef.current.has(lockKey)) return;
+    quickCreatingRef.current.add(lockKey);
+    try {
+      const sourceCliName = allClisRef.current.find((item) => item.id === sourceTask.groupId)?.name;
+      const summary = summariesRef.current[sourceTask.id]?.text ?? null;
+      const gitStatus = prefetchedGitStatus !== undefined
+        ? prefetchedGitStatus
+        : await window.electronAPI?.readGitStatus?.(sourceTask.cwd).catch(() => null);
+      const branch = gitStatus && gitStatus.ok ? gitStatus.branch : null;
+      const changedFiles = gitStatus && gitStatus.ok ? gitStatus.entries.map((entry) => entry.path) : [];
+      const prompt = buildReviewPrompt({
+        taskTitle: sourceTask.title,
+        sourceCliName,
+        summary,
+        branch,
+        changedFiles,
+      });
+      const reviewTitle = buildReviewTaskTitle(sourceTask.title);
+      const result = await handleCreateTask(targetCli.id, reviewTitle, targetCli.defaultCommand, sourceTask.cwd, undefined, targetAccountId);
+      if (!result.success) {
+        await notify(t('任务启动失败'), t('{reason}。可以在接下来的窗口中修改启动命令或工作目录。', { reason: result.error || t('终端启动失败') }));
+        handleOpenNewTask(sourceTask.cwd, targetCli.id, targetAccountId);
+        return;
+      }
+      if (result.taskId) {
+        terminalViewportRef.current?.queuePromptOnReady(result.taskId, prompt);
+      }
+    } finally {
+      quickCreatingRef.current.delete(lockKey);
+    }
+  }, [handleCreateTask, handleOpenNewTask, notify]);
+
+  const handleReviewTaskVoid = useCallback((sourceTaskId: string, targetCliId: string, targetAccountId?: string, prefetchedGitStatus?: GitStatusResult | null) => {
+    void handleReviewTask(sourceTaskId, targetCliId, targetAccountId, prefetchedGitStatus);
+  }, [handleReviewTask]);
 
   // 关闭具体子任务
   const handleCloseTask = useCallback(async (taskId: string, e?: React.MouseEvent) => {
@@ -1284,6 +1381,22 @@ export const App: React.FC = () => {
   const handleClosePreview = useCallback(() => setFilePreview(null), []);
   const handleToggleFileTree = useCallback(() => setIsFileTreeOpen((v) => !v), []);
   const handleCloseFileTree = useCallback(() => setIsFileTreeOpen(false), []);
+  const handleOpenGitCommit = useCallback(() => {
+    setIsFileTreeOpen(false);
+    setGitCommitRoot(workspacePathRef.current);
+  }, []);
+  const handleCloseGitCommit = useCallback(() => {
+    setGitCommitRoot(null);
+    setIsFileTreeOpen(true);
+  }, []);
+  const handleSwitchCommitToConflicts = useCallback(() => {
+    const target = gitCommitRoot || workspacePathRef.current;
+    setGitCommitRoot(null);
+    setGitConflictRoot(target);
+  }, [gitCommitRoot]);
+  const handleGitCommitted = useCallback(() => {
+    setGitBranchRevision((revision) => revision + 1);
+  }, []);
   const handleOpenGitConflicts = useCallback(() => {
     setIsFileTreeOpen(false);
     setGitConflictRoot(workspacePathRef.current);
@@ -1335,7 +1448,7 @@ export const App: React.FC = () => {
   const shortcutRef = useRef<(e: KeyboardEvent) => boolean>(() => false);
   shortcutRef.current = (e) => {
     if (!e.ctrlKey || e.altKey || e.metaKey) return false;
-    if (isNewTaskOpen || isSettingsOpen || isHistoryOpen || isUsageOpen || isUpdateOpen || gitConflictRoot || workReminderVisible || confirmOptions) return false;
+    if (isNewTaskOpen || isSettingsOpen || isHistoryOpen || isUsageOpen || isUpdateOpen || gitCommitRoot || gitConflictRoot || workReminderVisible || confirmOptions) return false;
     const key = e.key.toLowerCase();
     if (e.shiftKey && key === 'e') { setIsFileTreeOpen((v) => !v); return true; }
     if (isFileTreeOpen) return false;
@@ -1397,6 +1510,10 @@ export const App: React.FC = () => {
 
   // 没有活动任务时的引导：仅在当前没有活动任务时构建 JSX，避免常规运行期间每次状态更新无谓重算
   const hasActiveTask = Boolean(activeTask);
+  const hasMissingRecommendedCli = useMemo(
+    () => Boolean(installed) && knownClis.some((cli) => Boolean(cli.installer?.powershellCommand) && !installed?.[cli.id]),
+    [installed, knownClis],
+  );
   const workspaceBranch = gitBranches[folderKey(workspacePath)];
   const emptyState = useMemo(() => {
     if (hasActiveTask) return undefined;
@@ -1432,7 +1549,19 @@ ${entry.cwd}`}
             </div>
           </div>
         )}
-        <p className="mt-5 px-1 text-left text-xs font-medium text-fg-faint">{t('新建任务')}</p>
+        <div className="mt-5 flex items-center justify-between px-1">
+          <p className="text-left text-xs font-medium text-fg-faint">{t('新建任务')}</p>
+          {hasMissingRecommendedCli && (
+            <button
+              type="button"
+              onClick={handleOpenCliInstaller}
+              className="rounded px-1 text-xs text-accent hover:underline"
+              data-empty-install-cli
+            >
+              {t('安装更多 CLI')}
+            </button>
+          )}
+        </div>
         <div className={`mt-1.5 grid grid-cols-2 gap-2.5 ${visibleClis.length <= 4 ? '' : 'sm:grid-cols-3'}`}>
           {visibleClis.map((group) => (
             <button
@@ -1457,7 +1586,7 @@ ${entry.cwd}`}
         </p>
       </div>
     );
-  }, [hasActiveTask, history, visibleClis, workspacePath, workspaceBranch, settings.language, handleAddFolderVoid, handleResumeHistory, handleQuickNewTask, handleOpenNewTask]);
+  }, [hasActiveTask, history, visibleClis, workspacePath, workspaceBranch, hasMissingRecommendedCli, settings.language, handleAddFolderVoid, handleOpenCliInstaller, handleResumeHistory, handleQuickNewTask, handleOpenNewTask]);
 
   // 低频弹窗与 Dashboard 首次打开前不加载分包、不挂载；首次打开后保持挂载交由显隐控制，保留内部状态
   const everOpenedModalsRef = useRef({ newTask: false, history: false, usage: false, settings: false, fileTree: false, dashboard: false, update: false });
@@ -1480,7 +1609,7 @@ ${entry.cwd}`}
     [tasks],
   );
   const fallbackKnownClis = useMemo(
-    () => [...BUILTIN_CLIS, ...extraClis].filter((cli) => cli.id !== 'terminal').map((cli) => ({ id: cli.id, name: cli.name, command: cli.defaultCommand })),
+    () => sortClisAlphabetically([...BUILTIN_CLIS, ...extraClis].filter((cli) => cli.id !== 'terminal').map((cli) => ({ id: cli.id, name: cli.name, command: cli.defaultCommand }))),
     [extraClis],
   );
 
@@ -1503,6 +1632,9 @@ ${entry.cwd}`}
         gitBranches={gitBranches}
         summaries={summaries}
         clockOffsetHours={settings.clockOffsetHours}
+        workStartTime={settings.workStartTime}
+        workEndTime={settings.workEndTime}
+        greetingMessages={settings.greetingMessages}
         recentFolders={recentFolders}
         activeTaskId={activeTaskId}
         isDashboardActive={isDashboardOpen}
@@ -1516,6 +1648,7 @@ ${entry.cwd}`}
         onCustomNewTask={handleOpenNewTask}
         onCloseTask={handleCloseTask}
         onRenameTask={handleRenameTask}
+        onReviewTask={handleReviewTaskVoid}
         onReorderTask={reorderTask}
         onRestartTask={handleRestartTask}
         onOpenFolder={handleOpenDirectory}
@@ -1667,6 +1800,7 @@ ${entry.cwd}`}
             rootPath={workspacePath}
             gitBranch={workspaceBranch}
             onGitBranchChanged={handleGitBranchChanged}
+            onOpenGitCommit={handleOpenGitCommit}
             onOpenGitConflicts={handleOpenGitConflicts}
             activePreviewPath={filePreview?.path ?? null}
             hasActiveTerminal={Boolean(activeTask)}
@@ -1678,23 +1812,40 @@ ${entry.cwd}`}
         </Suspense>
       )}
 
+      {gitCommitRoot && (
+        <Suspense fallback={null}>
+          <GitCommitModal
+            rootPath={gitCommitRoot}
+            onClose={handleCloseGitCommit}
+            onOpenConflicts={handleSwitchCommitToConflicts}
+            onCommitted={handleGitCommitted}
+          />
+        </Suspense>
+      )}
+
       {gitConflictRoot && (
         <Suspense fallback={null}>
           <GitConflictDiffModal rootPath={gitConflictRoot} onClose={handleCloseGitConflicts} />
         </Suspense>
       )}
 
-      {/* 首次启动引导：选择语言，认识各入口；完成后不再弹出 */}
-      {!settings.onboardingDone && (
+      {/* 首次启动引导与常用 CLI 安装页 */}
+      {(!settings.onboardingDone || isCliInstallerOpen) && (
         <Suspense fallback={null}>
           <OnboardingModal
-            isOpen={!settings.onboardingDone}
+            isOpen={!settings.onboardingDone || isCliInstallerOpen}
+            mode={!settings.onboardingDone ? 'onboarding' : 'install'}
             language={settings.language}
             onLanguageChange={(language) => setSettings((prev) => ({ ...prev, language }))}
             detectedClis={installed ? visibleClis.filter((cli) => cli.id !== 'terminal').map((cli) => ({ id: cli.id, name: cli.name, icon: cli.icon })) : null}
+            knownClis={knownClis}
             defaultFolder={workspacePath}
             onAddFolder={handleAddFolderVoid}
-            onFinish={() => setSettings((prev) => ({ ...prev, onboardingDone: true }))}
+            onRedetectClis={redetectClis}
+            onFinish={() => {
+              if (!settings.onboardingDone) setSettings((prev) => ({ ...prev, onboardingDone: true }));
+              setIsCliInstallerOpen(false);
+            }}
           />
         </Suspense>
       )}
@@ -1721,6 +1872,7 @@ ${entry.cwd}`}
             installed={installed}
             onCustomClisChange={handleCustomClisChange}
             onRedetectClis={redetectClis}
+            onOpenCliInstaller={handleOpenCliInstaller}
             accountTaskCounts={accountTaskCounts}
             updateState={updateState}
             onCheckForUpdates={handleCheckForUpdates}
