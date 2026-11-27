@@ -25,6 +25,7 @@ export interface TerminalViewportRef {
   restartActiveTerminal: (taskId?: string | null, options?: RestartSessionOptions) => Promise<{ success: boolean; error?: string } | undefined>;
   exportActiveTerminalLog: (mode: 'copy' | 'save') => Promise<{ success: boolean; filePath?: string; canceled?: boolean; error?: string }>;
   insertTextToActiveTerminal: (text: string) => boolean;
+  runCommandInActiveTerminal: (taskId: string, command: string) => Promise<boolean>;
 }
 
 /** 把终端里实际渲染出来的文字（含回滚区）导出为纯文本，折行的物理行合并为一行。 */
@@ -311,6 +312,7 @@ interface TerminalInstance {
   earlyChunks: Array<{ data: string; seq?: number }>;
   pendingExitCode?: number;
   resetStoppedHint: () => void;
+  inputVersion: number;
 }
 
 const DARK_TERMINAL_THEME = {
@@ -867,6 +869,21 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
     return true;
   };
 
+  const runCommandInActiveTerminal = async (taskId: string, command: string): Promise<boolean> => {
+    const instance = instancesRef.current.get(taskId);
+    if (!instance || activeTaskIdRef.current !== taskId || hiddenRef.current) return false;
+    const inputVersion = ++instance.inputVersion;
+    const input = instance.term.modes.bracketedPasteMode ? `\x1b[200~${command}\x1b[201~` : command;
+    if (await writePty(taskId, input) !== true) return false;
+    // Some CLI composers absorb Enter into a rapidly typed paste.
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 200));
+    if (activeTaskIdRef.current !== taskId || hiddenRef.current || instancesRef.current.get(taskId) !== instance
+      || instance.inputVersion !== inputVersion) return false;
+    const submitted = await writePty(taskId, '\r');
+    if (activeTaskIdRef.current === taskId && !hiddenRef.current) instance.term.focus();
+    return submitted === true;
+  };
+
   // 暴露给外层 Topbar 控制
   useImperativeHandle(ref, () => ({
     openSearch: () => setIsSearchOpen(true),
@@ -875,6 +892,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
     restartActiveTerminal,
     exportActiveTerminalLog,
     insertTextToActiveTerminal,
+    runCommandInActiveTerminal,
   }));
 
   // 动态更新所有已有终端的字体大小、行高与光标样式，实时触发自适应排版
@@ -1126,6 +1144,8 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
             lastText = data;
             lastTextAt = now;
           }
+          // 焦点报告由 xterm 自动发送，点击状态栏归还焦点时也不应中断命令提交。
+          if (data !== '\x1b[I' && data !== '\x1b[O') instance.inputVersion++;
           void writePty(task.id, data)?.then((written) => {
             if (written !== false) { stoppedHintShown = false; return; }
             const status = tasksRef.current.find((item) => item.id === task.id)?.status;
@@ -1243,6 +1263,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
           if (task.groupId !== 'terminal' && !task.groupId.startsWith('custom-') && !e.isComposing
             && e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
             e.preventDefault();
+            instance.inputVersion++;
             writePty(task.id, '\x1b\r');
             return false;
           }
@@ -1340,6 +1361,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
         });
 
         const instance: TerminalInstance = {
+          inputVersion: 0,
           term,
           fitAddon,
           searchAddon,
@@ -1507,7 +1529,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
         try { instance.fitAddon.fit(); } catch { /* ignore */ }
         instance.flush();
         setTimeout(() => {
-          if (hiddenRef.current) return;
+          if (hiddenRef.current || activeTaskIdRef.current !== id) return;
           try {
             instance.fitAddon.fit();
             // 鼠标刚点中目标任务行时保留其焦点以便 F2 重命名 / Alt+方向键排序；通过快捷键从别处切来时聚焦终端
@@ -1658,7 +1680,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
     <main className="flex-1 min-w-0 h-full w-full bg-canvas relative overflow-hidden">
       {/* 终端内悬浮关键字搜索栏 */}
       <TerminalSearchBar
-        isOpen={isSearchOpen}
+        isOpen={Boolean(activeTaskId) && isSearchOpen}
         searchQuery={searchQuery}
         onSearchChange={handleSearchChange}
         onFindNext={handleFindNext}
@@ -1707,7 +1729,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
           {scrollState.fresh ? t('有新输出，回到底部') : t('回到底部')}
         </button>
       )}
-      {notice && (
+      {activeTaskId && notice && (
         <div role="status" className="pointer-events-none absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-full border border-line-strong bg-elevated/95 px-3 py-1 text-xs text-fg shadow-lg backdrop-blur">
           {notice}
         </div>

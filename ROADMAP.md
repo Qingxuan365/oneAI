@@ -32,6 +32,8 @@
 - [x] 2026-11-19 09:15 版本号升到 2.2.2 并生成安装包 `OneAI-Setup-2.2.2.exe`（85319058 字节），随 GitHub Release `v2.2.2` 发布；包含运行中转圈、任务完成提示音、休息提醒称呼与输出静默判断修复。
 
 ### 待办 / 后续增强
+- [ ] 2026-11-27 16:25 外部用户反馈「打开最新版后卡住，需强制结束进程」，待复现。用与 GitHub 发布资产 SHA-256 一致的 v2.2.10 在 Windows 11 独立配置下测试启动、恢复系统终端、两轮 6,000 行输出和 Dashboard，以及默认更新检查开启时空闲 130 秒。446 次界面到主进程往返均响应，最长 72 ms，诊断日志没有阻塞或渲染无响应记录。反馈设备、触发条件和日志待确认。
+- [ ] 目录树「复制文件」已实现并通过界面与 Windows 文件数据格式检查，实际粘贴到资源管理器待验证。
 - [ ] 桌面验收软件更新真实升级链路：发布包含 `OneAI-Setup-<version>.exe`、`latest.yml`（及 `.blockmap`）的新版 GitHub Release 后，从已安装的旧版触发检查、应用内下载进度与重启覆盖安装，确认新版本正常启动且工作区与设置保留。
 - [ ] 桌面验收底部状态栏：安装新版后在 Claude Code、Codex、Antigravity、Pi 与系统终端下核对状态栏两行内容、进度条观感与各主题配色、窗口缩窄时的收起顺序、日期时钟的显示与收起，以及关闭「显示状态栏」后终端行数恢复。
 - [ ] 桌面验收 `Dashboard` 页面（`Ctrl + Shift + D`）：核对本机真实 Claude Code / Codex / Antigravity / Pi 会话扫描速度与数据准确性（去重 Session 数、Tokens、估算费用与价格覆盖率、12 个月热力图与多分组 Antigravity / 多账号实时配额卡），确认各主题配色观感及从 Dashboard 切回运行中终端时的焦点与 PTY 重绘手感。
@@ -69,6 +71,11 @@
 - 会话日志缓冲保留最近约 2 MiB 输出；更早内容不会出现在复制和导出的日志中。
 
 ## 4. 最近验证
+- **2026-11-27 17:40** OneAI 2.3.1 通过类型检查、`check:i18n`（792 个键，0 缺失）、`check:main`（24/24）、`check:ui`（566/566）与 `build:win`。已核对 [Windows x64 安装包](D:/GitHub/OneAI/release/OneAI-Setup-2.3.1.exe) （北京时间 2026-11-27 17:40:35，85,707,872 字节）的大小、`latest.yml`（338 字节）中的版本号与 SHA-512，以及 `OneAI-Setup-2.3.1.exe.blockmap`（89,070 字节）。
+- **2026-11-27 17:33** TypeScript 生产构建、主进程（24/24）、多语言（792 个键，0 缺失）、界面回归（566/566）和 Windows x64 NSIS 打包通过。打包版通过真实鼠标点击在 Antigravity 1.5.18 终端打开原生模型选择器。Electron 对照检查确认卡片间距由 2 px 增至 6 px，运行光效和连线正常。已核对 [Windows x64 安装包](D:/GitHub/OneAI/release/OneAI-Setup-2.3.0.exe) （北京时间 2026-11-27 17:32:27，85,707,936 字节）的大小、SHA-512 和增量更新块映射。
+- **2026-11-27 17:18** 状态栏模型入口与侧栏完整连线通过类型检查、`check:main`（24/24）、`check:i18n`（792 个键，0 缺失）、`check:ui`（561/561）及 Windows x64 NSIS 打包。Electron 回归覆盖焦点报告期间仍提交命令、连线持续流向任务卡片和减少动态效果时的静态连线。新打包的 OneAI 通过真实鼠标点击打开隔离 Codex 会话的原生模型选择器。已核对 `latest.yml` 的文件大小和 SHA-512。[Windows x64 安装包](D:/GitHub/OneAI/release/OneAI-Setup-2.3.0.exe) （北京时间 2026-11-27 17:17:14，85,705,860 字节，未签名）。
+- **2026-11-27 16:59** 分支切换、冲突对比、原生模型入口、Codex 模型信息兜底与侧栏脉冲线通过生产构建、`check:main`（24/24）、`check:i18n`（792 个键，0 缺失）及 `check:ui`（559/559）。用 Windows Electron 和临时 Git 仓库实测分支切换、未提交改动保护与冲突对比。隔离的真实 Codex CLI 通过 ConPTY 打开原生模型选择器，测试退出时出现 `AttachConsole` 清理提示。
+- **2026-11-27 16:17** 主页和项目目录树复制文件通过类型检查、`check:main`（22/22）、`check:i18n`（769 个键，0 缺失）和 `check:ui`（545/545）。Windows 文件数据对象检查通过，覆盖中文文件名、空格和复制操作标记。
 - **2026-11-27 09:23** OneAI 2.3.0 通过类型检查、`check:main`（21/21）、`check:i18n`（766 个键，0 缺失）、`check:ui`（535/535）及 `build:win`。已核对安装包和应用内版本、`latest.yml` 中的 SHA-512 与文件大小，以及增量更新块映射。[Windows x64 安装包](D:/GitHub/OneAI/release/OneAI-Setup-2.3.0.exe) （北京时间 2026-11-27 09:23:00，85,701,753 字节，未签名）。
 - **2026-11-27 07:55** 状态竞争修复通过类型检查、`check:main`（21/21）、`check:i18n`（766 个键，0 缺失）、`check:ui`（535/535）和 `build:win`。延迟采样回归覆盖提前进入等待、重复提示、终端退出、重开后收到旧结果，以及返回结果后立即重新判断。移除采样保护的隔离对照复现提前切换。已核对 [Windows 安装包](D:/GitHub/OneAI/release/shell-activity-status/OneAI-Setup-2.2.10.exe) （北京时间 2026-11-27 07:54:58，85,697,353 字节，未签名）及更新元数据中的版本和 SHA-512。
 - **2026-11-27 07:23** 静默 Shell 运行状态通过类型检查、`check:main`（21/21）、`check:i18n`（766 个键，0 缺失）、`check:ui`（529/529）、真实 Windows ConPTY 回归和 `build:win`。Windows 实测进程采样可识别 Pi 式 Node 启动器下的静默 PowerShell，命令结束后信号清除。五种 CLI 的状态、提示音和待查看时机以界面夹具覆盖，实际登录会话尚未逐一验证。ConPTY 退出测试有已知 `AttachConsole` 日志，退出码为 0。已核对 [Windows 安装包](D:/GitHub/OneAI/release/shell-activity/OneAI-Setup-2.2.10.exe) （北京时间 2026-11-27 07:23:07，85,701,655 字节，未签名）及更新元数据中的版本和 SHA-512。
@@ -84,14 +91,14 @@
 - **2026-11-25 18:08** 状态栏额度通过类型检查、主进程 18/18、多语言 758 条和界面 495/495。独立 Electron 预览核对方括号、点阵和重置时间，19 档状态栏宽度无横向溢出。本地 Windows 安装包为 85,698,397 字节，SHA-512 与更新清单一致。界面验收使用示例额度。
 - **2026-11-25 10:19** 2.2.7 → 2.2.8 真实线上更新链路验证与三语更新说明：用打包版 2.2.7 客户端直连 GitHub Release `v2.2.8`，实测检测到 `v2.2.8`（`canAutoUpdate=true`）、侧栏显示 `v2.2.8` 徽标、应用内完整下载 `OneAI-Setup-2.2.8.exe`（85,697,602 字节）并通过 SHA-512 校验进入 `downloaded` 态（侧栏切换为绿色「重启更新」徽标，弹窗显示「立即重启并安装」，已 CDP 截图核对）；随后新增 `selectLocalizedReleaseNotes`（按 `zh-CN` / `zh-TW` / `en` 只展示对应语言更新说明，切换语言实时刷新），`tsc`、`check:main`（18/18）与 `build:win` 通过，同步替换 `v2.2.8` Release 三件套与三语更新说明。未验证：点击「立即重启并安装」后 NSIS 安装器覆盖重启的最终系统交互。
 - **2026-11-25 10:13** 2.2.8 发布构建与 UI 截图验收：`npx tsc --noEmit`、`npm run check:i18n`（760 条，0 缺失）、`npm run check:main`（18/18）、`npm run check:ui`（全部通过）与 `npm run build:win` 通过；已对打包版 `OneAI.exe` 的「设置 → 关于」与「软件更新」弹窗做 CDP 真实截图核对，布局、对齐与对比度正常。产物：`release/OneAI-Setup-2.2.8.exe`（85,697,602 字节）、`release/latest.yml`（338 字节）与 `release/OneAI-Setup-2.2.8.exe.blockmap`（89,317 字节）。
-- **2026-11-25 10:03** 软件更新打包版真机实测与修复：用独立 `--user-data-dir` 启动 [OneAI.exe](D:/GitHub/OneAI/release/win-unpacked/OneAI.exe) 并通过 CDP 实测，先后发现并修复三个真实问题：① 主进程 ESM 具名导入 CJS 模块 `electron-updater` 导致打包版启动报错（改为默认导入）；② 共享代理 IP 降级查 `api.github.com` 触发 403 限流（新增 `github.com/Qingxuan365/oneAI/releases/latest` 跳转兜底）；③ 启动 6 秒自动检查在手动检查后重复触发与降级后锁死 `canAutoUpdate` 的状态竞态。修复后 `tsc`、`check:main`（18/18）、`build:win` 与打包版 CDP 实测均通过（`initial.canAutoUpdate=true`，线上检查返回 `not-available` / `v2.2.7`，自动检查复用结果不重发）；安装包 [OneAI-Setup-2.2.7.exe](D:/GitHub/OneAI/release/OneAI-Setup-2.2.7.exe) 为 85,693,183 字节，[latest.yml](D:/GitHub/OneAI/release/latest.yml) 为 338 字节。未验证：发布带 `latest.yml` 的新版本后跨版本在线下载与重启覆盖安装。
-- **2026-11-25 09:54** 软件更新功能验证：`npx tsc --noEmit`、`npm run check:i18n`（760 条，0 缺失、0 占位符错误、0 未使用）、`npm run check:main`（18/18 通过，新增 `updater.ts` 版本比较 / 更新说明清洗 / 自动更新门禁测试）、`npm run check:ui`（全部通过，新增侧栏更新徽标、忽略版本、更新弹窗各状态与「设置 → 关于」英文无中文断言）及 `npm run build:win` 通过；已核对产物 [OneAI-Setup-2.2.7.exe](D:/GitHub/OneAI/release/OneAI-Setup-2.2.7.exe) （85,693,103 字节）、[latest.yml](D:/GitHub/OneAI/release/latest.yml) （338 字节）与 `release/win-unpacked/resources/app-update.yml`。未验证：真实跨版本 GitHub Release 在线下载与重启覆盖安装。
-- **2026-11-25 07:06** 2.2.7 发布构建：主进程 17/17、多语言 714 条和 TypeScript 构建通过；Windows 安装包 `release/OneAI-Setup-2.2.7.exe` 为 85,363,186 字节，生成于北京时间 2026-11-25 07:06:26。性能、界面和真实 PTY 验证见本节既有记录。
-- **2026-11-25 07:02** 继续验收终端链路：主进程 17/17 通过，新增消费确认非法值、重复确认、清屏释放积压、重启后旧输出隔离测试；真实 PTY 测试补充系统 ConPTY 与 Pi 所用 ConPTY DLL 的交互写入、尺寸调整与退出，背压及 Electron 退出回归通过。另用打包版 OneAI.exe 加载 app.asar 内 node-pty，成功输出标记并以 0 退出。本轮 build:win 通过，安装包为 85,365,823 字节，生成于北京时间 2026-11-25 07:03:19。真实 CLI 的中文输入法及长期运行仍待桌面验收。
-- **2026-11-25 06:55** 性能优化：类型检查、主进程 16 项、多语言 714 条及界面回归通过；`node scripts/check-pty.mjs` 在 Electron 下实测 3 次直接创建与 3 次 worker 创建，事件循环最大延迟分别为 79.7～83.9 ms 和 11.2～15.1 ms；首次 worker 创建等待约 145 ms，后续约 71～73 ms。4 MiB 输出在约 1 Mi 字符积压处暂停，消费确认后恢复并收到尾部标记。带存活 PTY 的 Electron 退出回归通过，先等待 node-pty 输出线程排空再终止外层 worker；taskkill 兜底期间会出现 AttachConsole 提示，测试退出码为 0。Windows 安装包构建通过，release/OneAI-Setup-2.2.6.exe 为 85,365,817 字节，生成于北京时间 2026-11-25 06:55:54；真实 CLI 中文输入、长期运行与安装后验证仍未覆盖。
 
 
 ## 5. 最近完成
+- **2026-11-27 17:40** OneAI 版本升至 2.3.1，纳入后台静默 Shell 追踪、关闭到系统托盘、目录树本地分支切换与只读 Git 冲突对比、目录树复制文件、底部状态栏原生模型选择器（含 Antigravity）、侧栏主页入口与脉冲连线等改进；提交并推送至 `main` 与 `v2.3.1`，上传 Windows 安装包、`latest.yml` 与 `.blockmap` 至 [GitHub Release v2.3.1](https://github.com/Qingxuan365/oneAI/releases/tag/v2.3.1) 。独立网络工具 `tools/` 未纳入本次发布。
+- **2026-11-27 17:33** 状态栏接入 Antigravity 原生模型选择器。侧栏文件夹「+」菜单优先显示 Claude Code、Codex、Antigravity、Kimi Code、Pi、OpenCode，其后是其他已安装的 CLI 和系统终端。展开侧栏的相邻任务卡片间距增至 6 px。
+- **2026-11-27 17:18** 修复点击确认时 xterm 的焦点报告被当成新输入、导致原生模型命令取消提交的问题。展开侧栏时，主题色渐变沿完整连线从文件夹持续流向运行中的任务卡片，减少动态效果时显示静态连线。已重建 OneAI 2.3.0 Windows x64 安装包、`latest.yml` 和增量更新块映射。
+- **2026-11-27 16:59** 目录树增加本地分支切换和只读 Git 冲突对比。底部模型入口在确认输入框为空后打开受支持 CLI 的原生选择器，Codex 摘要缺少模型元数据时保留可用的模型名与思考强度。界面回归窗口静音，仍检查提示音触发次数。
+- **2026-11-27 16:17** 在侧栏 Dashboard 右侧添加「主页」，回到初始任务页并保留后台终端。折叠侧栏保留主页图标。
 - **2026-11-27 09:23** 应用及锁文件版本升级至 2.3.0，纳入后台 Shell 检测、任务状态切换保护和关闭到系统托盘。已生成本地 Windows 安装包及更新文件。
 - **2026-11-27 07:55** Windows 上为 Claude Code、Codex、Antigravity、Kimi Code 和 Pi 增加按终端进程树识别静默运行的 Shell 命令。检测到命令时保持「运行中」，最后一条检测到的命令结束后恢复等待与待查看计时。达到阈值时会先等当前会话已发出的采样返回。终端退出和重启使旧会话的采样及提醒计时失效，等待提示音仅在界面实际进入等待状态时播放。其他 CLI 和采样不可用时按终端输出判断。同步中英文 README 和功能说明。
 - **2026-11-26 16:36** 「设置 → 外观 → 窗口行为」新增「关闭时隐藏到系统托盘」，默认关闭。开启后关闭窗口保留 PTY，双击托盘图标恢复窗口，右键退出复用终端确认。系统退出与更新安装可正常关闭窗口。同步中英文 README 和功能说明。
@@ -107,11 +114,3 @@
 - **2026-11-25 10:19** 发布 2.2.8 并支持三语更新说明过滤（[GitHub Release v2.2.8](https://github.com/Qingxuan365/oneAI/releases/tag/v2.2.8) ）：新增基于 GitHub Releases 的更新提示与应用内自动更新、侧栏更新徽标、「设置 → 关于」页与更新弹窗，并在 `updater.ts` 中按当前界面语言（简体中文 / 繁體中文 / English）只展示对应语言的更新说明；`AGENTS.md` 同步固化三语 Release 说明发版规范。
 - **2026-11-25 09:54** 新增基于 GitHub Releases 的软件更新提示与应用内自动更新（`electron-builder.json`、`vite.config.ts`、`src/shared/types.ts`、`src/main/updater.ts`、`src/main/index.ts`、`src/preload/index.*`、`src/renderer/src/components/UpdateModal.tsx`、`Sidebar.tsx`、`SettingsModal.tsx`、`App.tsx`、`en.ts`、`zh-TW.ts`、`check-main.mjs`、`check-ui.mjs`、`AGENTS.md`、`docs/features*.md`）：支持启动静默检查、侧栏提示徽标、弹窗更新说明与下载进度、立即重启覆盖安装（含运行中终端确认与退出保护放行）以及便携版/开发模式/缺 `latest.yml` 时的浏览器下载兜底。
 - **2026-11-25 07:07** 发布 2.2.7：版本配置与性能优化提交 `76360d5` 已推送至 `origin/main`，标签 `v2.2.7` 指向该提交；[GitHub Release](https://github.com/Qingxuan365/oneAI/releases/tag/v2.2.7) 已设为 Latest，安装包 `OneAI-Setup-2.2.7.exe` 为 85,363,186 字节，线上附件 SHA-256 `b0f4fd619db6315bca410170e825eb4b1944088921f5f87566f973dac37ed8b3` 与本地一致。独立网络工具 `tools/` 未纳入本次发布。
-- **2026-11-25 06:51** 顺序完成四项性能优化：共享 PTY worker 隔离原生创建阻塞并处理创建取消；增加 worker → 主进程 → xterm 消费确认与高低水位背压；统计缓存改为按文件分批序列化和原子落盘，保留日志变化后完整重解析以处理截断及累计状态；摘要目录按目录签名缓存，30 秒兜底重新枚举。新增真实 PTY 性能与背压测试 `scripts/check-pty.mjs`，补充取消、缓存损坏和目录变更回归。旧统计缓存保留，新缓存首次访问需重建。
-- **2026-11-24 08:06** 运行中任务的状态圆点从旋转动画改为绿色空心圆（`taskStatus.ts`，同步更新 `docs/features*.md`），避免每个运行中的任务都让窗口持续以 60 fps 重绘。修复生产构建的 CSP：`vite.config.ts` 计算内联脚本哈希前先把 CRLF 统一成 LF，与浏览器的计算方式一致；首帧设置主题的内联脚本此前一直被拦截，浅色主题启动时会先闪一帧深色。
-
-- **2026-11-24 08:01** 粘贴图片的 PNG 编码移到 worker 线程（新增 `src/main/png-encode.ts`，`index.ts` 先判断剪贴板格式再读取，编码失败时回退到 `toPNG()`）；修复上一版资源采样 worker 导致应用退出卡住的问题（`system-stats.ts`：停止采样时先结束 PowerShell，再结束 worker）。退出时结束终端的方式保持同步 taskkill，实测异步版本更慢且会卡死。
-
-- **2026-11-24 06:58** 修复三个问题（`InlineQuotaText.tsx`、`TerminalViewport.tsx`、`StatusBar.tsx`、`index.css`、`system-stats.ts`、`main/index.ts`、`preload/index.*`、`types/index.ts`、`App.tsx`）：会话已有 Ctx／缓存／成本但还没有 token 数时，Token 文案读取 undefined 导致启动黑屏，现已修复；终端内容改为垂直居中，状态栏左边距与侧栏齿轮对齐；系统资源采样的 PowerShell 改在 worker 线程中创建和读写，避免偶发约 2 秒的主线程阻塞，关闭状态栏时停止采样并结束这些进程。
-
-- **2026-11-24 00:38** 新增底部两行状态栏并精简顶栏（`StatusBar.tsx`、`InlineQuotaText.tsx`、`SystemStatsText.tsx`、`Topbar.tsx`、`App.tsx`、`index.css`、`SettingsModal.tsx`、`types/index.ts`、`en.ts`、`zh-TW.ts`、`check-ui.mjs`、`AGENTS.md`、`docs/features*.md`、`README*.md`）：额度改用「已用」进度条，新增任务状态与「显示状态栏」设置；`AGENTS.md` 里「额度必须在顶栏单行纯文字」的红线改为状态栏规范。

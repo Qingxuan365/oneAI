@@ -193,6 +193,15 @@ export interface DirectoryListResult {
   error?: string;
 }
 
+export type GitLocalBranchesResult =
+  | { ok: true; branches: string[]; currentBranch: string | null }
+  | { ok: false; error: string };
+
+export type GitBranchSwitchResult = { ok: true } | { ok: false; error: string; currentBranch?: string };
+
+export type GitConflictFilesResult = { ok: true; files: string[] } | { ok: false; error: string };
+export type GitConflictDiffResult = { ok: true; diff: string } | { ok: false; error: string };
+
 export interface SessionCreateResult {
   success: boolean;
   reused?: boolean;

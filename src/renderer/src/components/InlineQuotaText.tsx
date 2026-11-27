@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { RotateCw } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { ChevronDown, RotateCw, X } from 'lucide-react';
 import { QuotaData } from '../types';
 import { t } from '../i18n';
 
@@ -8,6 +8,8 @@ interface InlineQuotaTextProps {
   /** 状态栏的两行：limits 为额度进度条与模型，usage 为会话 Tokens / Cache / Cost / Ctx */
   row: 'limits' | 'usage';
   onRefresh: () => Promise<void>;
+  onOpenModelPicker?: () => void;
+  modelPickerDisabled?: boolean;
   /** 传入当前语言，使 React.memo 在切换语言时同步重绘 */
   language?: string;
 }
@@ -77,8 +79,12 @@ function formatTokens(n: number): string {
  * 状态栏额度与会话用量，所有 CLI 共用。额度行显示 5h / 7d 进度条与模型，
  * 用量行显示 Tokens / Cache / Cost / Ctx。窄栏由容器查询收起次要详情。
  */
-export const InlineQuotaText: React.FC<InlineQuotaTextProps> = React.memo(({ quota, onRefresh, row }) => {
+export const InlineQuotaText: React.FC<InlineQuotaTextProps> = React.memo(({ quota, onRefresh, row, onOpenModelPicker, modelPickerDisabled }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [confirmingModelPicker, setConfirmingModelPicker] = useState(false);
+  useEffect(() => {
+    if (modelPickerDisabled) setConfirmingModelPicker(false);
+  }, [modelPickerDisabled]);
 
   const handleRefreshClick = async () => {
     if (isRefreshing) return;
@@ -97,10 +103,37 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = React.memo(({ quo
     </button>
   );
 
+  const awaitingModelConfirmation = confirmingModelPicker && !modelPickerDisabled;
+  const pickerLabel = awaitingModelConfirmation ? t('确认输入框为空后打开') : t('切换模型');
+  const modelButton = onOpenModelPicker && (
+    <span className="flex min-w-0 items-center gap-0.5">
+      <button
+        type="button"
+        onClick={() => {
+          if (awaitingModelConfirmation) onOpenModelPicker();
+          setConfirmingModelPicker(!awaitingModelConfirmation);
+        }}
+        disabled={modelPickerDisabled}
+        aria-label={pickerLabel}
+        title={modelPickerDisabled ? t('任务就绪后即可切换模型') : awaitingModelConfirmation ? pickerLabel : t('打开 CLI 的模型选择器')}
+        className="quota-model-picker flex min-w-0 items-center gap-1 rounded text-fg hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:cursor-default disabled:hover:text-fg"
+      >
+        <span className="truncate">{quota?.model && !awaitingModelConfirmation ? `Model: ${quota.model}` : pickerLabel}</span>
+        {!awaitingModelConfirmation && <ChevronDown size={12} className="shrink-0" aria-hidden="true" />}
+      </button>
+      {awaitingModelConfirmation && (
+        <button type="button" onClick={() => setConfirmingModelPicker(false)} aria-label={t('取消切换模型')} title={t('取消切换模型')} className="icon-btn h-5 w-5 shrink-0">
+          <X size={12} aria-hidden="true" />
+        </button>
+      )}
+    </span>
+  );
+
   if (!quota) {
     if (row === 'usage') return null;
     return (
       <div className="flex items-center gap-3 font-mono text-ui text-fg-faint">
+        {modelButton}
         <span>{t(FIVE_HOUR_LABEL)} --</span>
         <span>{t(WEEKLY_LABEL)} --</span>
         {refreshButton(t('刷新额度'))}
@@ -113,6 +146,7 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = React.memo(({ quo
     if (row === 'usage') return null;
     return (
       <div className="flex items-center gap-2 text-ui text-fg-faint">
+        {modelButton}
         <span className="rounded border border-line-strong bg-muted px-1.5 py-0.5 text-ui text-fg-muted">{quota.cliName}</span>
         <span className="quota-detail">{quota.message || t('未检测到本地 CLI 或配置')}</span>
         {refreshButton(t('刷新 {name} 状态', { name: quota.cliName }))}
@@ -220,14 +254,14 @@ export const InlineQuotaText: React.FC<InlineQuotaTextProps> = React.memo(({ quo
   return (
     <div className="quota-limits flex items-center gap-5 font-mono text-ui text-fg-muted" title={modelTitle}>
       {/* 空间不足时先截断模型名，给额度留出完整的显示宽度。 */}
-      {quota.model && (
+      {(quota.model || modelButton) && (
         <span className="quota-model-info flex min-w-0 items-center gap-1.5">
-          <span className="quota-model truncate">
+          {modelButton || <span className="quota-model truncate">
             <span className="text-fg-subtle">Model: </span>
             <span className="text-fg">{quota.model}</span>
-          </span>
+          </span>}
           {quota.effort && (
-            <span className={`shrink-0 rounded border px-1.5 py-px text-ui lowercase tracking-wider ${effortColor(quota.effort)}`}>
+            <span className={`quota-model-effort shrink-0 rounded border px-1.5 py-px text-ui lowercase tracking-wider ${effortColor(quota.effort)}`}>
               {quota.effort}
             </span>
           )}

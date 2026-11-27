@@ -15,3 +15,12 @@ export const BUILTIN_CLIS: CliDef[] = [
   { id: 'grok', name: 'Grok Build', icon: 'grok', defaultCommand: 'grok' },
   { id: 'terminal', get name() { return t('系统终端'); }, icon: 'terminal', defaultCommand: 'powershell.exe' },
 ];
+
+export const MODEL_PICKER_COMMANDS: ReadonlyMap<string, string> = new Map([
+  ['codex', '/model'],
+  ['claude', '/model'],
+  ['kimi', '/model'],
+  ['opencode', '/models'],
+  ['agy', '/model'],
+  ['pi', '/model'],
+]);

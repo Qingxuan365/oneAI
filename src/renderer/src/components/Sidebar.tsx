@@ -1,5 +1,5 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUpCircle, BedDouble, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Folder, FolderOpen, FolderPlus, GitBranch, GripVertical, History, LayoutDashboard, Moon, PanelLeftOpen, Pencil, Plus, RotateCcw, Settings, SlidersHorizontal, Sun, Trash2, User, X } from 'lucide-react';
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ArrowUpCircle, BedDouble, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Folder, FolderOpen, FolderPlus, GitBranch, GripVertical, History, House, LayoutDashboard, Moon, PanelLeftOpen, Pencil, Plus, RotateCcw, Settings, SlidersHorizontal, Sun, Trash2, User, X } from 'lucide-react';
 import { Account, CliDef, FolderEntry, HistoryEntry, MusicStream, TaskSession, UpdateState } from '../types';
 
 const NO_STREAMS: MusicStream[] = [];
@@ -13,6 +13,61 @@ import { AppLogo } from './AppLogo';
 import { MusicPlayer } from './MusicPlayer';
 import { version } from '../../../../package.json';
 import { T, t } from '../i18n';
+
+const NEW_TASK_CLI_PRIORITY = new Map(['claude', 'codex', 'agy', 'kimi', 'pi', 'opencode'].map((id, index) => [id, index]));
+const newTaskCliRank = (id: string) => NEW_TASK_CLI_PRIORITY.get(id) ?? NEW_TASK_CLI_PRIORITY.size + Number(id === 'terminal');
+
+function FolderTaskPulses({ runningIds, layoutKey }: { runningIds: string; layoutKey: string }) {
+  const svg = useRef<SVGSVGElement>(null);
+  const gradientId = useId();
+  const [routes, setRoutes] = useState<Array<{ id: string; x: number; y: number }>>([]);
+
+  useLayoutEffect(() => {
+    const list = svg.current?.parentElement;
+    if (!list) return;
+    const running = new Set(runningIds.split('\0'));
+    const rows = Array.from(list.children).filter((node): node is HTMLElement =>
+      node instanceof HTMLElement && running.has(node.dataset.taskId ?? ''));
+    const measure = () => {
+      const next = rows.map((row) => ({
+        id: row.dataset.taskId!,
+        x: row.offsetLeft + 2,
+        y: 5 + row.offsetTop + row.offsetHeight / 2,
+      }));
+      setRoutes((previous) => previous.length === next.length
+        && previous.every((route, i) => route.id === next[i].id && route.x === next[i].x && route.y === next[i].y)
+        ? previous : next);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(list);
+    rows.forEach((row) => observer.observe(row));
+    return () => observer.disconnect();
+  }, [runningIds, layoutKey]);
+
+  const yMax = Math.max(0, ...routes.map((route) => route.y));
+  const xMax = Math.max(1, ...routes.map((route) => route.x));
+  return (
+    <svg ref={svg} width={xMax + 1} height={yMax + 1} data-folder-task-pulses aria-hidden="true"
+      className="pointer-events-none absolute -left-px -top-[5px] !mt-0 overflow-visible text-accent"
+      fill="none" stroke={`url(#${gradientId})`} strokeWidth="1.7" strokeLinecap="round">
+      <defs>
+        <linearGradient id={gradientId} gradientUnits="userSpaceOnUse" x2="14" y2="24" spreadMethod="repeat">
+          <stop offset="0" className="folder-task-flow-base" />
+          <stop offset=".38" className="folder-task-flow-highlight" />
+          <stop offset=".65" className="folder-task-flow-middle" />
+          <stop offset="1" className="folder-task-flow-base" />
+          <animateTransform attributeName="gradientTransform" type="translate" from="0 0" to="14 24"
+            dur="1s" repeatCount="indefinite" />
+        </linearGradient>
+      </defs>
+      <path d={`M 1 0 V ${yMax}`} className="folder-task-flow-line" />
+      {routes.map(({ id, x, y }) => (
+        <path key={id} data-folder-task-pulse={id} d={`M 1 ${y} H ${x}`} className="folder-task-flow-line" />
+      ))}
+    </svg>
+  );
+}
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -45,6 +100,7 @@ interface SidebarProps {
   onPinRecentFolder?: (folderPath: string) => void;
   onAddFolder: () => void;
   onOpenDashboard?: () => void;
+  onOpenHome?: () => void;
   onSelectTask: (taskId: string) => void;
   onToggleFolder: (folderPath: string) => void;
   onReorderFolder: (sourcePath: string, targetPath: string) => void;
@@ -123,6 +179,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   onPinRecentFolder,
   onAddFolder,
   onOpenDashboard,
+  onOpenHome,
   onSelectTask,
   onToggleFolder,
   onReorderFolder,
@@ -229,6 +286,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   }, [folders, tasks]);
   const tasksOf = (folderPath: string) => tasksByFolder.get(folderKey(folderPath)) ?? [];
   const cliMap = useMemo(() => new Map(clis.map((cli) => [cli.id, cli])), [clis]);
+  const newTaskClis = useMemo(() => [...clis].sort((a, b) => newTaskCliRank(a.id) - newTaskCliRank(b.id)), [clis]);
   const accountMap = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
   const cliOf = (task: TaskSession) => cliMap.get(task.groupId);
   const accountOf = (task: TaskSession) => (task.accountId ? accountMap.get(task.accountId) : undefined);
@@ -375,9 +433,9 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
 
   const newTaskItems = (folderPath: string) => (
     <>
-      {clis.map((cli, idx) => (
+      {newTaskClis.map((cli, idx) => (
         <React.Fragment key={cli.id}>
-          {idx > 0 && accountedClis(clis[idx - 1].id).length > 0 && <div className="my-1 border-t border-line/60" role="separator" />}
+          {idx > 0 && accountedClis(newTaskClis[idx - 1].id).length > 0 && <div className="my-1 border-t border-line/60" role="separator" />}
           <button type="button" role="menuitem" className={menuItemClass}
             onClick={() => { setMenu(null); onNewTask(folderPath, cli.id); }}>
             <BrandIcon icon={cli.icon} size={14} /><span className="truncate">{cli.name}</span>
@@ -505,6 +563,26 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
     </div>
   );
 
+  const isHomeActive = !isDashboardActive && activeTaskId === null;
+  const homeButton = onOpenHome && (
+    <button
+      type="button"
+      data-home-nav
+      onClick={onOpenHome}
+      aria-current={isHomeActive ? 'page' : undefined}
+      aria-label={t('主页')}
+      title={t('主页')}
+      className={`flex shrink-0 items-center justify-center rounded-md transition-colors ${
+        isCollapsed ? 'h-9 w-9' : 'h-8 gap-2 px-2.5 text-ui'
+      } ${
+        isHomeActive ? 'bg-selected font-medium text-accent' : 'text-fg-muted hover:bg-hover hover:text-fg'
+      }`}
+    >
+      <House size={isCollapsed ? 16 : 15} aria-hidden="true" />
+      {!isCollapsed && <span>{t('主页')}</span>}
+    </button>
+  );
+
   // 折叠后保留窄条：每个文件夹一个按钮（点击新建任务）及其下的任务序号按钮（带品牌标与状态点，支持切换、右键菜单与中键关闭），底部保留添加文件夹、设置与展开入口
   if (isCollapsed) {
     return (
@@ -513,9 +591,9 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
           <AppLogo size={20} />
         </div>
 
-        {onOpenDashboard && (
-          <div className="flex w-full shrink-0 justify-center border-b border-line py-1.5">
-            <button
+        {(onOpenDashboard || onOpenHome) && (
+          <div className="flex w-full shrink-0 flex-col items-center gap-1 border-b border-line py-1.5">
+            {onOpenDashboard && <button
               type="button"
               data-dashboard-nav
               onClick={onOpenDashboard}
@@ -527,7 +605,8 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
               }`}
             >
               <LayoutDashboard size={16} />
-            </button>
+            </button>}
+            {homeButton}
           </div>
         )}
 
@@ -662,16 +741,15 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
         </div>
       </div>
 
-      {/* Dashboard 导航菜单（品牌头部正下方） */}
-      {onOpenDashboard && (
-        <div className="shrink-0 border-b border-line px-2 py-2">
-          <button
+      {(onOpenDashboard || onOpenHome) && (
+        <div className="flex shrink-0 items-center gap-1 border-b border-line px-2 py-2">
+          {onOpenDashboard && <button
             type="button"
             data-dashboard-nav
             onClick={onOpenDashboard}
             aria-current={isDashboardActive ? 'page' : undefined}
             title="Dashboard (Ctrl+Shift+D)"
-            className={`relative flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-ui transition-colors ${
+            className={`relative flex h-8 min-w-0 flex-1 items-center gap-2.5 rounded-md px-2.5 text-left text-ui transition-colors ${
               isDashboardActive
                 ? 'bg-selected font-medium text-fg'
                 : 'text-fg-muted hover:bg-hover hover:text-fg'
@@ -680,7 +758,8 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
             {isDashboardActive && <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-accent" aria-hidden="true" />}
             <LayoutDashboard size={15} className={`shrink-0 ${isDashboardActive ? 'text-accent' : 'text-fg-subtle'}`} aria-hidden="true" />
             <span className="truncate">Dashboard</span>
-          </button>
+          </button>}
+          {homeButton}
         </div>
       )}
 
@@ -727,6 +806,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
             const unreadCount = folderTasks.filter((task) => task.id !== activeTaskId && unreadTaskIds?.has(task.id)).length;
             const hasError = folderTasks.some((task) => task.status === 'error');
             const hasRunning = folderTasks.some((task) => task.status === 'running' || task.status === 'starting');
+            const runningIds = folder.isExpanded ? folderTasks.filter((task) => task.status === 'running').map((task) => task.id).join('\0') : '';
             const dropEdge = folderDropTarget === key ? folderDropPosition : null;
 
             return (
@@ -835,7 +915,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
 
                 {/* 二级：该文件夹里的任务 */}
                 {folder.isExpanded && (
-                  <div className="ml-[1.4rem] mt-0.5 space-y-0.5 border-l border-line pl-1.5">
+                  <div className="relative ml-[1.4rem] mt-0.5 space-y-1.5 border-l border-line pl-1.5">
                     {folderTasks.length === 0 && (
                       <button
                         type="button"
@@ -1020,6 +1100,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                         </div>
                       );
                     })}
+                    {runningIds && <FolderTaskPulses runningIds={runningIds} layoutKey={folderTasks.map((task) => task.id).join('\0')} />}
                   </div>
                 )}
               </div>

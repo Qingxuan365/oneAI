@@ -26,6 +26,9 @@ interface StatusBarProps {
   /** 是否在时钟里显示年月日（含农历）与星期，默认显示；状态栏过窄时自动收起，设置 → 时间 里可关闭 */
   dateVisible?: boolean;
   onRefreshQuota: () => Promise<void>;
+  onOpenModelPicker?: () => void;
+  modelPickerTaskId?: string;
+  modelPickerDisabled?: boolean;
   /** 传入当前语言，使 React.memo 在切换语言时同步重绘 */
   language?: string;
 }
@@ -137,6 +140,9 @@ export const StatusBar: React.FC<StatusBarProps> = React.memo(({
   clockOffsetHours = 0,
   dateVisible = true,
   onRefreshQuota,
+  onOpenModelPicker,
+  modelPickerTaskId,
+  modelPickerDisabled,
   language,
 }) => {
   return (
@@ -154,7 +160,7 @@ export const StatusBar: React.FC<StatusBarProps> = React.memo(({
           </span>
         )}
         <div id="oneai-statusbar-quota" className="min-w-0 flex-1 overflow-hidden">
-          {showQuota && <InlineQuotaText row="limits" quota={quota} onRefresh={onRefreshQuota} language={language} />}
+          {showQuota && <InlineQuotaText key={modelPickerTaskId} row="limits" quota={quota} onRefresh={onRefreshQuota} onOpenModelPicker={onOpenModelPicker} modelPickerDisabled={modelPickerDisabled} language={language} />}
         </div>
         <StatusClock showDate={dateVisible} clockOffsetHours={clockOffsetHours} language={language} />
       </div>

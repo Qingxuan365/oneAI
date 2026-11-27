@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Check,
+  ChevronDown,
   ChevronRight,
   ChevronsDownUp,
   Copy,
@@ -9,6 +10,7 @@ import {
   FileArchive,
   FileCode2,
   FileCog,
+  FileStack,
   FileImage,
   FileJson,
   FileText,
@@ -16,6 +18,7 @@ import {
   FolderOpen,
   FolderTree,
   GitBranch,
+  GitMerge,
   Loader2,
   RefreshCw,
   Search,
@@ -25,12 +28,15 @@ import { Modal } from './Modal';
 import { DirectoryTreeEntry } from '../types';
 import { folderKey, folderName } from '../workspaceState';
 import { t } from '../i18n';
+import type { GitLocalBranchesResult } from '../../../shared/types';
 
 interface ProjectTreeDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   rootPath: string;
   gitBranch?: string | null;
+  onGitBranchChanged?: (dir: string, branch: string) => void;
+  onOpenGitConflicts?: () => void;
   activePreviewPath?: string | null;
   hasActiveTerminal: boolean;
   onPreviewFile: (cwd: string, filePath: string) => void;
@@ -77,7 +83,7 @@ interface ContextMenuState {
 
 type FeedbackState = {
   key: string;
-  kind: 'inserted' | 'copied-rel' | 'copied-full' | 'copy-failed';
+  kind: 'inserted' | 'copied-rel' | 'copied-full' | 'copied-file' | 'copy-failed';
 };
 
 const MAX_CACHED_PROJECTS = 20;
@@ -127,6 +133,8 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
   onClose,
   rootPath,
   gitBranch,
+  onGitBranchChanged,
+  onOpenGitConflicts,
   activePreviewPath,
   hasActiveTerminal,
   onPreviewFile,
@@ -146,6 +154,12 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
   const [refreshing, setRefreshing] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
+  const [gitBranches, setGitBranches] = useState<{
+    root: string;
+    result: GitLocalBranchesResult;
+  } | null>(null);
+  const [gitSwitchError, setGitSwitchError] = useState<{ root: string; message: string; switched?: boolean } | null>(null);
+  const [switchingGitBranch, setSwitchingGitBranch] = useState(false);
 
   const bump = useCallback(() => {
     if (mountedRef.current) setVersion((v) => v + 1);
@@ -280,6 +294,46 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
   }, [rootPath]);
 
   useEffect(() => {
+    const list = window.electronAPI?.listLocalGitBranches;
+    if (!isOpen || !gitBranch || !list) return;
+    let disposed = false;
+    void list(rootPath).then((result) => {
+      if (!disposed) setGitBranches({ root: rootPath, result });
+    }).catch(() => {
+      if (!disposed) setGitBranches({ root: rootPath, result: { ok: false, error: '' } });
+    });
+    return () => { disposed = true; };
+  }, [isOpen, rootPath, gitBranch]);
+
+  useEffect(() => {
+    if (isOpen) setGitSwitchError(null);
+  }, [isOpen, rootPath]);
+
+  const handleSwitchGitBranch = async (branch: string) => {
+    const switchBranch = window.electronAPI?.switchLocalGitBranch;
+    if (!branch || switchingGitBranch || !switchBranch) return;
+    setSwitchingGitBranch(true);
+    setGitSwitchError(null);
+    try {
+      const result = await switchBranch(rootPath, branch);
+      if (!result.ok) {
+        setGitSwitchError({ root: rootPath, message: result.error, switched: Boolean(result.currentBranch) });
+      }
+      const currentBranch = result.ok ? branch : result.currentBranch;
+      if (!currentBranch) return;
+      setGitBranches((state) => state?.root === rootPath && state.result.ok
+        ? { root: rootPath, result: { ...state.result, currentBranch } }
+        : state);
+      onGitBranchChanged?.(rootPath, currentBranch);
+      await refreshAll(rootPath, false);
+    } catch {
+      setGitSwitchError({ root: rootPath, message: '' });
+    } finally {
+      setSwitchingGitBranch(false);
+    }
+  };
+
+  useEffect(() => {
     if (!contextMenu) return;
     const onMouseDown = (e: MouseEvent) => {
       if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
@@ -315,6 +369,15 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
       }
     }
   }, [showFeedback]);
+
+  const copyFile = useCallback(async (entry: DirectoryTreeEntry) => {
+    try {
+      const ok = await window.electronAPI?.copyProjectFile?.(rootPath, entry.relPath);
+      showFeedback(entry.relPath, ok ? 'copied-file' : 'copy-failed');
+    } catch {
+      showFeedback(entry.relPath, 'copy-failed');
+    }
+  }, [rootPath, showFeedback]);
 
   const handleInsert = useCallback((entry: DirectoryTreeEntry) => {
     onInsertPath?.(entry.relPath);
@@ -472,6 +535,13 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
   const titleLabel = folderName(rootPath) || rootPath;
   const isInitialLoading = Boolean(rootState?.loading && rootState.entries.length === 0);
   const activeKey = activePreviewPath ? folderKey(activePreviewPath) : '';
+  const branchOptions = gitBranches?.root === rootPath ? gitBranches.result : null;
+  const branchValue = branchOptions?.ok ? branchOptions.currentBranch ?? '' : '';
+  const branchError = gitSwitchError?.root === rootPath
+    ? [gitSwitchError.switched ? t('Git 分支已切换，后续操作出现错误') : t('无法切换 Git 分支'), gitSwitchError.message].filter(Boolean)
+    : branchOptions && !branchOptions.ok
+      ? [t('无法读取本地 Git 分支'), branchOptions.error].filter(Boolean)
+      : null;
 
   const menuItemClass = 'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-fg-muted transition-colors hover:bg-hover hover:text-fg';
   const menuLeft = contextMenu ? Math.max(8, Math.min(contextMenu.x, window.innerWidth - 208)) : 0;
@@ -484,6 +554,7 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
     if (feedback.kind === 'inserted') { statusText = t('已插入路径到终端'); statusOk = true; }
     else if (feedback.kind === 'copied-rel') { statusText = t('已复制相对路径'); statusOk = true; }
     else if (feedback.kind === 'copied-full') { statusText = t('已复制完整路径'); statusOk = true; }
+    else if (feedback.kind === 'copied-file') { statusText = t('已复制文件'); statusOk = true; }
     else { statusText = t('复制失败'); statusErr = true; }
   }
 
@@ -504,7 +575,26 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
           <span className="min-w-0 flex-1 truncate font-mono text-2xs text-fg-faint" title={rootPath}>
             {rootPath}
           </span>
-          {gitBranch && (
+          {gitBranch && (window.electronAPI?.switchLocalGitBranch && window.electronAPI?.listLocalGitBranches ? (
+            <div className="relative flex max-w-[8.5rem] shrink-0 items-center rounded-full border border-violet/30 bg-violet/10 text-2xs text-violet" aria-busy={switchingGitBranch}>
+              <GitBranch size={10} className="pointer-events-none absolute left-1.5" aria-hidden="true" />
+              <select
+                data-git-branch
+                value={branchValue}
+                onChange={(event) => void handleSwitchGitBranch(event.target.value)}
+                disabled={switchingGitBranch || !branchOptions?.ok || branchOptions.branches.length === 0}
+                aria-label={t('切换 Git 分支')}
+                title={t('Git 分支：{branch}', { branch: branchValue || gitBranch })}
+                className="w-full min-w-0 cursor-pointer appearance-none truncate rounded-full bg-transparent pl-5 pr-5 font-mono text-violet focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:cursor-default"
+              >
+                {!branchValue && <option className="bg-elevated text-fg" value="" disabled>{gitBranch}</option>}
+                {branchOptions?.ok && branchOptions.branches.map((branch) => (
+                  <option key={branch} className="bg-elevated text-fg" value={branch}>{branch}</option>
+                ))}
+              </select>
+              <ChevronDown size={10} className="pointer-events-none absolute right-1.5" aria-hidden="true" />
+            </div>
+          ) : (
             <span
               className="flex max-w-[6.5rem] shrink-0 items-center gap-1 rounded-full border border-violet/30 bg-violet/10 px-1.5 text-2xs text-violet"
               title={t('Git 分支：{branch}', { branch: gitBranch })}
@@ -513,6 +603,12 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
               <GitBranch size={10} className="shrink-0" aria-hidden="true" />
               <span className="truncate font-mono">{gitBranch}</span>
             </span>
+          ))}
+          {gitBranch && onOpenGitConflicts && (
+            <button type="button" className="icon-btn h-6 w-6 shrink-0" onClick={onOpenGitConflicts}
+              aria-label={t('Git 冲突对比')} title={t('Git 冲突对比')}>
+              <GitMerge size={13} aria-hidden="true" />
+            </button>
           )}
           <button
             type="button"
@@ -545,6 +641,11 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
             </button>
           )}
         </div>
+        {branchError && (
+          <p role="status" className="max-h-24 overflow-auto whitespace-pre-wrap break-words text-2xs text-danger">
+            {branchError.join('\n')}
+          </p>
+        )}
 
         <label className="flex items-center gap-2 rounded-md border border-line-strong bg-canvas px-2.5 py-1.5 text-fg-subtle">
           <Search size={13} className="shrink-0" />
@@ -650,6 +751,7 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
           const isActive = !entry.isDir && Boolean(activeKey) && folderKey(entry.fullPath) === activeKey;
           const insertedNow = feedback?.key === entry.relPath && feedback.kind === 'inserted';
           const copiedNow = feedback?.key === entry.relPath && feedback.kind === 'copied-rel';
+          const fileCopiedNow = feedback?.key === entry.relPath && feedback.kind === 'copied-file';
 
           return (
             <div
@@ -729,6 +831,17 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
                 >
                   {copiedNow ? <Check size={12} className="text-success" /> : <Copy size={12} />}
                 </button>
+                {!entry.isDir && window.electronAPI?.copyProjectFile && (
+                  <button
+                    type="button"
+                    onClick={() => void copyFile(entry)}
+                    aria-label={t('复制文件')}
+                    title={t('复制文件')}
+                    className="icon-btn h-6 w-6"
+                  >
+                    {fileCopiedNow ? <Check size={12} className="text-success" /> : <FileStack size={12} />}
+                  </button>
+                )}
               </div>
             </div>
           );

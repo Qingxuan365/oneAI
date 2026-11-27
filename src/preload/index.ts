@@ -104,6 +104,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   listDirectory: (rootPath: string, relDir?: string) =>
     ipcRenderer.invoke('fs:list-dir', rootPath, relDir),
+  copyProjectFile: (rootPath: string, relPath: string) =>
+    ipcRenderer.invoke('fs:copy-project-file', rootPath, relPath),
 
   revealInExplorer: (targetPath: string) =>
     ipcRenderer.invoke('shell:reveal-in-explorer', targetPath),
@@ -143,6 +145,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkAccountLogin: (account: SessionAccount) => ipcRenderer.invoke('account:login-status', account),
   setTitleBarOverlay: (opts: { color: string; symbolColor: string; height: number; backgroundColor?: string }) => ipcRenderer.send('window:set-title-bar-overlay', opts),
   getGitBranches: (paths: string[]) => ipcRenderer.invoke('git:branches', paths),
+  listLocalGitBranches: (dir: string) => ipcRenderer.invoke('git:list-local-branches', dir),
+  switchLocalGitBranch: (dir: string, branch: string) => ipcRenderer.invoke('git:switch-local-branch', dir, branch),
+  listGitConflicts: (dir: string) => ipcRenderer.invoke('git:list-conflicts', dir),
+  readGitConflictDiff: (dir: string, file: string) => ipcRenderer.invoke('git:conflict-diff', dir, file),
   getTaskSummaries: (tasks: Array<{ id: string; cliId: string; cwd: string; createdAt: number; historyId?: string; configDir?: string; includeUsage?: boolean }>) => ipcRenderer.invoke('task:summaries', tasks),
 
   onQuotaUpdate: (callback: (quotas: Record<string, QuotaData>) => void) => {

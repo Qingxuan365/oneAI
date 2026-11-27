@@ -7,6 +7,7 @@ import { quotaService } from './quota-service';
 import { setSystemStatsEnabled, startSystemStats } from './system-stats';
 import { checkAccountLogin } from './account-login';
 import { setupGitBranch } from './git-branch';
+import { setupGitConflicts } from './git-conflicts';
 import { setupTaskSummary } from './task-summary';
 import { listSessionHistory, deleteSessionHistory } from './session-history';
 import { getDashboardStats, getUsageStats } from './usage-stats';
@@ -236,6 +237,7 @@ function setupIPC() {
   setupFilePreview();
   setupProjectTree();
   setupGitBranch();
+  setupGitConflicts();
   setupTaskSummary();
   setupUpdater(() => mainWindow, () => {
     appQuitting = true;

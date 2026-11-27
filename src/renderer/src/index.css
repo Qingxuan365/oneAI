@@ -814,6 +814,9 @@ html, body, #root {
   from { transform: translate(-50%, -50%) rotate(0deg); }
   to { transform: translate(-50%, -50%) rotate(360deg); }
 }
+.folder-task-flow-base { stop-color: rgb(var(--color-accent) / 0.64); }
+.folder-task-flow-highlight { stop-color: rgb(var(--color-accent)); }
+.folder-task-flow-middle { stop-color: rgb(var(--color-violet) / 0.88); }
 .task-neon-ring {
   position: absolute;
   inset: 0;
@@ -866,6 +869,7 @@ html, body, #root {
   .modal-panel { animation: dialog-in 160ms ease-out; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .folder-task-flow-line { stroke: rgb(var(--color-accent) / 0.72); }
   .topbar-neon-track.is-running .topbar-neon-beam {
     width: 100%;
     transform: none;
@@ -934,7 +938,8 @@ html, body, #root {
   .quota-window-short { display: inline; }
 }
 @container statusbar (max-width: 40rem) {
-  .quota-model-info, .statusbar-sys { display: none; }
+  .quota-model-info:not(:has(.quota-model-picker)), .statusbar-sys { display: none; }
+  .quota-model-info:has(.quota-model-picker) .quota-model-effort { display: none; }
 }
 @container statusbar (max-width: 38rem) {
   .quota-ctx { display: none; }

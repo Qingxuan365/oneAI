@@ -21,6 +21,7 @@ await build({
     import { NewTaskModal } from './src/renderer/src/components/NewTaskModal';
     import { HistoryModal } from './src/renderer/src/components/HistoryModal';
     import { ProjectTreeDrawer } from './src/renderer/src/components/ProjectTreeDrawer';
+    import { GitConflictDiffModal } from './src/renderer/src/components/GitConflictDiffModal';
     import { UsageModal } from './src/renderer/src/components/UsageModal';
     import { DashboardView } from './src/renderer/src/components/DashboardView';
     import { SettingsModal } from './src/renderer/src/components/SettingsModal';
@@ -299,9 +300,13 @@ await build({
     window.drawFileTree = (isOpen = true, activePreviewPath = null, hasActiveTerminal = true) => flushSync(() => root.render(<div className="workbench-ui h-screen">
       <ProjectTreeDrawer isOpen={isOpen} onClose={() => window.events.push('tree-close')} rootPath="D:/GitHub/OneAI" gitBranch="main"
         activePreviewPath={activePreviewPath} hasActiveTerminal={hasActiveTerminal}
+        onGitBranchChanged={(dir, branch) => window.events.push('tree-branch-changed:' + dir + '|' + branch)}
         onPreviewFile={(cwd, filePath) => window.events.push('tree-preview:' + cwd + '|' + filePath)}
         onInsertPath={(relPath) => window.events.push('tree-insert:' + relPath)}
         onRevealInExplorer={(targetPath) => window.events.push('tree-reveal:' + targetPath)} />
+    </div>));
+    window.drawGitConflicts = () => flushSync(() => root.render(<div className="workbench-ui h-screen">
+      <GitConflictDiffModal rootPath="D:/GitHub/OneAI" onClose={() => window.events.push('close-git-conflicts')} />
     </div>));
     window.drawTermMany = (count, active) => {
       const tasks = Array.from({ length: count }, (_, i) => ({ id: 'many-' + i, groupId: 'terminal', title: 'm' + i, status: 'running', cwd: 'D:/GitHub/OneAI', createdAt: 1 }));
@@ -364,8 +369,11 @@ await fs.writeFile(new URL('fixture.css', dir), css.css + await fs.readFile('nod
 await fs.writeFile(new URL('fixture.html', dir), '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="fixture.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
 await fs.writeFile(new URL('electron-check.cjs', dir), `
 const { app, BrowserWindow } = require('electron');
+const testProfile = require('node:fs').mkdtempSync(require('node:path').join(__dirname, 'profile-'));
+app.setPath('userData', testProfile);
 app.whenReady().then(async () => {
   const win = new BrowserWindow({ show: false, width: 1440, height: 900, webPreferences: { backgroundThrottling: false } });
+  win.webContents.setAudioMuted(true);
   win.webContents.on('console-message', (_event, level, message) => { if (level >= 3) console.error(message); });
   try {
     await win.loadFile(require('node:path').join(__dirname, 'fixture.html'));
@@ -742,11 +750,47 @@ app.whenReady().then(async () => {
         !row('a').classList.contains('task-neon-running') && !row('a').querySelector('[data-task-neon]')
         && row('b').classList.contains('task-neon-running') && Boolean(row('b').querySelector('[data-task-neon="running"]'))
         && row('c').classList.contains('task-neon-running') && Boolean(row('c').querySelector('[data-task-neon="running"]')));
+      check('adjacent selected and running task cards have at least six pixels of vertical separation',
+        row('b').getBoundingClientRect().top - row('a').getBoundingClientRect().bottom >= 6);
+      const pulse = id => document.querySelector('[data-folder-task-pulse="side-' + id + '"]');
+      const runningPulse = pulse('b');
+      const connector = runningPulse.ownerSVGElement;
+      const trunk = connector.querySelector('path:not([data-folder-task-pulse])');
+      const cardBounds = row('b').getBoundingClientRect();
+      const pulseBounds = connector.getBoundingClientRect();
+      const branchStart = runningPulse.getPointAtLength(0);
+      const endpoint = runningPulse.getPointAtLength(runningPulse.getTotalLength());
+      const trunkStart = trunk.getPointAtLength(0);
+      const trunkEnd = trunk.getPointAtLength(trunk.getTotalLength());
+      check('continuous folder connector starts at the folder and reaches each running card center', Boolean(pulse('c')) && !pulse('a')
+        && trunkStart.y === 0 && trunkStart.x === branchStart.x && trunkEnd.y >= branchStart.y
+        && Math.abs(pulseBounds.y + endpoint.y - (cardBounds.y + cardBounds.height / 2)) <= 2
+        && Math.abs(pulseBounds.x + endpoint.x - cardBounds.x) <= 2);
+      const pulseStyle = getComputedStyle(runningPulse);
+      const gradient = connector.querySelector('linearGradient');
+      connector.pauseAnimations();
+      connector.setCurrentTime(0.2);
+      const startFlow = gradient.gradientTransform.animVal.getItem(0).matrix;
+      const startPosition = [startFlow.e, startFlow.f];
+      connector.setCurrentTime(0.6);
+      const endFlow = gradient.gradientTransform.animVal.getItem(0).matrix;
+      const flowsTowardCard = endFlow.e > startPosition[0] && endFlow.f > startPosition[1];
+      connector.unpauseAnimations();
+      check('the entire connector carries a repeating gradient toward the task or a solid stroke under reduced motion',
+        pulseStyle.strokeDasharray === 'none' && getComputedStyle(trunk).stroke === pulseStyle.stroke &&
+        (window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? !pulseStyle.stroke.startsWith('url(')
+          : pulseStyle.stroke.startsWith('url(') && gradient.getAttribute('spreadMethod') === 'repeat'
+            && flowsTowardCard && gradient.querySelector('animateTransform').getAttribute('repeatCount') === 'indefinite'
+            && [...gradient.querySelectorAll('stop')].every(stop => getComputedStyle(stop).stopColor !== 'rgba(0, 0, 0, 0)')));
       window.drawSidebar(false, 0, false, null, true, ['side-b', 'side-c']); await tick();
       check('running tasks keep neon ring while Dashboard is active',
         !row('a').querySelector('[data-task-neon]')
         && Boolean(row('b').querySelector('[data-task-neon="running"]'))
         && Boolean(row('c').querySelector('[data-task-neon="running"]')));
+      check('background folder pulses stay visible on Dashboard', Boolean(pulse('b') && pulse('c')));
+      window.drawSidebar(false, 0, false, null, false, ['side-c']); await tick();
+      check('a task that leaves running status loses its pulse', !pulse('b') && Boolean(pulse('c')));
       window.drawSidebar(true, 0, false, null, false, ['side-b', 'side-c']); await tick();
       check('collapsed rail running tasks show neon ring without horizontal overflow',
         !strip('a').classList.contains('task-neon-running') && !strip('a').querySelector('[data-task-neon]')
@@ -1724,6 +1768,14 @@ app.whenReady().then(async () => {
       check('topbar project tree button triggers toggle', window.events.includes('file-tree'));
       window.events = [];
       window.electronAPI.writeClipboardText = async (text) => { window.events.push('clip:' + text); return true; };
+      window.electronAPI.copyProjectFile = async (root, rel) => {
+        window.events.push('copy-file:' + root + '|' + rel);
+        return rel !== 'package.json';
+      };
+      window.electronAPI.listLocalGitBranches = async () => ({ ok: true, branches: ['conflict', 'feature/test', 'main'], currentBranch: 'main' });
+      window.electronAPI.switchLocalGitBranch = async (root, branch) => branch === 'conflict'
+        ? { ok: false, error: 'Local changes would be overwritten' }
+        : { ok: true };
       let dirListCalls = 0;
       window.electronAPI.listDirectory = async (rootPath, relDir = '') => {
         dirListCalls++;
@@ -1759,7 +1811,17 @@ app.whenReady().then(async () => {
       const treeRect = treeDlg.getBoundingClientRect();
       const rowOf = (rel) => document.querySelector('[data-tree-path="' + rel + '"]');
       const itemOf = (rel) => rowOf(rel).querySelector('button[role="treeitem"]');
-      check('project tree drawer renders below 44px topbar with title and branch', treeRect.top >= 44 && treeDlg.textContent.includes('OneAI') && treeDlg.querySelector('[data-git-branch]')?.textContent.includes('main'));
+      const branchSelect = treeDlg.querySelector('select[data-git-branch]');
+      check('project tree drawer renders below 44px topbar with title and a local branch selector', treeRect.top >= 44 && treeDlg.textContent.includes('OneAI') && branchSelect?.value === 'main' && [...branchSelect.options].some(option => option.value === 'feature/test'));
+      const chooseBranch = (branch) => {
+        branchSelect.value = branch;
+        branchSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+      const callsBeforeSwitch = dirListCalls;
+      chooseBranch('feature/test'); await wait(120);
+      check('branch switch updates the selector and refreshes the directory', branchSelect.value === 'feature/test' && window.events.includes('tree-branch-changed:D:/GitHub/OneAI|feature/test') && dirListCalls > callsBeforeSwitch);
+      chooseBranch('conflict'); await wait(80);
+      check('Git rejection keeps the current branch and exposes the reason', branchSelect.value === 'feature/test' && treeDlg.textContent.includes('Local changes would be overwritten') && !window.events.includes('tree-branch-changed:D:/GitHub/OneAI|conflict'));
       check('project tree dims node_modules and .git entries', rowOf('node_modules').getAttribute('data-tree-dimmed') === 'true' && parseFloat(getComputedStyle(itemOf('node_modules')).opacity) < 0.8 && !rowOf('src').hasAttribute('data-tree-dimmed'));
       check('active preview file is highlighted in tree', itemOf('package.json').getAttribute('aria-selected') === 'true');
       const callsBeforeExpand = dirListCalls;
@@ -1776,6 +1838,15 @@ app.whenReady().then(async () => {
       await wait(60);
       rowOf('src/App.tsx').querySelector('button[aria-label="插入路径到当前终端"]').click(); await wait(60);
       check('inline insert path triggers onInsertPath without closing the drawer', window.events.includes('tree-insert:src/App.tsx') && !window.events.includes('tree-close') && Boolean(document.querySelector('[role="dialog"]')));
+      const relativeCopy = rowOf('src/App.tsx').querySelector('button[aria-label="复制相对路径"]');
+      const fileCopy = relativeCopy.nextElementSibling;
+      check('copy file appears immediately after copy relative path on file rows only', fileCopy?.getAttribute('aria-label') === '复制文件' && !rowOf('src').querySelector('button[aria-label="复制文件"]'));
+      relativeCopy.click(); await wait(60);
+      check('copy relative path still writes text', window.events.includes('clip:src/App.tsx') && treeDlg.textContent.includes('已复制相对路径'));
+      fileCopy.click(); await wait(60);
+      check('copy file sends the root and relative path without previewing or closing', window.events.includes('copy-file:D:/GitHub/OneAI|src/App.tsx') && treeDlg.textContent.includes('已复制文件') && !window.events.some(event => event.startsWith('tree-preview:') || event === 'tree-close'));
+      rowOf('package.json').querySelector('button[aria-label="复制文件"]').click(); await wait(60);
+      check('copy file rejection shows failure feedback', treeDlg.textContent.includes('复制失败'));
       rowOf('src/App.tsx').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 900, clientY: 220 })); await wait(60);
       const treeMenu = document.querySelector('[role="menu"]');
       check('context menu lists file actions', treeMenu && ['预览文件', '插入路径到终端', '复制相对路径', '复制完整路径', '在资源管理器中显示'].every(label => treeMenu.textContent.includes(label)));
@@ -1789,6 +1860,24 @@ app.whenReady().then(async () => {
       check('clicking a file triggers preview and closes drawer', window.events.includes('tree-preview:D:/GitHub/OneAI|D:/GitHub/OneAI/package.json') && window.events.includes('tree-close'));
       delete window.electronAPI.listDirectory;
       delete window.electronAPI.writeClipboardText;
+      delete window.electronAPI.copyProjectFile;
+      delete window.electronAPI.listLocalGitBranches;
+      delete window.electronAPI.switchLocalGitBranch;
+      window.clearRoot();
+
+      let conflictFiles = ['current.ts', 'incoming.ts'];
+      window.electronAPI.listGitConflicts = async () => ({ ok: true, files: conflictFiles });
+      window.electronAPI.readGitConflictDiff = async (_dir, file) => ({ ok: true, diff: ['@@@ range @@@', '++ added ' + file, '-- removed'].join(String.fromCharCode(10)) });
+      window.drawGitConflicts(); await wait(100);
+      const conflictDialog = document.querySelector('[aria-labelledby="git-conflict-title"]');
+      check('conflict dialog lists unmerged files and reads the selected diff', conflictDialog?.querySelector('button[aria-pressed=true]')?.textContent.trim() === 'current.ts' && conflictDialog.querySelector('[data-git-conflict-diff]')?.textContent.includes('added current.ts'));
+      conflictDialog.querySelector('button[title="incoming.ts"]').click(); await wait(70);
+      check('conflict diff can switch files and shows colored changes', conflictDialog.querySelector('[data-git-conflict-diff] .text-success')?.textContent.includes('added incoming.ts') && Boolean(conflictDialog.querySelector('[data-git-conflict-diff] .text-danger')));
+      conflictFiles = [];
+      conflictDialog.querySelector('button[aria-label="刷新冲突"]').click(); await wait(70);
+      check('refresh drops conflicts that have been resolved', conflictDialog.textContent.includes('当前没有未解决的 Git 文件冲突'));
+      delete window.electronAPI.listGitConflicts;
+      delete window.electronAPI.readGitConflictDiff;
       window.clearRoot();
 
       // 侧栏 Dashboard 菜单与 Dashboard 全量分析页面
@@ -1916,6 +2005,8 @@ app.whenReady().then(async () => {
       let activeShells = [];
       let delayedSample;
       let delaySample = false;
+      let killedSessions = 0;
+      const pickerWrites = [];
       const output = new Set();
       const exits = new Set();
       const subscribe = listeners => callback => { listeners.add(callback); return () => listeners.delete(callback); };
@@ -1945,12 +2036,24 @@ app.whenReady().then(async () => {
           activeTaskId: clis[0], lastFolder: cwd, extraClis: [],
         }));
         localStorage.setItem('onedesktop_settings', JSON.stringify({ language: 'zh-CN', onboardingDone: true, taskDoneSoundEnabled: true }));
+        localStorage.setItem('oneai_sidebar_collapsed', 'false');
         window.electronAPI = {
-          ...api, detectClis: async () => clis.map(id => ({ id, name: id, command: id })),
+          ...api, detectClis: async () => [
+            ...clis.map(id => ({ id, name: { agy: 'Antigravity', pi: 'Pi' }[id] ?? id, command: id })),
+            { id: 'opencode', name: 'OpenCode', command: 'opencode' },
+            { id: 'qwen', name: 'Qwen Code', command: 'qwen' },
+            { id: 'aider', name: 'Aider', command: 'aider' },
+          ],
           createSession: async () => ({ success: true }),
-          getAllQuotas: async () => ({}), onQuotaUpdate: () => () => {},
+          killSession: () => { killedSessions++; },
+          getAllQuotas: async () => ({
+            codex: { cliId: 'codex', cliName: 'Codex', model: 'Codex Fixture', effort: 'high', status: 'normal', fiveHourPercent: 51, sevenDayPercent: 43 },
+            agy: { cliId: 'agy', cliName: 'Antigravity', model: 'Gemini 4 Neon', effort: 'medium', status: 'normal', fiveHourPercent: 100, sevenDayPercent: 54 },
+          }),
+          onQuotaUpdate: () => () => {},
+          getTaskSummaries: async tasks => Object.fromEntries(tasks.filter(task => task.includeUsage).map(task => [task.id, { usage: { model: undefined, effort: undefined, tokens: 123456, ctxPercent: 33 }, usageScope: 'task' }])),
           onSessionData: subscribe(output), onSessionExit: subscribe(exits),
-          getSessionBuffer: async () => '', writeSession: async () => true,
+          getSessionBuffer: async () => '', writeSession: async (id, text) => { pickerWrites.push([id, text]); return true; },
           resizeSession: async () => {}, setTitleBarOverlay: () => {},
           getSessionShellActivity: async ids => {
             sampledIds = ids;
@@ -2013,6 +2116,71 @@ app.whenReady().then(async () => {
         delayedSample(activeShells);
         await wait();
         check('a negative sample settles an already quiet session without waiting for another timer tick', row('codex')?.textContent.includes('等待输入') && tones === 6);
+        const modelPicker = document.querySelector('#oneai-statusbar button[aria-label="切换模型"]');
+        const statusbar = document.getElementById('oneai-statusbar');
+        check('Codex model and effort remain visible when the usage summary lacks model metadata', modelPicker?.textContent.includes('Codex Fixture') && statusbar.textContent.includes('high') && statusbar.textContent.includes('33%'));
+        const previousWrites = pickerWrites.length;
+        modelPicker.click(); await wait();
+        const pickerConfirmation = () => statusbar.querySelector('button[aria-label="确认输入框为空后打开"]');
+        check('native model picker prompts inline for an empty composer without writing any keys', Boolean(pickerConfirmation()) && pickerWrites.length === previousWrites);
+        statusbar.querySelector('button[aria-label="取消切换模型"]').click(); await wait();
+        check('canceling the model picker leaves terminal input intact', pickerWrites.length === previousWrites);
+        const escape = String.fromCharCode(27);
+        for (const callback of output) callback({ id: 'codex', data: escape + '[?1004h' });
+        await wait();
+        modelPicker.click(); await wait();
+        const confirmation = pickerConfirmation();
+        confirmation.focus();
+        const beforeConfirmation = pickerWrites.length;
+        confirmation.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+        await wait();
+        const terminalInput = [...document.querySelectorAll('.xterm-helper-textarea')].find(node => node.closest('.xterm').getClientRects().length);
+        terminalInput.dispatchEvent(new FocusEvent('focus'));
+        await new Promise(resolve => setTimeout(resolve, 260));
+        const confirmationWrites = pickerWrites.slice(beforeConfirmation);
+        check('the terminal reports focus during mouse confirmation', confirmationWrites.some(([id, text]) => id === 'codex' && text === escape + '[I'));
+        const dispatched = confirmationWrites.filter(([, text]) => text !== escape + '[I' && text !== escape + '[O');
+        check('confirming the model picker submits only the native command to the current task', dispatched.length === 2 && dispatched[0][0] === 'codex' && dispatched[0][1] === '/model' && dispatched[1][0] === 'codex' && dispatched[1][1] === String.fromCharCode(13));
+        check('model picker confirmation shows no command failure dialog', !document.querySelector('[role="dialog"]')?.textContent.includes('命令未发送'));
+        row('agy').querySelector('button').click(); await wait();
+        const geminiPicker = statusbar.querySelector('button[aria-label="切换模型"]');
+        check('Antigravity exposes the displayed Gemini model as a clickable picker', geminiPicker?.textContent.includes('Gemini 4 Neon') && !geminiPicker.disabled);
+        const beforeGeminiPicker = pickerWrites.length;
+        geminiPicker?.click(); await wait();
+        check('Antigravity waits for empty input confirmation before sending /model', Boolean(pickerConfirmation()) && pickerWrites.length === beforeGeminiPicker);
+        pickerConfirmation()?.click();
+        await new Promise(resolve => setTimeout(resolve, 260));
+        check('Antigravity sends /model and Enter to its own terminal', JSON.stringify(pickerWrites.slice(beforeGeminiPicker)) === JSON.stringify([['agy', '/model'], ['agy', String.fromCharCode(13)]]));
+        document.querySelector('button[aria-label="在 workbench-shell-check 中新建任务"]').click(); await wait();
+        const cliMenuNames = [...document.querySelectorAll('[role="menuitem"] > span.truncate')].map(node => node.textContent);
+        check('folder plus ranks the preferred installed CLIs first, retains other CLI order and ends the list with the terminal', cliMenuNames.join('|') === 'Claude Code|Codex|Antigravity|Kimi Code|Pi|OpenCode|Qwen Code|Aider|系统终端');
+        document.body.click(); await wait();
+        row('codex').querySelector('button').click(); await wait();
+        const tonesBeforeExit = tones;
+        for (const callback of exits) callback({ id: 'codex', exitCode: 0 });
+        await wait();
+        check('a task that already reached waiting can emit a separate chime on exit', row('codex')?.textContent.includes('已停止') && tones === tonesBeforeExit + 2);
+        row('codex').querySelector('button').click(); await wait();
+        const dashboardNav = document.querySelector('[data-dashboard-nav]');
+        const homeNav = document.querySelector('[data-home-nav]');
+        const terminal = [...document.querySelectorAll('.xterm')].find(node => node.getClientRects().length);
+        check('home appears immediately to the right of Dashboard', dashboardNav.nextElementSibling === homeNav && homeNav.getBoundingClientRect().left >= dashboardNav.getBoundingClientRect().right);
+        document.querySelector('header button[aria-label="在终端中搜索"]').click(); await wait();
+        homeNav.click(); await wait();
+        check('Home from a task shows the start page and keeps the terminal mounted', homeNav.getAttribute('aria-current') === 'page' && document.querySelector('main h2')?.textContent === '开始一个任务' && !document.querySelector('main input[aria-label="在终端中搜索"]') && terminal?.isConnected && !terminal.getClientRects().length && killedSessions === 0);
+        dashboardNav.click(); await wait();
+        check('Dashboard and Home have mutually exclusive active states', dashboardNav.getAttribute('aria-current') === 'page' && !homeNav.hasAttribute('aria-current'));
+        homeNav.click(); await wait();
+        check('Home returns from Dashboard to the start page', homeNav.getAttribute('aria-current') === 'page' && !dashboardNav.hasAttribute('aria-current') && document.querySelector('main h2')?.getClientRects().length > 0);
+        row('codex').querySelector('button').click(); await wait();
+        check('selecting a task after Home brings back the same terminal', !homeNav.hasAttribute('aria-current') && terminal?.getClientRects().length > 0 && killedSessions === 0);
+        document.querySelector('header button[aria-label="折叠左侧导航栏"]').click(); await wait();
+        const collapsedHome = document.querySelector('[data-home-nav]');
+        collapsedHome.click(); await wait();
+        check('collapsed sidebar keeps the Home icon and opens the start page', collapsedHome.getAttribute('aria-label') === '主页' && collapsedHome.getAttribute('aria-current') === 'page' && document.querySelector('main h2')?.getClientRects().length > 0);
+      } catch (error) {
+        console.error(error.stack);
+        throw error;
       } finally {
         window.clearRoot();
         window.electronAPI = api;

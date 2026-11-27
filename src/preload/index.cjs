@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   allowDroppedPreview: (paths) => ipcRenderer.invoke('preview:allow-dropped', paths),
   readPreviewFile: (cwd, filePath) => ipcRenderer.invoke('preview:read', cwd, filePath),
   listDirectory: (rootPath, relDir) => ipcRenderer.invoke('fs:list-dir', rootPath, relDir),
+  copyProjectFile: (rootPath, relPath) => ipcRenderer.invoke('fs:copy-project-file', rootPath, relPath),
   revealInExplorer: (targetPath) => ipcRenderer.invoke('shell:reveal-in-explorer', targetPath),
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
   openDirectory: (dir) => ipcRenderer.invoke('shell:open-directory', dir),
@@ -79,6 +80,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkAccountLogin: (account) => ipcRenderer.invoke('account:login-status', account),
   setTitleBarOverlay: (opts) => ipcRenderer.send('window:set-title-bar-overlay', opts),
   getGitBranches: (paths) => ipcRenderer.invoke('git:branches', paths),
+  listLocalGitBranches: (dir) => ipcRenderer.invoke('git:list-local-branches', dir),
+  switchLocalGitBranch: (dir, branch) => ipcRenderer.invoke('git:switch-local-branch', dir, branch),
+  listGitConflicts: (dir) => ipcRenderer.invoke('git:list-conflicts', dir),
+  readGitConflictDiff: (dir, file) => ipcRenderer.invoke('git:conflict-diff', dir, file),
   getTaskSummaries: (tasks) => ipcRenderer.invoke('task:summaries', tasks),
   onQuotaUpdate: (callback) => {
     const subscription = (_event, value) => callback(value);

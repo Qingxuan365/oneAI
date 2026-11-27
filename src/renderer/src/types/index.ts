@@ -7,6 +7,10 @@ import type {
   DirectoryListResult,
   DirectoryTreeEntry,
   FilePreviewResult,
+  GitBranchSwitchResult,
+  GitConflictDiffResult,
+  GitConflictFilesResult,
+  GitLocalBranchesResult,
   HistoryAccountRef,
   HistoryEntry,
   LoginStatus,
@@ -201,6 +205,7 @@ export interface ElectronTerminalAPI {
   allowDroppedPreview?: (paths: string[]) => Promise<boolean>;
   readPreviewFile?: (cwd: string, filePath: string) => Promise<FilePreviewResult>;
   listDirectory?: (rootPath: string, relDir?: string) => Promise<DirectoryListResult>;
+  copyProjectFile?: (rootPath: string, relPath: string) => Promise<boolean>;
   revealInExplorer?: (targetPath: string) => Promise<boolean>;
   openExternal?: (url: string) => Promise<boolean>;
   /** 在资源管理器中打开文件夹，目录不存在时返回 false */
@@ -219,6 +224,10 @@ export interface ElectronTerminalAPI {
   getTaskSummaries?: (tasks: Array<{ id: string; cliId: string; cwd: string; createdAt: number; historyId?: string; configDir?: string; includeUsage?: boolean }>) => Promise<Record<string, TaskSummary>>;
   /** 读取各文件夹所在 Git 仓库的当前分支（只读 .git/HEAD）；不在仓库内为 null */
   getGitBranches?: (paths: string[]) => Promise<Record<string, string | null>>;
+  listLocalGitBranches?: (dir: string) => Promise<GitLocalBranchesResult>;
+  switchLocalGitBranch?: (dir: string, branch: string) => Promise<GitBranchSwitchResult>;
+  listGitConflicts?: (dir: string) => Promise<GitConflictFilesResult>;
+  readGitConflictDiff?: (dir: string, file: string) => Promise<GitConflictDiffResult>;
   /** 在该账号的环境下运行 CLI 的状态命令，判断是否已登录 */
   checkAccountLogin?: (account: SessionAccount) => Promise<LoginStatus | { error: string }>;
   onQuotaUpdate: (callback: (quotas: Record<string, QuotaData>) => void) => () => void;

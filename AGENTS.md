@@ -44,7 +44,8 @@ d:/GitHub/OneAI/
 │   │   ├── model-format.ts    # Claude 模型 id 转显示名（无副作用，额度与用量共用）
 │   │   ├── model-pricing.ts   # 公开模型 API 等值费率表，供 Dashboard 估算已收录模型的成本与价格覆盖率
 │   │   ├── usage-stats.ts     # 本周用量与 Dashboard 统计：流式解析 Claude Code / Codex（含 archived_sessions 与 .jsonl.zst，用 fzstd 解压）/ Antigravity（优先紧凑版 transcript.jsonl）/ Pi 本机会话记录（按文件 mtime + 大小缓存解析结果并持久化到 userData）
-│   │   ├── git-branch.ts      # 读取文件夹所在 Git 仓库的当前分支（只读 .git/HEAD，不执行 git）
+│   │   ├── git-branch.ts      # 分支徽标读取 .git/HEAD，目录树通过本机 Git 列出并切换本地分支
+│   │   ├── git-conflicts.ts   # 只读列出未解决 Git 冲突及其合并差异
 │   │   ├── account-env.ts     # 多账号：各 CLI 的配置目录环境变量、路径校验与目录创建，只创建目录不读凭据
 │   │   ├── account-login.ts   # 多账号：调用 CLI 自带状态命令判断登录状态（Kimi Code 只检查凭据文件是否存在）
 │   │   ├── cli-detect.ts      # 按 PATH 检测已知 CLI（清单取自 known-clis.json）与用户自定义 CLI 是否已安装，决定「+」菜单里可新建的 CLI
@@ -96,6 +97,7 @@ d:/GitHub/OneAI/
 │           │   ├── FilePreviewPanel.tsx  # 终端右侧只读文件预览面板（Ctrl+单击终端路径打开，宽度可拖拽、持久化并支持双击重置）
 │           │   ├── HistoryModal.tsx      # 历史会话抽屉（顶栏右上角入口）：按日期分段，显示文件夹、分支与「已打开」
 │           │   ├── ProjectTreeDrawer.tsx # 项目目录树抽屉（顶栏右上角入口 / Ctrl+Shift+E）：懒加载目录树、筛选、预览与插入路径
+│           │   ├── GitConflictDiffModal.tsx # 目录树入口的只读 Git 冲突文件与合并差异
 │           │   ├── UsageModal.tsx        # 本周用量弹窗（快捷键 Ctrl+Shift+U）：按 CLI → 账号 → 模型分组的用量表与近 26 周每日请求数方块图
 │           │   ├── DashboardView.tsx     # Dashboard 主分析页面（侧栏顶部入口 / Ctrl+Shift+D）：跨周期 KPI、12 个月活跃热力图、趋势图、Top 5 分布、Token 构成、多组实时账号配额与模型明细，终端后台保活
 │           │   ├── SettingsModal.tsx     # 分页设置：外观、时间、终端、账号、CLI、提醒、快捷键列表、关于与更新
@@ -167,7 +169,7 @@ interface Account {
    - 切换左侧会话时严禁销毁终端 DOM 或中断底层 PTY，必须使用隐藏（`display: none`）保活机制。
    - 视窗切换显示后必须主动触发 `fitAddon.fit()` 重新计算终端字符矩阵。
 2. **额度展示原则**：
-   - 额度、会话用量、系统资源与时钟统一显示在终端下方的两行状态栏（`StatusBar.tsx`），所有 CLI 展示方式一致。`5h limit:` 和 `Weekly limit:` 在上行依序排列，方括号进度条填充剩余额度，百分数后写 `left`；`Ctx` 进度条填充上下文占用比例。其余为纯文字，严禁添加悬浮卡片、弹窗或遮挡视窗的浮层。
+   - 额度、会话用量、系统资源与时钟统一显示在终端下方的两行状态栏（`StatusBar.tsx`），所有 CLI 展示方式一致。`5h limit:` 和 `Weekly limit:` 在上行依序排列，方括号进度条填充剩余额度，百分数后写 `left`。`Ctx` 进度条填充上下文占用比例。支持的 CLI 在模型名称处提供行内入口，经确认输入框为空后打开终端里的原生选择器。状态栏严禁添加悬浮卡片、弹窗或遮挡视窗的浮层。
 3. **平台兼容性**：
    - Windows 平台优先调用 Powershell / Cmd / Git Bash / WSL 作为底层 Shell，正确处理 Windows 换行符（CRLF）与 ConPTY 信号。
 4. **界面一致性**：

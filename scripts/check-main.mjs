@@ -80,7 +80,7 @@ try {
         import fs from 'node:fs';
         import fsp from 'node:fs/promises';
         import path from 'node:path';
-        import { fork } from 'node:child_process';
+        import { execFileSync, fork } from 'node:child_process';
         import { once } from 'node:events';
 
         const fixtureRoot = process.env.ONEAI_CHECK_FIXTURE_ROOT!;
@@ -107,7 +107,9 @@ try {
         import { isLocalOrLinkLocalHost, listTracks, parsePlaylist, readBodyTextCapped, resolveAllowedTrack, serveMusicTrack } from './src/main/music-library';
         import { readTaskSummaries, readSessionDirectory } from './src/main/task-summary';
         import { allowPreviewFilePaths, readPreview, resolveInside } from './src/main/file-preview';
-        import { listProjectDirectory } from './src/main/project-tree';
+        import { copyProjectFile, listProjectDirectory } from './src/main/project-tree';
+        import { listLocalGitBranches, readGitBranch, switchLocalGitBranch } from './src/main/git-branch';
+        import { listGitConflicts, readGitConflictDiff } from './src/main/git-conflicts';
         import { setBoundedMap } from './src/main/fs-utils';
         import { folderKey, quoteTerminalPath, extractPathMatches } from './src/shared/paths';
         import { buildReleaseUrl, canUseAutoUpdater, compareSemver, extractVersionFromReleaseUrl, normalizeReleaseNotes, selectLocalizedReleaseNotes } from './src/main/updater';
@@ -752,6 +754,101 @@ try {
           assert.equal(capped.truncated, true);
           assert.equal(capped.totalCount, 8);
           assert.deepEqual(capped.entries.map((e) => e.name), ['.git', 'docs', 'node_modules']);
+        });
+
+        test('project-tree file copy rejects missing files, folders, and paths outside the project', async () => {
+          const root = path.join(fixtureRoot, 'tree-copy');
+          await fsp.mkdir(root);
+          const outside = path.join(fixtureRoot, 'tree-copy-outside');
+          await fsp.mkdir(outside);
+          const outsideFile = path.join(outside, 'file.txt');
+          await fsp.writeFile(outsideFile, 'outside');
+          await fsp.symlink(outside, path.join(root, 'link'), 'junction');
+          for (const relPath of ['', '.', 'missing.txt', outsideFile, '../tree-copy-outside/file.txt', 'link/file.txt', 'file.txt:stream']) {
+            assert.equal(await copyProjectFile(root, relPath), false, relPath);
+          }
+        });
+
+        test('project tree switches local branches through Git and preserves conflicting worktree files', async () => {
+          const repo = path.join(fixtureRoot, 'git-branch-switch');
+          const subdir = path.join(repo, 'nested');
+          await fsp.mkdir(subdir, { recursive: true });
+          const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { stdio: 'pipe', windowsHide: true });
+          const commit = () => git('-c', 'user.name=OneAI Check', '-c', 'user.email=check@example.invalid', '-c', 'commit.gpgSign=false', 'commit', '-qm', 'fixture');
+          git('init', '-q', '-b', 'main');
+          const tracked = path.join(repo, 'tracked.txt');
+          const ignored = path.join(repo, 'ignored.txt');
+          await fsp.writeFile(path.join(repo, '.gitignore'), 'ignored.txt\\n');
+          await fsp.writeFile(tracked, 'main');
+          git('add', '.gitignore', 'tracked.txt');
+          commit();
+          git('switch', '-qc', 'feature/nested');
+          await fsp.writeFile(tracked, 'feature');
+          await fsp.writeFile(ignored, 'tracked in feature');
+          git('add', '-f', 'tracked.txt', 'ignored.txt');
+          commit();
+          git('switch', '-q', 'main');
+          git('update-ref', 'refs/remotes/origin/remote-only', 'HEAD');
+
+          assert.deepEqual(await listLocalGitBranches(subdir), { ok: true, branches: ['feature/nested', 'main'], currentBranch: 'main' });
+          for (const invalid of ['remote-only', '--discard-changes', 'HEAD~1']) {
+            assert.equal((await switchLocalGitBranch(subdir, invalid)).ok, false);
+          }
+          await fsp.writeFile(tracked, 'uncommitted work');
+          assert.equal((await switchLocalGitBranch(subdir, 'feature/nested')).ok, false);
+          assert.equal(await readGitBranch(subdir), 'main');
+          assert.equal(await fsp.readFile(tracked, 'utf8'), 'uncommitted work');
+          await fsp.writeFile(tracked, 'main');
+          await fsp.writeFile(ignored, 'local ignored file');
+          assert.equal((await switchLocalGitBranch(subdir, 'feature/nested')).ok, false);
+          assert.equal(await fsp.readFile(ignored, 'utf8'), 'local ignored file');
+          await fsp.unlink(ignored);
+
+          git('switch', '--detach', '-q', 'HEAD');
+          assert.deepEqual(await listLocalGitBranches(subdir), { ok: true, branches: ['feature/nested', 'main'], currentBranch: null });
+          assert.deepEqual(await switchLocalGitBranch(subdir, 'feature/nested'), { ok: true });
+          assert.equal(await readGitBranch(subdir), 'feature/nested');
+          assert.equal(await fsp.readFile(tracked, 'utf8'), 'feature');
+          git('config', 'core.hooksPath', '.git/hooks');
+          await fsp.writeFile(path.join(repo, '.git', 'hooks', 'post-checkout'), '#!/bin/sh\\necho "fixture hook failed" >&2\\nexit 1\\n', { mode: 0o755 });
+          assert.deepEqual(await switchLocalGitBranch(subdir, 'main'), { ok: false, error: 'fixture hook failed', currentBranch: 'main' });
+          assert.equal(await readGitBranch(subdir), 'main');
+        });
+
+        test('Git conflict diff follows the unmerged index and treats filenames literally', async () => {
+          const repo = path.join(fixtureRoot, 'git-conflict-diff');
+          const subdir = path.join(repo, 'nested');
+          await fsp.mkdir(subdir, { recursive: true });
+          const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { stdio: 'pipe', windowsHide: true });
+          const commit = () => git('-c', 'user.name=OneAI Check', '-c', 'user.email=check@example.invalid', '-c', 'commit.gpgSign=false', 'commit', '-qam', 'fixture');
+          git('init', '-q', '-b', 'main');
+          const file = 'with [brackets].txt';
+          const target = path.join(subdir, file);
+          await fsp.writeFile(target, 'base content\\n');
+          await fsp.writeFile(path.join(repo, 'outside.txt'), 'base outside\\n');
+          git('add', '.');
+          commit();
+          assert.deepEqual(await listGitConflicts(subdir), { ok: true, files: [] });
+          git('switch', '-qc', 'incoming');
+          await fsp.writeFile(target, 'incoming content\\n');
+          await fsp.writeFile(path.join(repo, 'outside.txt'), 'incoming outside\\n');
+          commit();
+          git('switch', '-q', 'main');
+          await fsp.writeFile(target, 'current content\\n');
+          await fsp.writeFile(path.join(repo, 'outside.txt'), 'current outside\\n');
+          commit();
+          assert.throws(() => git('-c', 'user.name=OneAI Check', '-c', 'user.email=check@example.invalid', 'merge', 'incoming'));
+          assert.deepEqual(await listGitConflicts(subdir), { ok: true, files: [file] });
+          assert.equal((await readGitConflictDiff(subdir, '../outside.txt')).ok, false);
+          const result = await readGitConflictDiff(subdir, file);
+          assert.equal(result.ok, true);
+          if (!result.ok) return;
+          assert.match(result.diff, /@@@/);
+          assert.match(result.diff, /current content/);
+          assert.match(result.diff, /incoming content/);
+          git('--literal-pathspecs', 'add', 'nested/with [brackets].txt');
+          assert.deepEqual(await listGitConflicts(subdir), { ok: true, files: [] });
+          assert.equal((await readGitConflictDiff(subdir, file)).ok, false);
         });
 
         test('quota-service parses Antigravity usage groups and computes universal session metrics', () => {

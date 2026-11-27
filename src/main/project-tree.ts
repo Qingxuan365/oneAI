@@ -1,6 +1,8 @@
 import { ipcMain } from 'electron';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { isPathInside, isSamePath } from './fs-utils';
 import type { DirectoryListResult, DirectoryTreeEntry } from '../shared/types';
 import { t } from './i18n';
@@ -31,6 +33,20 @@ const DIMMED_DIR_NAMES = new Set([
 ]);
 
 const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+const execFileAsync = promisify(execFile);
+
+// Publish a native file drop list with the Windows shell's copy effect (DROPEFFECT_COPY).
+const COPY_FILE_COMMAND = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+$files = New-Object System.Collections.Specialized.StringCollection
+[void]$files.Add($env:ONEAI_CLIPBOARD_FILE)
+$data = New-Object System.Windows.Forms.DataObject
+$data.SetFileDropList($files)
+$effect = [System.IO.MemoryStream]::new([BitConverter]::GetBytes(1))
+$data.SetData('Preferred DropEffect', $false, $effect)
+[System.Windows.Forms.Clipboard]::SetDataObject($data, $true)
+`;
 
 async function safeRealpath(target: string): Promise<string | null> {
   try {
@@ -153,6 +169,33 @@ export async function listProjectDirectory(
   };
 }
 
+export async function copyProjectFile(rootPath: string, relPath: string): Promise<boolean> {
+  const systemRoot = process.env.SystemRoot;
+  if (process.platform !== 'win32' || !systemRoot || typeof rootPath !== 'string' || !rootPath.trim()
+    || typeof relPath !== 'string' || !relPath || path.isAbsolute(relPath) || relPath.includes(':')) return false;
+
+  try {
+    const realRoot = await fs.promises.realpath(path.resolve(rootPath.trim()));
+    const filePath = path.resolve(realRoot, relPath);
+    const realFile = await fs.promises.realpath(filePath);
+    for (const parent of [path.dirname(filePath), path.dirname(realFile)]) {
+      if (!isSamePath(realRoot, parent) && !isPathInside(realRoot, parent)) return false;
+    }
+    if (!(await fs.promises.stat(realFile)).isFile()) return false;
+
+    const powershell = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    await execFileAsync(powershell, ['-NoProfile', '-NonInteractive', '-STA', '-Command', COPY_FILE_COMMAND], {
+      env: { ...process.env, ONEAI_CLIPBOARD_FILE: filePath },
+      windowsHide: true,
+      timeout: 5000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function setupProjectTree() {
   ipcMain.handle('fs:list-dir', (_event, rootPath: string, relDir?: string) => listProjectDirectory(rootPath, relDir));
+  ipcMain.handle('fs:copy-project-file', (_event, rootPath: string, relPath: string) => copyProjectFile(rootPath, relPath));
 }

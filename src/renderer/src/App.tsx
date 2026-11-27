@@ -9,7 +9,7 @@ import { BrandIcon } from './components/BrandIcon';
 import { AppLogo } from './components/AppLogo';
 import { CliDef, CustomCli, FolderEntry, TaskSession, QuotaData, AppSettings, ThemeId, HistoryEntry, Account, TaskSummary, UpdateState } from './types';
 import { version as appVersion } from '../../../package.json';
-import { BUILTIN_CLIS } from './clis';
+import { BUILTIN_CLIS, MODEL_PICKER_COMMANDS } from './clis';
 import { SUMMARY_CLIS, formatAgo } from './taskSummary';
 import { ensureFolder, folderKey, folderName, groupRecent, historySessionKey, loadAppState, moveBefore, nextTaskTitle, orderedTasks, scheduleSaveAppState, tasksInFolder } from './workspaceState';
 import { accountCli, quotaKey, sanitizeAccounts, toSessionAccount } from './accounts';
@@ -30,7 +30,10 @@ const UsageModal = lazy(() => import('./components/UsageModal').then((m) => ({ d
 const DashboardView = lazy(() => import('./components/DashboardView').then((m) => ({ default: m.DashboardView })));
 const FilePreviewPanel = lazy(() => import('./components/FilePreviewPanel').then((m) => ({ default: m.FilePreviewPanel })));
 const ProjectTreeDrawer = lazy(() => import('./components/ProjectTreeDrawer').then((m) => ({ default: m.ProjectTreeDrawer })));
+const GitConflictDiffModal = lazy(() => import('./components/GitConflictDiffModal').then((m) => ({ default: m.GitConflictDiffModal })));
 const UpdateModal = lazy(() => import('./components/UpdateModal').then((m) => ({ default: m.UpdateModal })));
+
+const canOpenModelPicker = (status?: TaskSession['status']) => status === 'idle' || status === 'waiting';
 
 const DEFAULT_SETTINGS: AppSettings = {
   language: systemLanguage(),
@@ -358,6 +361,7 @@ export const App: React.FC = () => {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isUsageOpen, setIsUsageOpen] = useState(false);
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(false);
+  const [gitConflictRoot, setGitConflictRoot] = useState<string | null>(null);
   const [filePreview, setFilePreview] = useState<{ cwd: string; path: string; line?: number; openedAt: number } | null>(null);
   const [previewWidth, setPreviewWidth] = useState<number>(() => {
     try {
@@ -565,6 +569,7 @@ export const App: React.FC = () => {
         const detected = list ? Object.fromEntries(list.map((cli) => [cli.id, true])) : null;
         setInstalled(detected);
         if (list) setExtraClis((prev) => mergeDetectedExtras(prev, list, customClisRef.current));
+        if (activeTaskIdRef.current !== activeTaskId) return;
         const isVisibleCli = (id: string) => id === 'terminal' || !detected || Boolean(detected[id]);
         const candidates = tasksRef.current.filter((task) => isVisibleCli(task.groupId));
         const initialTask = candidates.find((task) => task.id === activeTaskId) || candidates[0];
@@ -663,7 +668,14 @@ export const App: React.FC = () => {
 
   // Git 分支：只读 .git/HEAD；文件夹列表变化、窗口获得焦点和每 30 秒刷新
   const [gitBranches, setGitBranches] = useState<Record<string, string | null>>({});
-  const branchPathsKey = [...folders.map((folder) => folder.path), ...recentFolders.map((recent) => recent.path)].join('\n');
+  const [gitBranchRevision, setGitBranchRevision] = useState(0);
+  const branchPathsKey = [...new Set([workspacePath, ...folders.map((folder) => folder.path), ...recentFolders.map((recent) => recent.path)])].join('\n');
+  const handleGitBranchChanged = useCallback((dir: string, branch: string) => {
+    const key = folderKey(dir);
+    setGitBranches((prev) => ({ ...prev, [key]: branch }));
+    setFilePreview((prev) => prev && folderKey(prev.cwd) === key ? null : prev);
+    setGitBranchRevision((revision) => revision + 1);
+  }, []);
   useEffect(() => {
     const read = window.electronAPI?.getGitBranches;
     if (!read) return;
@@ -681,7 +693,7 @@ export const App: React.FC = () => {
     const timer = window.setInterval(refresh, 30_000);
     window.addEventListener('focus', refresh);
     return () => { disposed = true; window.clearInterval(timer); window.removeEventListener('focus', refresh); };
-  }, [branchPathsKey]);
+  }, [branchPathsKey, gitBranchRevision]);
 
   // 原生标题栏已隐藏：把窗口控件覆盖层的底色、符号色、高度及窗口底色同步为当前主题的实际样式，并持久化供下次启动使用
   useEffect(() => {
@@ -783,7 +795,15 @@ export const App: React.FC = () => {
     if (!quota) return null;
     const summary = summaries[activeTask.id];
     if (currentGroup.id === 'codex' && summary?.usage) {
-      return { ...quota, ...summary.usage, sessionScope: summary.usageScope, ctxEstimated: true };
+      const { model, effort } = summary.usage;
+      return {
+        ...quota,
+        ...summary.usage,
+        model: model || quota.model,
+        effort: effort ?? (!model || model === quota.model ? quota.effort : undefined),
+        sessionScope: summary.usageScope,
+        ctxEstimated: true,
+      };
     }
     if (currentGroup.id === 'claude' && !activeTask.accountId && quota.sessionScope === 'latest') {
       // 快照属于当前任务的会话时标为「当前任务会话」，否则保留「最近活跃会话」的数据并带「最近」标签
@@ -937,6 +957,12 @@ export const App: React.FC = () => {
   const handleOpenHistory = useCallback(() => setIsHistoryOpen(true), []);
   const handleOpenDashboard = useCallback(() => setIsDashboardOpen(true), []);
   const handleCloseDashboard = useCallback(() => setIsDashboardOpen(false), []);
+  const handleOpenHome = useCallback(() => {
+    activeTaskIdRef.current = null;
+    setActiveTaskId(null);
+    setIsDashboardOpen(false);
+    setFilePreview(null);
+  }, []);
 
   // 折叠 / 展开文件夹
   const handleToggleFolder = useCallback((folderPath: string) => {
@@ -1258,11 +1284,28 @@ export const App: React.FC = () => {
   const handleClosePreview = useCallback(() => setFilePreview(null), []);
   const handleToggleFileTree = useCallback(() => setIsFileTreeOpen((v) => !v), []);
   const handleCloseFileTree = useCallback(() => setIsFileTreeOpen(false), []);
+  const handleOpenGitConflicts = useCallback(() => {
+    setIsFileTreeOpen(false);
+    setGitConflictRoot(workspacePathRef.current);
+  }, []);
+  const handleCloseGitConflicts = useCallback(() => {
+    setGitConflictRoot(null);
+    setIsFileTreeOpen(true);
+  }, []);
   const handleInsertPathToTerminal = useCallback((relPath: string) => {
     if (!activeTaskIdRef.current) return;
     setIsDashboardOpen(false);
     terminalViewportRef.current?.insertTextToActiveTerminal(`${quoteTerminalPath(relPath)} `);
   }, []);
+  const handleOpenModelPicker = useCallback(async () => {
+    const task = tasksRef.current.find((item) => item.id === activeTaskIdRef.current);
+    const command = task && MODEL_PICKER_COMMANDS.get(task.groupId);
+    if (!task || !command || !canOpenModelPicker(task.status) || isDashboardOpenRef.current) return;
+    try {
+      if (await terminalViewportRef.current?.runCommandInActiveTerminal(task.id, command)) return;
+    } catch { /* 终端可能在提交前退出 */ }
+    void notify(t('打开 CLI 的模型选择器'), t('命令未发送，请确认终端已就绪。'));
+  }, [notify]);
   const handleRevealInExplorer = useCallback((targetPath: string) => {
     void window.electronAPI?.revealInExplorer?.(targetPath);
   }, []);
@@ -1292,7 +1335,7 @@ export const App: React.FC = () => {
   const shortcutRef = useRef<(e: KeyboardEvent) => boolean>(() => false);
   shortcutRef.current = (e) => {
     if (!e.ctrlKey || e.altKey || e.metaKey) return false;
-    if (isNewTaskOpen || isSettingsOpen || isHistoryOpen || isUsageOpen || isUpdateOpen || workReminderVisible || confirmOptions) return false;
+    if (isNewTaskOpen || isSettingsOpen || isHistoryOpen || isUsageOpen || isUpdateOpen || gitConflictRoot || workReminderVisible || confirmOptions) return false;
     const key = e.key.toLowerCase();
     if (e.shiftKey && key === 'e') { setIsFileTreeOpen((v) => !v); return true; }
     if (isFileTreeOpen) return false;
@@ -1465,6 +1508,7 @@ ${entry.cwd}`}
         isDashboardActive={isDashboardOpen}
         onAddFolder={handleAddFolderVoid}
         onOpenDashboard={handleOpenDashboard}
+        onOpenHome={handleOpenHome}
         onSelectTask={handleSelectTask}
         onToggleFolder={handleToggleFolder}
         onReorderFolder={reorderFolder}
@@ -1571,6 +1615,9 @@ ${entry.cwd}`}
             clockOffsetHours={settings.clockOffsetHours}
             dateVisible={settings.topbarDateVisible !== false}
             onRefreshQuota={handleRefreshQuota}
+            onOpenModelPicker={activeTask && MODEL_PICKER_COMMANDS.has(activeTask.groupId) ? handleOpenModelPicker : undefined}
+            modelPickerTaskId={activeTask?.id}
+            modelPickerDisabled={!canOpenModelPicker(activeTask?.status)}
             language={settings.language}
           />
         )}
@@ -1619,6 +1666,8 @@ ${entry.cwd}`}
             onClose={handleCloseFileTree}
             rootPath={workspacePath}
             gitBranch={workspaceBranch}
+            onGitBranchChanged={handleGitBranchChanged}
+            onOpenGitConflicts={handleOpenGitConflicts}
             activePreviewPath={filePreview?.path ?? null}
             hasActiveTerminal={Boolean(activeTask)}
             onPreviewFile={handlePreviewFile}
@@ -1626,6 +1675,12 @@ ${entry.cwd}`}
             onRevealInExplorer={handleRevealInExplorer}
             language={settings.language}
           />
+        </Suspense>
+      )}
+
+      {gitConflictRoot && (
+        <Suspense fallback={null}>
+          <GitConflictDiffModal rootPath={gitConflictRoot} onClose={handleCloseGitConflicts} />
         </Suspense>
       )}
 
