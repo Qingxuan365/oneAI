@@ -333,7 +333,7 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ directory, streams, hi
   if (tracks.length === 0) return null;
 
   return (
-    <div role="group" data-music-player aria-label={t('音乐播放器')} hidden={hidden} className="space-y-1.5 border-t border-line px-3 py-2 text-xs text-fg-muted">
+    <div role="group" data-music-player aria-label={t('音乐播放器')} hidden={hidden} className="space-y-1.5 border-t border-line/70 bg-panel/45 px-3 py-2 text-xs text-fg-muted">
       {/* 第一行：曲名与播放控制 */}
       <div className="flex items-center gap-1.5">
         {playing ? (

@@ -314,8 +314,8 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
 
   const cacheReadShare = view && view.totalTokens > 0 ? (view.cacheReadTokens / view.totalTokens) * 100 : 0;
 
-  const selectClass = 'h-8 rounded-lg border border-line bg-surface px-2.5 text-xs text-fg outline-none transition-colors hover:border-line-strong focus:border-accent';
-  const cardClass = 'rounded-xl border border-line bg-surface/70 p-4 transition-colors hover:border-line-strong';
+  const selectClass = 'h-8 rounded-xl border border-line/80 bg-surface/80 px-2.5 text-xs text-fg outline-none transition-all duration-150 hover:border-line-strong focus:border-accent focus:ring-2 focus:ring-accent/20';
+  const cardClass = 'glass-card rounded-2xl border border-line/80 p-4 transition-all duration-150 hover:border-line-strong/90';
 
   const scrollToModels = () => {
     document.getElementById('dashboard-model-details')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -420,10 +420,10 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
           </div>
         )}
 
-        {/* 时间选项卡 + 三维过滤下拉 */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-2">
+        {/* 时间选项卡（macOS 分段胶囊） + 三维过滤下拉 */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line/70 pb-3">
           <div className="space-y-1.5">
-            <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label={t('时间范围')}>
+            <div className="glass-segmented inline-flex flex-wrap items-center gap-0.5 rounded-xl p-1" role="tablist" aria-label={t('时间范围')}>
               {RANGE_OPTIONS.map((opt) => {
                 const active = filter.range === opt.id;
                 return (
@@ -434,12 +434,11 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
                     aria-selected={active}
                     data-dashboard-range={opt.id}
                     onClick={() => setFilter((prev) => ({ ...prev, range: opt.id }))}
-                    className={`relative rounded-md px-3 py-1.5 text-ui transition-colors ${
-                      active ? 'font-semibold text-fg' : 'text-fg-subtle hover:bg-hover/60 hover:text-fg-muted'
+                    className={`rounded-lg px-3 py-1 text-ui transition-all duration-150 ${
+                      active ? 'bg-elevated font-semibold text-fg shadow-sm' : 'text-fg-subtle hover:text-fg'
                     }`}
                   >
                     {t(opt.label)}
-                    {active && <span className="absolute inset-x-2 -bottom-2 h-0.5 rounded-full bg-accent" aria-hidden="true" />}
                   </button>
                 );
               })}
@@ -727,7 +726,7 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
                     <h2 className="text-base font-semibold text-fg">{trendTitle}</h2>
                     <p className="mt-0.5 text-2xs text-fg-faint">{trendSubtitle}</p>
                   </div>
-                  <div className="inline-flex rounded-lg border border-line bg-canvas/50 p-0.5 text-2xs">
+                  <div className="glass-segmented inline-flex rounded-xl p-0.5 text-2xs">
                     {([
                       ['tokens', 'Token'],
                       ['cost', T('成本')],
@@ -739,8 +738,8 @@ export const DashboardView: React.FC<DashboardViewProps> = React.memo(({
                         data-trend-metric={id}
                         aria-pressed={trendMetric === id}
                         onClick={() => setTrendMetric(id)}
-                        className={`rounded-md px-2.5 py-1 transition-colors ${
-                          trendMetric === id ? 'bg-selected font-medium text-fg' : 'text-fg-subtle hover:text-fg'
+                        className={`rounded-lg px-2.5 py-1 transition-all duration-150 ${
+                          trendMetric === id ? 'bg-elevated font-medium text-fg shadow-sm' : 'text-fg-subtle hover:text-fg'
                         }`}
                       >
                         {t(label)}

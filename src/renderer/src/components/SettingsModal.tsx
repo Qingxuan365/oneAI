@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowUpCircle, Clock, ExternalLink, Info, Keyboard, LucideIcon, Minus, Monitor, Moon, Palette, Plus, RefreshCw, RotateCcw, Settings, SlidersHorizontal, SquareTerminal, Sun, TerminalSquare, Users } from 'lucide-react';
+import { ArrowUpCircle, Clock, CloudRain, ExternalLink, Image as ImageIcon, Info, Keyboard, LucideIcon, Minus, Monitor, Moon, Palette, Plus, RefreshCw, RotateCcw, Settings, SlidersHorizontal, Snowflake, SquareTerminal, Sun, TerminalSquare, Trash2, Users } from 'lucide-react';
 import { Account, AppSettings, CustomCli, GreetingSlot, UpdateState } from '../types';
 import { version as appVersion } from '../../../../package.json';
 import { THEME_OPTIONS } from '../themes';
@@ -10,6 +10,9 @@ import { AccountsSettings } from './AccountsSettings';
 import { CliSettings } from './CliSettings';
 import { MusicStreamsSettings } from './MusicStreamsSettings';
 import { TERMINAL_FONT_FAMILY } from './TerminalViewport';
+import { clampRainIntensity } from './WorkspaceRain';
+import { clampSnowIntensity } from './WorkspaceSnow';
+import { BUILTIN_MACOS_WALLPAPERS, clampBackgroundBlur, clampBackgroundOpacity } from '../workspaceBackgrounds';
 import {
   DEFAULT_GREETING_MESSAGES,
   DEFAULT_WORK_END_TIME,
@@ -70,6 +73,28 @@ const UI_SCALES: { id: AppSettings['uiScale']; name: string; desc: string; pct: 
   { id: 'standard', name: T('标准'), desc: T('经典尺寸'), pct: '100%' },
   { id: 'comfortable', name: T('舒适（推荐）'), desc: T('清晰护眼'), pct: '110%' },
   { id: 'large', name: T('大号'), desc: T('适合 2K/4K'), pct: '125%' },
+];
+
+const GLASS_MATERIALS: { id: AppSettings['glassMaterial']; name: string; desc: string }[] = [
+  { id: 'clear', name: T('清透玻璃'), desc: T('高通透磨砂与镜面高光') },
+  { id: 'tinted', name: T('柔和磨砂'), desc: T('均衡半透明，兼顾质感与清晰度') },
+  { id: 'solid', name: T('纯实色'), desc: T('关闭模糊与透明，高对比省资源') },
+];
+
+const RAIN_PRESETS: { value: number; label: string }[] = [
+  { value: 0, label: T('已关闭') },
+  { value: 25, label: T('细雨') },
+  { value: 55, label: T('中雨') },
+  { value: 80, label: T('大雨') },
+  { value: 100, label: T('暴雨') },
+];
+
+const SNOW_PRESETS: { value: number; label: string }[] = [
+  { value: 0, label: T('已关闭') },
+  { value: 25, label: T('小雪') },
+  { value: 55, label: T('中雪') },
+  { value: 80, label: T('大雪') },
+  { value: 100, label: T('暴雪') },
 ];
 
 const CURSOR_STYLES: { id: AppSettings['terminalCursorStyle']; name: string; desc: string; icon: string }[] = [
@@ -134,9 +159,9 @@ const Switch: React.FC<{ checked: boolean; onChange: (checked: boolean) => void;
     aria-checked={checked}
     aria-label={label}
     onClick={() => onChange(!checked)}
-    className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${checked ? 'bg-primary' : 'bg-control-hover'}`}
+    className={`relative h-[22px] w-10 shrink-0 rounded-full p-0.5 transition-colors duration-200 shadow-inner ${checked ? 'bg-primary' : 'bg-control-hover/90'}`}
   >
-    <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : ''}`} />
+    <span className={`block h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_3px_rgb(0_0_0/0.32)] transition-transform duration-200 ${checked ? 'translate-x-[18px]' : 'translate-x-0'}`} />
   </button>
 );
 
@@ -204,6 +229,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onOpenUpdateRelease,
 }) => {
   const [tab, setTab] = useState<TabId>('appearance');
+  const [lastRainIntensity, setLastRainIntensity] = useState(() => {
+    const current = clampRainIntensity(settings.rainIntensity, 35);
+    return current > 0 ? current : 35;
+  });
+  const [lastSnowIntensity, setLastSnowIntensity] = useState(() => {
+    const current = clampSnowIntensity(settings.snowIntensity, 0);
+    return current > 0 ? current : 40;
+  });
+  const [bgError, setBgError] = useState('');
+  const [bgSelecting, setBgSelecting] = useState(false);
+  const rainIntensity = clampRainIntensity(settings.rainIntensity, 35);
+  const snowIntensity = clampSnowIntensity(settings.snowIntensity, 0);
+  const bgPreset = settings.workspaceBackgroundPreset ?? 'none';
+  const bgOpacity = clampBackgroundOpacity(settings.workspaceBackgroundOpacity, 32);
+  const bgBlur = clampBackgroundBlur(settings.workspaceBackgroundBlur, 0);
+  const setRainIntensity = (value: number) => {
+    const clamped = clampRainIntensity(value, 0);
+    if (clamped > 0) setLastRainIntensity(clamped);
+    update({ rainIntensity: clamped });
+  };
+  const setSnowIntensity = (value: number) => {
+    const clamped = clampSnowIntensity(value, 0);
+    if (clamped > 0) setLastSnowIntensity(clamped);
+    update({ snowIntensity: clamped });
+  };
+  const handleSelectBackgroundImage = async () => {
+    if (!window.electronAPI?.selectWorkspaceBackgroundImage || bgSelecting) return;
+    setBgSelecting(true);
+    setBgError('');
+    try {
+      const result = await window.electronAPI.selectWorkspaceBackgroundImage(settings.workspaceBackgroundImage || undefined);
+      if (result.ok) {
+        update({ workspaceBackgroundPreset: 'custom', workspaceBackgroundImage: result.path });
+      } else if (!result.canceled && result.error) {
+        setBgError(result.error);
+      }
+    } catch {
+      setBgError(t('无法读取背景图片文件'));
+    } finally {
+      setBgSelecting(false);
+    }
+  };
   const hasUpdateDot = Boolean(updateState && (updateState.phase === 'available' || updateState.phase === 'downloading' || updateState.phase === 'downloaded'));
   const update = (patch: Partial<AppSettings>) => onUpdateSettings({ ...settings, ...patch });
   const setFontSize = (size: number) => update({ terminalFontSize: Math.max(12, Math.min(24, size)) });
@@ -212,7 +279,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const setReminderHours = (hours: number) => update({ workReminderHours: Number.isFinite(hours) ? Math.max(1, Math.min(12, Math.trunc(hours))) : 1 });
   const setClockOffset =(hours: number) => update({ clockOffsetHours: Number.isFinite(hours) ? Math.max(-24, Math.min(24, Math.trunc(hours))) : 0 });
   const optionClass = (active: boolean) => (active ? 'option-active' : 'option');
-  const row = 'flex items-center justify-between gap-3 rounded-md border border-line bg-muted px-3 py-2.5 text-ui text-fg-muted';
+  const row = 'flex items-center justify-between gap-3 rounded-xl border border-line/80 bg-muted/75 px-3.5 py-2.5 text-ui text-fg-muted';
 
   return (
     <Modal
@@ -228,7 +295,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <button
             type="button"
             onClick={onResetDefault}
-            className="mr-auto flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-fg-subtle transition-colors hover:bg-hover hover:text-fg"
+            className="mr-auto flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-fg-subtle transition-colors hover:bg-hover hover:text-fg"
             title={t('还原外观、终端、时间、提醒与音乐播放器的设置；账号、自定义 CLI、在线音乐和界面语言保留')}
           >
             <RotateCcw size={12} />
@@ -240,7 +307,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     >
       <div className="flex h-[60vh] min-h-0 select-none">
         {/* 竖向选项卡：只有当前页可 Tab 聚焦，上下方向键与 Home / End 切换（WAI-ARIA tabs 模式） */}
-        <div role="tablist" aria-label={t('设置分类')} aria-orientation="vertical" className="w-36 shrink-0 space-y-0.5 overflow-y-auto border-r border-line bg-surface p-2"
+        <div role="tablist" aria-label={t('设置分类')} aria-orientation="vertical" className="glass-surface w-40 shrink-0 space-y-1 overflow-y-auto border-r border-line/70 p-2.5"
           onKeyDown={(e) => {
             const index = TABS.findIndex((item) => item.id === tab);
             const next = e.key === 'ArrowDown' ? (index + 1) % TABS.length
@@ -261,9 +328,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               aria-controls="settings-tabpanel"
               tabIndex={tab === id ? 0 : -1}
               onClick={() => setTab(id)}
-              className={`flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-ui transition-colors ${tab === id ? 'bg-selected font-medium text-fg' : 'text-fg-subtle hover:bg-hover hover:text-fg'}`}
+              className={`flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-ui transition-all duration-150 ${tab === id ? 'bg-selected/90 font-medium text-fg shadow-sm' : 'text-fg-subtle hover:bg-hover/80 hover:text-fg'}`}
             >
-              <Icon size={14} />
+              <Icon size={14} className={tab === id ? 'text-accent' : ''} />
               <span className="truncate">{t(label)}</span>
               {id === 'about' && hasUpdateDot && (
                 <span className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${updateState?.phase === 'downloaded' ? 'bg-success' : 'bg-accent'}`} aria-hidden="true" />
@@ -320,6 +387,261 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
                   </React.Fragment>
                 ))}
+              </Section>
+
+              <Section title={t('玻璃材质')} hint={t('调节导航栏、弹窗与卡片的液态玻璃通透度')}>
+                <div className="grid grid-cols-3 gap-2" role="group" aria-label={t('界面玻璃材质')}>
+                  {GLASS_MATERIALS.map((item) => {
+                    const currentGlass = settings.glassMaterial ?? 'tinted';
+                    const active = currentGlass === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        data-glass-option={item.id}
+                        aria-pressed={active}
+                        onClick={() => update({ glassMaterial: item.id })}
+                        className={`flex flex-col items-start gap-0.5 p-2.5 text-left ${optionClass(active)}`}
+                      >
+                        <span className="text-ui font-medium text-fg">{t(item.name)}</span>
+                        <span className="text-2xs font-normal leading-snug text-fg-faint">{t(item.desc)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </Section>
+
+              <Section title={t('工作区背景')} hint={t('内置多套 macOS 风格壁纸，也支持自定义本地图片，配合液态玻璃呈现通透层次')}>
+                <div className="grid grid-cols-4 gap-2" role="group" aria-label={t('工作区壁纸预设')}>
+                  <button
+                    type="button"
+                    data-bg-preset="none"
+                    aria-pressed={bgPreset === 'none'}
+                    onClick={() => { setBgError(''); update({ workspaceBackgroundPreset: 'none' }); }}
+                    className={`flex flex-col overflow-hidden p-1.5 text-left ${optionClass(bgPreset === 'none')}`}
+                  >
+                    <span className="mb-1.5 flex h-11 w-full items-center justify-center rounded-lg border border-dashed border-line-strong/80 bg-canvas text-2xs text-fg-faint">
+                      {t('纯色主题')}
+                    </span>
+                    <span className="truncate px-0.5 text-xs font-medium text-fg">{t('无背景')}</span>
+                  </button>
+                  {BUILTIN_MACOS_WALLPAPERS.map((wp) => {
+                    const active = bgPreset === wp.id;
+                    return (
+                      <button
+                        key={wp.id}
+                        type="button"
+                        data-bg-preset={wp.id}
+                        aria-pressed={active}
+                        onClick={() => { setBgError(''); update({ workspaceBackgroundPreset: wp.id }); }}
+                        className={`flex flex-col overflow-hidden p-1.5 text-left ${optionClass(active)}`}
+                      >
+                        <span
+                          className="mb-1.5 block h-11 w-full overflow-hidden rounded-lg border border-white/15"
+                          style={{ background: wp.previewGradient }}
+                        >
+                          <img src={wp.dataUrl} alt="" className="h-full w-full object-cover" />
+                        </span>
+                        <span className="truncate px-0.5 text-xs font-medium text-fg">{t(wp.name)}</span>
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    data-bg-preset="custom"
+                    aria-pressed={bgPreset === 'custom'}
+                    disabled={bgSelecting}
+                    onClick={() => void handleSelectBackgroundImage()}
+                    className={`flex flex-col overflow-hidden p-1.5 text-left ${optionClass(bgPreset === 'custom')}`}
+                  >
+                    <span className="mb-1.5 flex h-11 w-full items-center justify-center gap-1 rounded-lg border border-dashed border-accent/45 bg-accent/10 text-accent">
+                      <ImageIcon size={15} aria-hidden="true" />
+                    </span>
+                    <span className="truncate px-0.5 text-xs font-medium text-fg">{t('自定义图片')}</span>
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    data-bg-choose-image
+                    disabled={bgSelecting}
+                    onClick={() => void handleSelectBackgroundImage()}
+                    className="btn-secondary py-1 text-xs"
+                  >
+                    <ImageIcon size={13} />
+                    <span>{settings.workspaceBackgroundImage ? t('更换图片') : t('选择本地图片')}</span>
+                  </button>
+                  {bgPreset !== 'none' && (
+                    <button
+                      type="button"
+                      data-bg-clear
+                      onClick={() => { setBgError(''); update({ workspaceBackgroundPreset: 'none' }); }}
+                      className="btn-secondary py-1 text-xs"
+                    >
+                      <Trash2 size={13} />
+                      <span>{t('清除背景')}</span>
+                    </button>
+                  )}
+                  {bgPreset === 'custom' && settings.workspaceBackgroundImage && (
+                    <span className="min-w-0 flex-1 truncate font-mono text-2xs text-fg-faint" title={settings.workspaceBackgroundImage}>
+                      {settings.workspaceBackgroundImage.split(/[\\/]/).pop()}
+                    </span>
+                  )}
+                </div>
+
+                {bgError && (
+                  <p role="alert" className="text-xs text-danger">{bgError}</p>
+                )}
+
+                {bgPreset !== 'none' && (
+                  <div className="space-y-2.5 rounded-xl border border-line/80 bg-muted/65 p-3">
+                    <div className="flex items-center gap-3">
+                      <span className="w-20 shrink-0 text-xs text-fg-subtle">{t('背景可见度')}</span>
+                      <input
+                        type="range"
+                        min={5}
+                        max={85}
+                        step={1}
+                        aria-label={t('背景可见度')}
+                        data-bg-opacity-slider
+                        value={bgOpacity}
+                        onChange={(e) => update({ workspaceBackgroundOpacity: clampBackgroundOpacity(Number(e.target.value), 32) })}
+                        className="slim flex-1"
+                      />
+                      <span className="w-10 shrink-0 text-right font-mono text-xs tabular-nums text-fg-muted">{bgOpacity}%</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="w-20 shrink-0 text-xs text-fg-subtle">{t('背景模糊度')}</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={24}
+                        step={1}
+                        aria-label={t('背景模糊度')}
+                        data-bg-blur-slider
+                        value={bgBlur}
+                        onChange={(e) => update({ workspaceBackgroundBlur: clampBackgroundBlur(Number(e.target.value), 0) })}
+                        className="slim flex-1"
+                      />
+                      <span className="w-10 shrink-0 text-right font-mono text-xs tabular-nums text-fg-muted">{bgBlur}px</span>
+                    </div>
+                  </div>
+                )}
+              </Section>
+
+              <Section
+                title={t('工作区雨景')}
+                hint={t('在全工作区叠加氛围雨滴，可连续调节雨势大小')}
+                aside={(
+                  <span className="inline-flex items-center gap-1 rounded-full border border-line bg-muted px-2 py-0.5 font-mono text-2xs text-fg-subtle">
+                    <CloudRain size={11} className={rainIntensity > 0 ? 'text-accent' : 'text-fg-faint'} aria-hidden="true" />
+                    <span>{rainIntensity > 0 ? `${rainIntensity}%` : t('已关闭')}</span>
+                  </span>
+                )}
+              >
+                <div className={row}>
+                  <span>
+                    <span className="block">{t('开启下雨效果')}</span>
+                    <span className="block text-xs text-fg-faint">{t('关闭后不再绘制雨滴动画，零后台开销')}</span>
+                  </span>
+                  <Switch
+                    label={t('开启下雨效果')}
+                    checked={rainIntensity > 0}
+                    onChange={(checked) => setRainIntensity(checked ? lastRainIntensity : 0)}
+                  />
+                </div>
+                <div className="space-y-2.5 rounded-xl border border-line/80 bg-muted/65 p-3">
+                  <div className="flex items-center gap-3">
+                    <span className="w-16 shrink-0 text-xs text-fg-subtle">{t('雨势大小')}</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={5}
+                      aria-label={t('工作区下雨强度')}
+                      data-rain-slider
+                      value={rainIntensity}
+                      onChange={(e) => setRainIntensity(Number(e.target.value))}
+                      className="slim flex-1"
+                    />
+                    <span className="w-10 shrink-0 text-right font-mono text-xs tabular-nums text-fg-muted">{rainIntensity}%</span>
+                  </div>
+                  <div className="grid grid-cols-5 gap-1.5" role="group" aria-label={t('工作区下雨强度')}>
+                    {RAIN_PRESETS.map((preset) => {
+                      const active = rainIntensity === preset.value;
+                      return (
+                        <button
+                          key={preset.value}
+                          type="button"
+                          data-rain-preset={preset.value}
+                          aria-pressed={active}
+                          onClick={() => setRainIntensity(preset.value)}
+                          className={`py-1.5 text-center ${optionClass(active)}`}
+                        >
+                          {t(preset.label)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </Section>
+
+              <Section
+                title={t('工作区雪景')}
+                hint={t('在全工作区叠加氛围雪花，可连续调节雪势大小')}
+                aside={(
+                  <span className="inline-flex items-center gap-1 rounded-full border border-line bg-muted px-2 py-0.5 font-mono text-2xs text-fg-subtle">
+                    <Snowflake size={11} className={snowIntensity > 0 ? 'text-accent' : 'text-fg-faint'} aria-hidden="true" />
+                    <span>{snowIntensity > 0 ? `${snowIntensity}%` : t('已关闭')}</span>
+                  </span>
+                )}
+              >
+                <div className={row}>
+                  <span>
+                    <span className="block">{t('开启下雪效果')}</span>
+                    <span className="block text-xs text-fg-faint">{t('关闭后不再绘制雪花动画，零后台开销')}</span>
+                  </span>
+                  <Switch
+                    label={t('开启下雪效果')}
+                    checked={snowIntensity > 0}
+                    onChange={(checked) => setSnowIntensity(checked ? lastSnowIntensity : 0)}
+                  />
+                </div>
+                <div className="space-y-2.5 rounded-xl border border-line/80 bg-muted/65 p-3">
+                  <div className="flex items-center gap-3">
+                    <span className="w-16 shrink-0 text-xs text-fg-subtle">{t('雪势大小')}</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={5}
+                      aria-label={t('工作区下雪强度')}
+                      data-snow-slider
+                      value={snowIntensity}
+                      onChange={(e) => setSnowIntensity(Number(e.target.value))}
+                      className="slim flex-1"
+                    />
+                    <span className="w-10 shrink-0 text-right font-mono text-xs tabular-nums text-fg-muted">{snowIntensity}%</span>
+                  </div>
+                  <div className="grid grid-cols-5 gap-1.5" role="group" aria-label={t('工作区下雪强度')}>
+                    {SNOW_PRESETS.map((preset) => {
+                      const active = snowIntensity === preset.value;
+                      return (
+                        <button
+                          key={preset.value}
+                          type="button"
+                          data-snow-preset={preset.value}
+                          aria-pressed={active}
+                          onClick={() => setSnowIntensity(preset.value)}
+                          className={`py-1.5 text-center ${optionClass(active)}`}
+                        >
+                          {t(preset.label)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </Section>
 
               <Section title={t('窗口行为')}>

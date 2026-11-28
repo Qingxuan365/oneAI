@@ -57,6 +57,7 @@ d:/GitHub/OneAI/
 │   │   ├── project-tree.ts    # 项目目录树：按层懒加载读取项目内目录（含实路径边界与符号链接防循环校验）
 │   │   ├── music-library.ts   # 音乐：扫描本地音乐目录、经 oneai-music:// 流式协议（及兼容读取）提供本地音频，并把在线音乐的 .m3u / .pls 歌单展开成曲目（只接受 http(s)）
 │   │   ├── workspace-store.ts # 工作区状态落盘：启动同步读取，运行期异步串行原子写入，退出前兜底刷盘
+│   │   ├── workspace-background.ts # 工作区背景图片：通过原生文件对话框选择并校验本地图片（最大 15 MB），返回 data URL
 │   │   ├── window-state.ts    # 窗口状态落盘：尺寸、位置（含多屏越界保护）、最大化状态与上次主题底色 / 标题栏覆盖层色值
 │   │   ├── updater.ts         # 软件更新：基于 electron-updater 检测 GitHub Releases、应用内下载与重启覆盖安装（开发模式、便携版或缺少 latest.yml 时降级为 Releases API 检测并跳转浏览器下载）
 │   │   └── session-history.ts # 读取 Claude / Codex（含 archived_sessions 与 .jsonl.zst）/ Kimi 本机及多账号目录历史会话与恢复命令（按文件签名缓存）
@@ -87,6 +88,7 @@ d:/GitHub/OneAI/
 │           ├── accounts.ts               # 多账号：支持的 CLI 与登录命令、环境变量文本解析、账号校验
 │           ├── reviewPrompt.ts           # 任务右键「一键审核」：生成审核任务标题与单行代码审核提示词
 │           ├── workGreeting.ts           # 工作时间段与四时段问候语计算、格式校验与时间区间预览
+│           ├── workspaceBackgrounds.ts   # 内置 6 套 macOS 风格壁纸（SVG data URL）与背景可见度 / 模糊度校验
 │           ├── previewHighlight.ts       # 文件预览语法高亮：按扩展名或文件名调用 highlight.js 分词并保留跨行作用域，跳过压缩单行与 > 1 MB 文件
 │           ├── components/
 │           │   ├── Sidebar.tsx           # 左侧品牌头部（Logo、标语、版本号）、Dashboard 入口、文件夹树（Git 分支、任务）与最近任务
@@ -115,7 +117,10 @@ d:/GitHub/OneAI/
 │           │   ├── MusicPlayer.tsx       # 侧栏底部迷你音乐播放器（本地目录 + 在线音乐），没有任何曲目时不显示
 │           │   ├── MusicStreamsSettings.tsx # 设置 → 提醒：添加 / 删除在线音乐（列表最多显示 5 行，超出滚动）
 │           │   ├── BrandIcon.tsx         # 各 CLI 品牌徽标
-│           │   └── AppLogo.tsx           # 应用 Logo
+│           │   ├── AppLogo.tsx           # 应用 Logo
+│           │   ├── WorkspaceBackground.tsx # 全工作区背景层（内置 6 套 macOS 壁纸或本地图片，带可见度遮罩与模糊度）
+│           │   ├── WorkspaceRain.tsx     # 全工作区下雨氛围 Canvas 层（可开关与 0~100 连续调节雨势，pointer-events: none）
+│           │   └── WorkspaceSnow.tsx     # 全工作区下雪氛围 Canvas 层（三层景深雪花与冰晶，可开关与 0~100 连续调节雪势，pointer-events: none）
 │           └── types/index.ts            # 前端类型与 window.electronAPI 声明
 ```
 

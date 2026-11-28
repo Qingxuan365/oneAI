@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cancelWindowClose: () => ipcRenderer.send('window:cancel-close'),
   setCloseToTray: (enabled) => ipcRenderer.send('window:set-close-to-tray', enabled),
   selectWorkspaceDirectory: (currentPath) => ipcRenderer.invoke('workspace:select-directory', currentPath),
+  selectWorkspaceBackgroundImage: (currentPath) => ipcRenderer.invoke('workspace:select-background-image', currentPath),
+  readWorkspaceBackgroundImage: (filePath) => ipcRenderer.invoke('workspace:read-background-image', filePath),
   loadWorkspaceState: () => ipcRenderer.sendSync('state:load'),
   saveWorkspaceState: (json) => ipcRenderer.send('state:save', json),
   listMusic: (dir) => ipcRenderer.invoke('music:list', dir),

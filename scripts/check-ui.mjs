@@ -29,6 +29,9 @@ await build({
     import { OnboardingModal } from './src/renderer/src/components/OnboardingModal';
     import { UpdateModal } from './src/renderer/src/components/UpdateModal';
     import { BrandIcon } from './src/renderer/src/components/BrandIcon';
+    import { WorkspaceRain } from './src/renderer/src/components/WorkspaceRain';
+    import { WorkspaceSnow } from './src/renderer/src/components/WorkspaceSnow';
+    import { WorkspaceBackground } from './src/renderer/src/components/WorkspaceBackground';
     import knownClisFixture from './src/main/known-clis.json';
     import { THEME_IDS } from './src/shared/types';
     import { dateLocale, getLanguage, setLanguage, t } from './src/renderer/src/i18n';
@@ -48,6 +51,8 @@ await build({
       // 路径里带 logged 的账号视为已登录；账号相关桩不使用反斜杠，避免外层模板字符串转义
       checkAccountLogin: async account => ({ loggedIn: account.configDir.indexOf('logged') >= 0, detail: account.configDir.indexOf('logged') >= 0 ? 'me@example.com' : undefined }),
       selectWorkspaceDirectory: async () => 'C:/picked/dir',
+      selectWorkspaceBackgroundImage: async () => ({ ok: true, path: 'C:/Pictures/custom-wall.png', dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==' }),
+      readWorkspaceBackgroundImage: async () => ({ ok: true, path: 'C:/Pictures/custom-wall.png', dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==' }),
       listKnownClis: async () => window.knownClisMock ?? [],
       getCliEnvInfo: async () => window.cliEnvFixture,
       installClis: async (ids) => window.cliInstallHandler(ids),
@@ -248,14 +253,22 @@ await build({
       </div>));
     };
     function SettingsHarness() {
-      const [settings, setSettings] = React.useState({ theme: 'dark', voiceReminderEnabled: true, workReminderHours: 1, workStartTime: '09:00', workEndTime: '18:00', greetingMessages: { morning: '', noon: '', afternoon: '', evening: '' }, terminalFontSize: 15, terminalLineHeight: 1.3, uiScale: 'comfortable', terminalCursorStyle: 'bar', terminalCursorBlink: true, previewMinimap: true, musicDirectory: '', musicPlayerVisible: true, musicStreams: [], clockOffsetHours: 0, topbarDateVisible: true, language: 'zh-CN', onboardingDone: true, accounts: [], customClis: [] });
+      const [settings, setSettings] = React.useState({ theme: 'dark', glassMaterial: 'tinted', rainIntensity: 35, snowIntensity: 0, workspaceBackgroundPreset: 'none', workspaceBackgroundImage: '', workspaceBackgroundOpacity: 32, workspaceBackgroundBlur: 0, voiceReminderEnabled: true, workReminderHours: 1, workStartTime: '09:00', workEndTime: '18:00', greetingMessages: { morning: '', noon: '', afternoon: '', evening: '' }, terminalFontSize: 15, terminalLineHeight: 1.3, uiScale: 'comfortable', terminalCursorStyle: 'bar', terminalCursorBlink: true, previewMinimap: true, musicDirectory: '', musicPlayerVisible: true, musicStreams: [], clockOffsetHours: 0, topbarDateVisible: true, language: 'zh-CN', onboardingDone: true, accounts: [], customClis: [] });
       setLanguage(settings.language);
       window.currentSettings = () => settings;
       window.currentCustomClis = () => settings.customClis;
       window.currentAccounts = () => settings.accounts;
-      return <SettingsModal isOpen onClose={() => {}} settings={settings} onUpdateSettings={setSettings} onResetDefault={() => {}} onLoginAccount={(a) => window.events.push('login:' + a.name)}
-        fallbackKnownClis={[{ id: 'codex', name: 'Codex', command: 'codex' }, { id: 'claude', name: 'Claude Code', command: 'claude' }, { id: 'opencode', name: 'OpenCode', command: 'opencode' }, { id: 'grok', name: 'Grok Build', command: 'grok' }]} installed={{ codex: true, claude: true }}
-        onCustomClisChange={(list) => setSettings((prev) => ({ ...prev, customClis: list }))} onRedetectClis={() => window.events.push('redetect')} onOpenCliInstaller={() => window.events.push('open-cli-installer')} />;
+      const customBgUrl = settings.workspaceBackgroundPreset === 'custom' && settings.workspaceBackgroundImage
+        ? 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+        : null;
+      return <>
+        <WorkspaceBackground preset={settings.workspaceBackgroundPreset} customImageUrl={customBgUrl} opacity={settings.workspaceBackgroundOpacity} blur={settings.workspaceBackgroundBlur} />
+        <WorkspaceRain intensity={settings.rainIntensity} theme={settings.theme === 'system' ? 'dark' : settings.theme} />
+        <WorkspaceSnow intensity={settings.snowIntensity} theme={settings.theme === 'system' ? 'dark' : settings.theme} />
+        <SettingsModal isOpen onClose={() => {}} settings={settings} onUpdateSettings={setSettings} onResetDefault={() => {}} onLoginAccount={(a) => window.events.push('login:' + a.name)}
+          fallbackKnownClis={[{ id: 'codex', name: 'Codex', command: 'codex' }, { id: 'claude', name: 'Claude Code', command: 'claude' }, { id: 'opencode', name: 'OpenCode', command: 'opencode' }, { id: 'grok', name: 'Grok Build', command: 'grok' }]} installed={{ codex: true, claude: true }}
+          onCustomClisChange={(list) => setSettings((prev) => ({ ...prev, customClis: list }))} onRedetectClis={() => window.events.push('redetect')} onOpenCliInstaller={() => window.events.push('open-cli-installer')} />
+      </>;
     }
     function OnboardingHarness({ clis, mode = 'onboarding', initialLanguage = 'en' }) {
       const [language, setLang] = React.useState(initialLanguage);
@@ -472,19 +485,19 @@ app.whenReady().then(async () => {
         const taskRing = taskRow?.querySelector('[data-task-neon="running"]');
         const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         if (status === 'running') {
-          check('running topbar neon beam sweeps cleanly below header while keeping 44px height', neonTrack?.dataset.topbarNeon === 'running'
+          check('running topbar glass beam sweeps cleanly below header while keeping 44px height', neonTrack?.dataset.topbarNeon === 'running'
             && neonTrack.classList.contains('is-running')
             && Math.round(document.querySelector('header').getBoundingClientRect().height) === 44
             && neonTrack.getBoundingClientRect().top >= document.querySelector('header').getBoundingClientRect().bottom - 0.5
-            && (reducedMotion || getComputedStyle(neonBeam).animationName === 'topbar-neon-sweep'));
-          check('running sidebar task row shows perimeter neon ring', Boolean(taskRow?.classList.contains('task-neon-running'))
+            && (reducedMotion || getComputedStyle(neonBeam).animationName === 'topbar-glass-sweep'));
+          check('running sidebar task row shows sweeping macOS glass ring and shimmer', Boolean(taskRow?.classList.contains('task-neon-running'))
             && Boolean(taskRing)
-            && (reducedMotion || getComputedStyle(taskRing, '::before').animationName === 'task-neon-spin'));
+            && (reducedMotion || (getComputedStyle(taskRing, '::before').animationName === 'task-neon-spin' && getComputedStyle(taskRow, '::after').animationName === 'task-glass-sweep')));
         } else {
-          check(status + ' topbar neon beam stays idle', neonTrack?.dataset.topbarNeon === 'idle'
+          check(status + ' topbar glass beam stays idle', neonTrack?.dataset.topbarNeon === 'idle'
             && !neonTrack.classList.contains('is-running')
             && getComputedStyle(neonBeam).animationName === 'none');
-          check(status + ' sidebar task row has no perimeter neon ring', !taskRow?.classList.contains('task-neon-running') && !taskRing);
+          check(status + ' sidebar task row has no breathing glass aura', !taskRow?.classList.contains('task-neon-running') && !taskRing);
         }
       }
       for (const language of ['zh-TW', 'en']) {
@@ -1023,6 +1036,63 @@ app.whenReady().then(async () => {
       const names = label => [...document.querySelectorAll('[aria-label="' + label + '"] button')].map(b => b.textContent.trim()).join('|');
       check('settings lists the eye-care themes', names('护眼主题色') === '豆沙绿|羊皮纸|薰衣草|雾灰|暖夜|北极灰蓝|森夜|墨夜');
       check('settings lists the editor themes (Darcula, Sublime Material, the Sublime Text built-ins, the IDEA themes, Kiro and One Dark)', names('编辑器配色主题') === 'Darcula|Sublime Material|Monokai|Mariana|Breakers|Solarized Dark|Solarized Light|Cobalt|IntelliJ Light|IDEA Light|IDEA Dark|IDEA 高对比度|Kiro Dark|Kiro Light|One Dark');
+      const glassButtons = [...document.querySelectorAll('[aria-label="界面玻璃材质"] button[data-glass-option]')];
+      check('appearance settings exposes the 3 macOS 27 glass material tiers with tinted selected by default', glassButtons.map(b => b.dataset.glassOption).join('|') === 'clear|tinted|solid' && glassButtons[1]?.getAttribute('aria-pressed') === 'true');
+      glassButtons[0].click(); await tick(100);
+      check('clicking clear glass updates settings.glassMaterial to clear', window.currentSettings().glassMaterial === 'clear' && glassButtons[0].getAttribute('aria-pressed') === 'true');
+      glassButtons[2].click(); await tick(100);
+      check('clicking solid updates settings.glassMaterial to solid', window.currentSettings().glassMaterial === 'solid' && glassButtons[2].getAttribute('aria-pressed') === 'true');
+      document.documentElement.dataset.glass = 'clear';
+      const clearAlpha = getComputedStyle(document.documentElement).getPropertyValue('--glass-panel-alpha').trim();
+      const clearBlur = getComputedStyle(document.documentElement).getPropertyValue('--glass-blur').trim();
+      document.documentElement.dataset.glass = 'solid';
+      const solidAlpha = getComputedStyle(document.documentElement).getPropertyValue('--glass-panel-alpha').trim();
+      const solidBlur = getComputedStyle(document.documentElement).getPropertyValue('--glass-blur').trim();
+      document.documentElement.dataset.glass = 'tinted';
+      glassButtons[1].click(); await tick(100);
+      check('data-glass tiers adjust CSS backdrop blur and panel translucency variables', parseFloat(clearAlpha) < parseFloat(solidAlpha) && parseFloat(clearBlur) > 0 && parseFloat(solidBlur) === 0);
+
+      // 工作区背景与内置 6 套 macOS 壁纸 + 自定义本地图片 + 清除
+      const bgPresets = [...document.querySelectorAll('[aria-label="工作区壁纸预设"] button[data-bg-preset]')];
+      check('appearance settings exposes none, 6 built-in macOS wallpapers, and custom image', bgPresets.map(b => b.dataset.bgPreset).join('|') === 'none|tahoe|sequoia|sonoma|ventura|monterey|big-sur|custom');
+      check('no workspace background layer is mounted when preset is none', !document.querySelector('[data-workspace-background]'));
+      bgPresets[1].click(); await tick(100);
+      const bgLayer = () => document.querySelector('[data-workspace-background]');
+      check('selecting built-in macOS Tahoe wallpaper mounts background layer and reveals visibility/blur sliders', window.currentSettings().workspaceBackgroundPreset === 'tahoe' && bgLayer()?.dataset.workspaceBackground === 'tahoe' && Boolean(document.querySelector('[data-bg-opacity-slider]')) && Boolean(document.querySelector('[data-bg-blur-slider]')));
+      document.querySelector('[data-bg-choose-image]').click(); await tick(120);
+      check('selecting a custom local image updates preset to custom and mounts custom background layer', window.currentSettings().workspaceBackgroundPreset === 'custom' && window.currentSettings().workspaceBackgroundImage === 'C:/Pictures/custom-wall.png' && bgLayer()?.dataset.workspaceBackground === 'custom');
+      document.querySelector('[data-bg-clear]').click(); await tick(100);
+      check('clearing workspace background restores none and unmounts background layer', window.currentSettings().workspaceBackgroundPreset === 'none' && !bgLayer());
+
+      // 工作区下雨效果：开关、强度预设与 Canvas pointer-events: none
+      const rainSwitch = () => document.querySelector('[role="switch"][aria-label="开启下雨效果"]');
+      const rainCanvas = () => document.querySelector('[data-workspace-rain]');
+      check('workspace rain canvas is mounted with pointer-events none by default', Boolean(rainCanvas()) && rainCanvas().dataset.rainIntensity === '35' && getComputedStyle(rainCanvas()).pointerEvents === 'none' && rainSwitch()?.getAttribute('aria-checked') === 'true');
+      rainSwitch().click(); await tick(100);
+      check('toggling rain switch off sets intensity to 0 and unmounts rain canvas', window.currentSettings().rainIntensity === 0 && !rainCanvas() && rainSwitch()?.getAttribute('aria-checked') === 'false');
+      rainSwitch().click(); await tick(100);
+      check('toggling rain switch back on restores previous non-zero intensity', window.currentSettings().rainIntensity === 35 && rainCanvas()?.dataset.rainIntensity === '35');
+      const stormBtn = document.querySelector('[data-rain-preset="100"]');
+      stormBtn.click(); await tick(100);
+      check('rain intensity preset adjusts rain size to 100%', window.currentSettings().rainIntensity === 100 && rainCanvas()?.dataset.rainIntensity === '100');
+      document.querySelector('[data-rain-preset="0"]').click(); await tick(100);
+      check('rain preset Off turns rain off cleanly', window.currentSettings().rainIntensity === 0 && !rainCanvas());
+
+      // 工作区下雪效果：默认关闭、开关恢复、强度预设与 Canvas pointer-events: none
+      const snowSwitch = () => document.querySelector('[role="switch"][aria-label="开启下雪效果"]');
+      const snowCanvas = () => document.querySelector('[data-workspace-snow]');
+      check('workspace snow canvas is not mounted by default when intensity is 0', !snowCanvas() && snowSwitch()?.getAttribute('aria-checked') === 'false');
+      snowSwitch().click(); await tick(100);
+      check('toggling snow switch on mounts snow canvas with default 40% intensity and pointer-events none', window.currentSettings().snowIntensity === 40 && Boolean(snowCanvas()) && snowCanvas().dataset.snowIntensity === '40' && getComputedStyle(snowCanvas()).pointerEvents === 'none' && snowSwitch()?.getAttribute('aria-checked') === 'true');
+      const blizzardBtn = document.querySelector('[data-snow-preset="100"]');
+      blizzardBtn.click(); await tick(100);
+      check('snow intensity preset adjusts snow size to 100%', window.currentSettings().snowIntensity === 100 && snowCanvas()?.dataset.snowIntensity === '100');
+      snowSwitch().click(); await tick(100);
+      check('toggling snow switch off sets intensity to 0 and unmounts snow canvas', window.currentSettings().snowIntensity === 0 && !snowCanvas() && snowSwitch()?.getAttribute('aria-checked') === 'false');
+      snowSwitch().click(); await tick(100);
+      check('toggling snow switch back on restores previous non-zero intensity', window.currentSettings().snowIntensity === 100 && snowCanvas()?.dataset.snowIntensity === '100');
+      document.querySelector('[data-snow-preset="0"]').click(); await tick(100);
+      check('snow preset Off turns snow off cleanly', window.currentSettings().snowIntensity === 0 && !snowCanvas());
       const tab =[...document.querySelectorAll('[role="tab"]')].find(t => t.textContent.includes('账号'));
       check('settings has an accounts tab', Boolean(tab));
       tab.click(); await tick(300);

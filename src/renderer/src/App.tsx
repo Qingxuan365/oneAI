@@ -7,6 +7,10 @@ import { Modal } from './components/Modal';
 import { ConfirmDialog, ConfirmOptions } from './components/ConfirmDialog';
 import { BrandIcon } from './components/BrandIcon';
 import { AppLogo } from './components/AppLogo';
+import { WorkspaceRain, clampRainIntensity } from './components/WorkspaceRain';
+import { WorkspaceSnow, clampSnowIntensity } from './components/WorkspaceSnow';
+import { WorkspaceBackground } from './components/WorkspaceBackground';
+import { clampBackgroundBlur, clampBackgroundOpacity, findBuiltinWallpaper, isWorkspaceBackgroundPreset } from './workspaceBackgrounds';
 import { CliDef, CustomCli, FolderEntry, GitStatusResult, TaskSession, QuotaData, AppSettings, ThemeId, HistoryEntry, Account, TaskSummary, UpdateState, KnownCliInfo } from './types';
 import { version as appVersion } from '../../../package.json';
 import { BUILTIN_CLIS, MODEL_PICKER_COMMANDS, sortClisAlphabetically } from './clis';
@@ -42,6 +46,13 @@ const DEFAULT_SETTINGS: AppSettings = {
   language: systemLanguage(),
   onboardingDone: false,
   theme: 'system',
+  glassMaterial: 'tinted',
+  rainIntensity: 35,
+  snowIntensity: 0,
+  workspaceBackgroundPreset: 'none',
+  workspaceBackgroundImage: '',
+  workspaceBackgroundOpacity: 32,
+  workspaceBackgroundBlur: 0,
   voiceReminderEnabled: true,
   taskDoneSoundEnabled: true,
   taskDoneSoundVolume: 60,
@@ -104,6 +115,17 @@ function loadSavedSettings(): AppSettings {
       return {
         ...DEFAULT_SETTINGS,
         ...saved,
+        glassMaterial: saved?.glassMaterial === 'clear' || saved?.glassMaterial === 'tinted' || saved?.glassMaterial === 'solid'
+          ? saved.glassMaterial
+          : DEFAULT_SETTINGS.glassMaterial,
+        rainIntensity: clampRainIntensity(saved?.rainIntensity, DEFAULT_SETTINGS.rainIntensity),
+        snowIntensity: clampSnowIntensity(saved?.snowIntensity, DEFAULT_SETTINGS.snowIntensity),
+        workspaceBackgroundPreset: isWorkspaceBackgroundPreset(saved?.workspaceBackgroundPreset)
+          ? saved.workspaceBackgroundPreset
+          : DEFAULT_SETTINGS.workspaceBackgroundPreset,
+        workspaceBackgroundImage: typeof saved?.workspaceBackgroundImage === 'string' ? saved.workspaceBackgroundImage : '',
+        workspaceBackgroundOpacity: clampBackgroundOpacity(saved?.workspaceBackgroundOpacity, DEFAULT_SETTINGS.workspaceBackgroundOpacity),
+        workspaceBackgroundBlur: clampBackgroundBlur(saved?.workspaceBackgroundBlur, DEFAULT_SETTINGS.workspaceBackgroundBlur),
         workStartTime: normalizeTimeString(saved?.workStartTime, DEFAULT_WORK_START_TIME),
         workEndTime: normalizeTimeString(saved?.workEndTime, DEFAULT_WORK_END_TIME),
         greetingMessages: sanitizeGreetingMessages(saved?.greetingMessages),
@@ -389,10 +411,40 @@ export const App: React.FC = () => {
     return () => media.removeEventListener('change', update);
   }, []);
 
+  const resolvedGlass = settings.glassMaterial === 'clear' || settings.glassMaterial === 'solid'
+    ? settings.glassMaterial
+    : 'tinted';
+
+  // 自定义本地背景图片：启动或更换路径时由主进程读取为 data URL（绝不写入 localStorage）
+  const [customBgDataUrl, setCustomBgDataUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (settings.workspaceBackgroundPreset !== 'custom' || !settings.workspaceBackgroundImage) {
+      setCustomBgDataUrl(null);
+      return;
+    }
+    let cancelled = false;
+    window.electronAPI?.readWorkspaceBackgroundImage?.(settings.workspaceBackgroundImage)
+      .then((res) => {
+        if (!cancelled) setCustomBgDataUrl(res.ok ? res.dataUrl : null);
+      })
+      .catch(() => {
+        if (!cancelled) setCustomBgDataUrl(null);
+      });
+    return () => { cancelled = true; };
+  }, [settings.workspaceBackgroundPreset, settings.workspaceBackgroundImage]);
+
+  const hasWorkspaceBackground = settings.workspaceBackgroundPreset === 'custom'
+    ? Boolean(customBgDataUrl)
+    : Boolean(findBuiltinWallpaper(settings.workspaceBackgroundPreset));
+
   useEffect(() => {
     document.documentElement.dataset.theme = resolvedTheme;
+    document.documentElement.dataset.themeMode = THEME_MODE[resolvedTheme];
+    document.documentElement.dataset.glass = resolvedGlass;
+    if (hasWorkspaceBackground) document.documentElement.dataset.hasBg = 'true';
+    else delete document.documentElement.dataset.hasBg;
     document.documentElement.style.colorScheme = THEME_MODE[resolvedTheme];
-  }, [resolvedTheme]);
+  }, [resolvedTheme, resolvedGlass, hasWorkspaceBackground]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCliInstallerOpen, setIsCliInstallerOpen] = useState(false);
   const [knownClis, setKnownClis] = useState<KnownCliInfo[]>([]);
@@ -734,23 +786,41 @@ export const App: React.FC = () => {
     return () => { disposed = true; window.clearInterval(timer); window.removeEventListener('focus', refresh); };
   }, [branchPathsKey, gitBranchRevision]);
 
-  // 原生标题栏已隐藏：把窗口控件覆盖层的底色、符号色、高度及窗口底色同步为当前主题的实际样式，并持久化供下次启动使用
+  // 原生标题栏已隐藏：把窗口控件覆盖层的底色、符号色、高度及窗口底色同步为当前主题与玻璃材质的实际样式，并持久化供下次启动使用
   useEffect(() => {
     const header = document.querySelector('header');
     if (!header || !window.electronAPI?.setTitleBarOverlay) return;
     {
-      const toHex = (css: string) => {
+      const parseRgba = (css: string) => {
         const m = css.match(/\d+(\.\d+)?/g);
-        return m && m.length >= 3 ? `#${m.slice(0, 3).map((n) => Math.round(Number(n)).toString(16).padStart(2, '0')).join('')}` : null;
+        if (!m || m.length < 3) return null;
+        return {
+          r: Number(m[0]),
+          g: Number(m[1]),
+          b: Number(m[2]),
+          a: m.length >= 4 ? Number(m[3]) : 1,
+        };
       };
-      const color = toHex(getComputedStyle(header).backgroundColor);
-      const symbolColor = toHex(getComputedStyle(header).color);
-      const backgroundColor = toHex(getComputedStyle(document.body).backgroundColor) ?? undefined;
+      const toHex = (r: number, g: number, b: number) => `#${[r, g, b].map((n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0')).join('')}`;
+      const headerBg = parseRgba(getComputedStyle(header).backgroundColor);
+      const bodyBg = parseRgba(getComputedStyle(document.body).backgroundColor);
+      const symbol = parseRgba(getComputedStyle(header).color);
+      const color = headerBg
+        ? (headerBg.a < 1 && bodyBg
+          ? toHex(
+            headerBg.r * headerBg.a + bodyBg.r * (1 - headerBg.a),
+            headerBg.g * headerBg.a + bodyBg.g * (1 - headerBg.a),
+            headerBg.b * headerBg.a + bodyBg.b * (1 - headerBg.a),
+          )
+          : toHex(headerBg.r, headerBg.g, headerBg.b))
+        : null;
+      const symbolColor = symbol ? toHex(symbol.r, symbol.g, symbol.b) : null;
+      const backgroundColor = bodyBg ? toHex(bodyBg.r, bodyBg.g, bodyBg.b) : undefined;
       if (color && symbolColor) {
         window.electronAPI.setTitleBarOverlay({ color, symbolColor, height: Math.max(24, Math.floor(header.getBoundingClientRect().height) - 1), backgroundColor });
       }
     }
-  }, [resolvedTheme, settings.uiScale]);
+  }, [resolvedTheme, resolvedGlass, settings.uiScale]);
 
   // 任务行第二行：任务对应会话里最近一条用户消息（仅 Claude / Codex / Kimi），每 5 秒与窗口获得焦点时刷新。
   // 使用账号的任务读该账号的配置目录；任务进入停止态后再补读最后一次摘要，收敛后不再每 5 秒重扫
@@ -1614,7 +1684,14 @@ ${entry.cwd}`}
   );
 
   return (
-    <div className="workbench-ui flex h-screen w-screen bg-canvas text-fg overflow-hidden">
+    <div className="workbench-ui relative flex h-screen w-screen bg-canvas text-fg overflow-hidden">
+      <WorkspaceBackground
+        preset={settings.workspaceBackgroundPreset}
+        customImageUrl={customBgDataUrl}
+        opacity={settings.workspaceBackgroundOpacity}
+        blur={settings.workspaceBackgroundBlur}
+      />
+      <div className="relative z-10 flex h-full w-full min-w-0 overflow-hidden">
       {/* 左侧：CLI 品牌 Logo + 多任务树状菜单 */}
       <Sidebar
         isCollapsed={isSidebarCollapsed}
@@ -1689,6 +1766,7 @@ ${entry.cwd}`}
         <div className="flex min-h-0 flex-1 overflow-hidden" style={isDashboardOpen ? { display: 'none' } : undefined}>
           <TerminalViewport
             theme={resolvedTheme}
+            transparentBackground={hasWorkspaceBackground}
             ref={terminalViewportRef}
             tasks={allTasks}
             activeTaskId={activeTaskId}
@@ -1755,6 +1833,11 @@ ${entry.cwd}`}
           />
         )}
       </div>
+      </div>
+
+      {/* 全工作区雨雪氛围层（pointer-events: none，不遮挡弹窗且强度为 0 时零开销） */}
+      <WorkspaceRain intensity={settings.rainIntensity} theme={resolvedTheme} />
+      <WorkspaceSnow intensity={settings.snowIntensity} theme={resolvedTheme} />
 
       {/* 新建子任务弹窗 */}
       {everOpenedModalsRef.current.newTask && (

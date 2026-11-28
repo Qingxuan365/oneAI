@@ -901,7 +901,7 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
       </div>
 
       {/* 底部提示 / 即时操作反馈 */}
-      <div className="flex shrink-0 items-center justify-between border-t border-line bg-surface px-3 py-1.5 text-2xs">
+      <div className="flex shrink-0 items-center justify-between border-t border-line/70 bg-surface/65 px-3 py-1.5 text-2xs">
         <span className={statusErr ? 'text-danger' : statusOk ? 'text-success' : 'text-fg-faint'}>
           {statusText}
         </span>
@@ -913,7 +913,7 @@ export const ProjectTreeDrawer: React.FC<ProjectTreeDrawerProps> = React.memo(({
           ref={menuRef}
           role="menu"
           style={{ left: menuLeft, top: menuTop }}
-          className="fixed z-50 w-48 overflow-hidden rounded-lg border border-line-strong bg-elevated py-1 shadow-xl"
+          className="glass-popover fixed z-50 w-48 overflow-hidden rounded-xl border border-line-strong/80 py-1"
         >
           {contextMenu.entry.isDir ? (
             <button

@@ -41,6 +41,7 @@ import type {
   UsageDay,
   UsageRow,
   UsageStats,
+  WorkspaceBackgroundImageResult,
 } from '../../../shared/types';
 import { THEME_IDS } from '../../../shared/types';
 import type { Language } from '../../../shared/i18n';
@@ -82,6 +83,7 @@ export type {
   UsageDay,
   UsageRow,
   UsageStats,
+  WorkspaceBackgroundImageResult,
 };
 
 export type TaskStatus = 'starting' | 'running' | 'idle' | 'waiting' | 'stopped' | 'error';
@@ -146,10 +148,20 @@ export interface WorkScheduleGreetings {
   evening: string;
 }
 
+export type GlassMaterial = 'clear' | 'tinted' | 'solid';
+export type WorkspaceBackgroundPreset = 'none' | 'tahoe' | 'sequoia' | 'sonoma' | 'ventura' | 'monterey' | 'big-sur' | 'custom';
+
 export interface AppSettings {
   language: Language; // 首次启动按系统语言预选，之后可在设置 → 外观切换
   onboardingDone: boolean; // 首次引导（选择语言、认识各入口）是否已完成；完成后不再弹出
   theme: 'system' | ThemeId; // 应用主题，默认跟随系统（仅在 light / dark 间切换）
+  glassMaterial: GlassMaterial; // macOS 27 风格液态玻璃材质档位：clear（清透玻璃）/ tinted（柔和磨砂，默认）/ solid（纯实色）
+  rainIntensity: number; // 工作区下雨强度（0 关闭，1 ~ 100 调节雨势大小，默认 35）
+  snowIntensity: number; // 工作区下雪强度（0 关闭，1 ~ 100 调节雪势大小，默认 0）
+  workspaceBackgroundPreset: WorkspaceBackgroundPreset; // 工作区背景：无背景 / 内置 macOS 风格壁纸 / 自定义本地图片
+  workspaceBackgroundImage: string; // 自定义工作区背景图片绝对路径（仅 preset === 'custom' 时使用）
+  workspaceBackgroundOpacity: number; // 工作区背景可见度（5 ~ 85%，默认 32）
+  workspaceBackgroundBlur: number; // 工作区背景模糊度（0 ~ 24 px，默认 0）
   voiceReminderEnabled: boolean; // 工作满提醒时长时是否语音播报
   taskDoneSoundEnabled: boolean; // 任务由运行中转为等待输入或终端退出时播放提示音，默认 true
   taskDoneSoundVolume: number; // 提示音音量 (0 ~ 100, 默认 60)
@@ -195,6 +207,8 @@ export interface ElectronTerminalAPI {
   cancelWindowClose?: () => void;
   setCloseToTray?: (enabled: boolean) => void;
   selectWorkspaceDirectory?: (currentPath?: string) => Promise<string | null>;
+  selectWorkspaceBackgroundImage?: (currentPath?: string) => Promise<WorkspaceBackgroundImageResult>;
+  readWorkspaceBackgroundImage?: (filePath: string) => Promise<WorkspaceBackgroundImageResult>;
   listMusic?: (dir?: string) => Promise<{ directory: string; tracks: Array<{ name: string; path: string }> }>;
   readMusic?: (filePath: string) => Promise<Uint8Array | null>;
   getMusicTrackUrl?: (filePath: string) => string;

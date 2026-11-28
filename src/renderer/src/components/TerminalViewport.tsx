@@ -46,6 +46,8 @@ function readTerminalText(term: Terminal): string {
 
 interface TerminalViewportProps {
   theme: ThemeId;
+  /** 启用工作区壁纸背景时让终端底色透明，透出底层壁纸与主题遮罩 */
+  transparentBackground?: boolean;
   tasks: TaskSession[];
   activeTaskId: string | null;
   /** 外部整屏视图（如 Dashboard）覆盖时为 true，暂停前台即时刷帧与零尺寸 fit */
@@ -317,19 +319,19 @@ interface TerminalInstance {
 }
 
 const DARK_TERMINAL_THEME = {
-  background: '#0d1117', foreground: '#c9d1d9', cursor: '#58a6ff', selectionBackground: '#1f6feb40',
-  black: '#484f58', red: '#ff7b72', green: '#3fb950', yellow: '#d29922', blue: '#58a6ff',
-  magenta: '#bc8cff', cyan: '#39c5cf', white: '#b1bac4', brightBlack: '#6e7681',
-  brightRed: '#ffa198', brightGreen: '#56d364', brightYellow: '#e3b341', brightBlue: '#79c0ff',
-  brightMagenta: '#d2a8ff', brightCyan: '#56d4dd', brightWhite: '#f0f6fc',
+  background: '#161618', foreground: '#f5f5f7', cursor: '#409cff', selectionBackground: '#0a84ff40',
+  black: '#48484a', red: '#ff453a', green: '#30d158', yellow: '#ffd60a', blue: '#409cff',
+  magenta: '#bf5af2', cyan: '#64d2ff', white: '#d1d1d6', brightBlack: '#636366',
+  brightRed: '#ff6961', brightGreen: '#4cd964', brightYellow: '#ffe620', brightBlue: '#70b5ff',
+  brightMagenta: '#da8fff', brightCyan: '#8ce0ff', brightWhite: '#ffffff',
 };
 
 const LIGHT_TERMINAL_THEME = {
-  background: '#ffffff', foreground: '#24292f', cursor: '#0969da', selectionBackground: '#0969da40',
-  black: '#24292f', red: '#cf222e', green: '#116329', yellow: '#7d4e00', blue: '#0969da',
-  magenta: '#8250df', cyan: '#0550ae', white: '#6e7781', brightBlack: '#57606a',
-  brightRed: '#a40e26', brightGreen: '#1a7f37', brightYellow: '#9a6700', brightBlue: '#218bff',
-  brightMagenta: '#a475f9', brightCyan: '#0969da', brightWhite: '#24292f',
+  background: '#ffffff', foreground: '#1d1d1f', cursor: '#007aff', selectionBackground: '#007aff38',
+  black: '#1d1d1f', red: '#d70015', green: '#248a3d', yellow: '#a86800', blue: '#0071e3',
+  magenta: '#8944ab', cyan: '#0071a4', white: '#6e6e73', brightBlack: '#525257',
+  brightRed: '#b80012', brightGreen: '#1e7a34', brightYellow: '#8f5800', brightBlue: '#007aff',
+  brightMagenta: '#af52de', brightCyan: '#007aff', brightWhite: '#1d1d1f',
 };
 
 const BEAN_TERMINAL_THEME = {
@@ -554,8 +556,14 @@ export function sanitizeTerminalData(data: string): string {
   return res;
 }
 
+function resolveXtermTheme(theme: ThemeId, transparentBackground: boolean) {
+  const base = TERMINAL_THEMES[theme];
+  return transparentBackground ? { ...base, background: 'rgba(0, 0, 0, 0)' } : base;
+}
+
 export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, TerminalViewportProps>(({
   theme,
+  transparentBackground = false,
   tasks,
   activeTaskId,
   fontSize = 15,
@@ -581,10 +589,12 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
   const instancesRef = useRef<Map<string, TerminalInstance>>(new Map());
 
   useEffect(() => {
+    const resolved = resolveXtermTheme(theme, transparentBackground);
     instancesRef.current.forEach(({ term }) => {
-      term.options.theme = TERMINAL_THEMES[theme];
+      term.options.theme = resolved;
+      try { term.refresh(0, term.rows - 1); } catch {}
     });
-  }, [theme]);
+  }, [theme, transparentBackground]);
 
   // 搜索栏状态
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -1039,7 +1049,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
         terminalHost.appendChild(termContainer);
 
         const term = new Terminal({
-          theme: TERMINAL_THEMES[theme],
+          theme: resolveXtermTheme(theme, transparentBackground),
           fontFamily: TERMINAL_FONT_FAMILY,
           fontSize,
           lineHeight,
@@ -1048,7 +1058,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
           smoothScrollDuration: smoothScroll ? SMOOTH_SCROLL_MS : 0,
           cursorInactiveStyle: 'none',
           convertEol: false,
-          allowTransparency: false,
+          allowTransparency: true,
           scrollback: 5000,
           // Alt+单击默认会向 CLI 发一串方向键来「移动光标」，在自绘界面的 CLI 里会造成乱跳
           altClickMovesCursor: false,

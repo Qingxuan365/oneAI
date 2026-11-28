@@ -24,7 +24,8 @@ Working with several AI coding CLIs usually means a pile of terminal windows. It
 - **Session history**: browse and resume past Claude Code, Codex and Kimi Code sessions.
 - **Project tree & file preview**: open the right-side project directory tree drawer (`Ctrl + Shift + E`) to browse, filter and insert relative paths into the terminal, or Ctrl + click a path for a read-only preview with syntax highlighting and a code minimap.
 - **Any CLI**: installed CLIs are detected from your `PATH`, and any other command can be added as a custom CLI.
-- **English, Simplified Chinese and Traditional Chinese**, 25 themes (light, dark, eye-care and editor palettes), and a short first-run guide.
+- **Appearance & ambiance**: macOS Liquid Glass visual design with three glass materials, 25 themes (light, dark, eye-care and editor palettes), 6 built-in macOS-style wallpapers or custom local backgrounds, and toggleable workspace rain & snow ambient effects.
+- **English, Simplified Chinese and Traditional Chinese**, plus a short first-run guide with one-click installation for common CLIs.
 
 See [docs/features.md](docs/features.md) for the detailed behavior of every feature.
 

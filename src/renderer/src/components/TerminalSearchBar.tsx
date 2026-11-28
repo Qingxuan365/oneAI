@@ -46,8 +46,8 @@ export const TerminalSearchBar: React.FC<TerminalSearchBarProps> = ({
   const toggle = (active: boolean) => `icon-btn ${active ? 'bg-primary text-white enabled:hover:bg-primary-hover enabled:hover:text-white' : ''}`;
 
   return (
-    <div role="search" className="absolute right-6 top-3 z-30 flex items-center gap-1 rounded-lg border border-line-strong bg-elevated/95 p-1.5 text-xs text-fg shadow-xl backdrop-blur">
-      <label className="flex items-center gap-1.5 rounded-md border border-line-strong bg-canvas px-2 focus-within:border-accent">
+    <div role="search" className="glass-popover absolute right-6 top-3 z-30 flex items-center gap-1 rounded-2xl border border-line-strong/80 p-1.5 text-xs text-fg">
+      <label className="flex items-center gap-1.5 rounded-xl border border-line-strong/75 bg-canvas/85 px-2.5 focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20">
         <Search size={13} className="shrink-0 text-fg-faint" />
         <input
           ref={inputRef}

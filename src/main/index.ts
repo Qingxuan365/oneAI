@@ -18,6 +18,7 @@ import { setupWorkspaceStore } from './workspace-store';
 import { registerMusicScheme, setupMusicLibrary } from './music-library';
 import { allowPreviewFilePaths, isImageExtension, setupFilePreview } from './file-preview';
 import { setupProjectTree } from './project-tree';
+import { setupWorkspaceBackground } from './workspace-background';
 import { bindWindowState, loadWindowState, WindowStateTracker } from './window-state';
 import { getLanguage, setLanguage, t } from './i18n';
 import { quoteTerminalPath } from '../shared/paths';
@@ -236,6 +237,7 @@ function createWindow() {
 // 注册 IPC 消息通道
 function setupIPC() {
   setupWorkspaceStore();
+  setupWorkspaceBackground(() => mainWindow);
   setupMusicLibrary(() => mainWindow);
   setupFilePreview();
   setupProjectTree();

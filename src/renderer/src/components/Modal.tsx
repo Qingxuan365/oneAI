@@ -84,7 +84,7 @@ export const Modal: React.FC<ModalProps> = ({
 
   return (
     <div
-      className={`modal-overlay fixed z-50 flex bg-black/55 backdrop-blur-[2px] ${drawer ? 'inset-x-0 bottom-0 top-11 justify-end' : 'inset-0 items-center justify-center p-4'}`}
+      className={`modal-overlay fixed z-50 flex bg-black/40 backdrop-blur-[6px] ${drawer ? 'inset-x-0 bottom-0 top-11 justify-end' : 'inset-0 items-center justify-center p-4'}`}
       onMouseDown={(e) => { if (e.target === e.currentTarget && !closeDisabled) onClose(); }}
     >
       <div
@@ -93,20 +93,20 @@ export const Modal: React.FC<ModalProps> = ({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`${drawer ? 'drawer-panel h-full rounded-none border-y-0 border-r-0' : 'modal-panel max-h-[86vh] rounded-xl border'} flex w-full ${widthClass} flex-col overflow-hidden border-line-strong bg-elevated text-fg shadow-2xl outline-none`}
+        className={`${drawer ? 'drawer-panel h-full rounded-none border-y-0 border-r-0' : 'modal-panel max-h-[86vh] rounded-2xl border'} glass-popover flex w-full ${widthClass} flex-col overflow-hidden border-line-strong/80 text-fg outline-none`}
       >
-        <div className="flex h-12 shrink-0 items-center justify-between border-b border-line pl-5 pr-3">
-          <h2 id={titleId} className="flex min-w-0 items-center gap-2 text-sm font-semibold text-fg">
+        <div className="flex h-12 shrink-0 items-center justify-between border-b border-line/70 pl-5 pr-3">
+          <h2 id={titleId} className="flex min-w-0 items-center gap-2 text-sm font-semibold tracking-tight text-fg">
             {icon}
             <span className="truncate">{title}</span>
           </h2>
-          <button type="button" onClick={onClose} disabled={closeDisabled} className="icon-btn" title={t('关闭 (Esc)')} aria-label={t('关闭')}>
-            <X size={16} />
+          <button type="button" onClick={onClose} disabled={closeDisabled} className="icon-btn rounded-full" title={t('关闭 (Esc)')} aria-label={t('关闭')}>
+            <X size={15} />
           </button>
         </div>
         {bare ? children : <div className="min-h-0 flex-1 overflow-y-auto p-5">{children}</div>}
         {footer && (
-          <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line bg-surface px-5 py-3">
+          <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line/70 bg-surface/60 px-5 py-3">
             {footer}
           </div>
         )}

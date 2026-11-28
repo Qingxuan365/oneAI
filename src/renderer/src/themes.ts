@@ -34,8 +34,8 @@ export type ThemeGroup = 'basic' | 'eyecare' | 'editor';
 
 /** 设置页展示的主题；swatch 为 [底色, 强调色] 预览。basic 为顶部的浅 / 深色，eyecare 为护眼配色，editor 为编辑器配色。 */
 export const THEME_OPTIONS: ReadonlyArray<{ id: ThemeId; label: string; group: ThemeGroup; swatch: [string, string] }> = [
-  { id: 'light', get label() { return t('浅色'); }, group: 'basic', swatch: ['#ffffff', '#0969da'] },
-  { id: 'dark', get label() { return t('深色'); }, group: 'basic', swatch: ['#0d1117', '#38bdf8'] },
+  { id: 'light', get label() { return t('浅色'); }, group: 'basic', swatch: ['#ffffff', '#007aff'] },
+  { id: 'dark', get label() { return t('深色'); }, group: 'basic', swatch: ['#161618', '#0a84ff'] },
   { id: 'bean', get label() { return t('豆沙绿'); }, group: 'eyecare', swatch: ['#cce8cf', '#0e5e8a'] },
   { id: 'parchment', get label() { return t('羊皮纸'); }, group: 'eyecare', swatch: ['#f4ecd8', '#1e64a0'] },
   { id: 'lavender', get label() { return t('薰衣草'); }, group: 'eyecare', swatch: ['#ece8f4', '#4252b2'] },

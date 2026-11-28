@@ -40,6 +40,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cancelWindowClose: () => ipcRenderer.send('window:cancel-close'),
   setCloseToTray: (enabled: boolean) => ipcRenderer.send('window:set-close-to-tray', enabled),
   selectWorkspaceDirectory: (currentPath?: string) => ipcRenderer.invoke('workspace:select-directory', currentPath),
+  selectWorkspaceBackgroundImage: (currentPath?: string) => ipcRenderer.invoke('workspace:select-background-image', currentPath),
+  readWorkspaceBackgroundImage: (filePath: string) => ipcRenderer.invoke('workspace:read-background-image', filePath),
   listMusic: (dir?: string) => ipcRenderer.invoke('music:list', dir),
   readMusic: (filePath: string) => ipcRenderer.invoke('music:read', filePath),
   getMusicTrackUrl: (filePath: string) => `oneai-music://track?file=${encodeURIComponent(filePath)}`,

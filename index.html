@@ -6,11 +6,16 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>OneAI</title>
     <script>
-      // 首帧前按已保存主题写入 data-theme，避免浅色主题启动时先闪一帧深色。
+      // 首帧前按已保存主题与玻璃材质写入 data-theme / data-theme-mode / data-glass，避免首帧闪烁。
       try {
-        var theme = (JSON.parse(localStorage.getItem('onedesktop_settings') || '{}') || {}).theme;
+        var saved = JSON.parse(localStorage.getItem('onedesktop_settings') || '{}') || {};
+        var theme = saved.theme;
         if (['light', 'dark', 'bean', 'parchment', 'dusk', 'nord', 'lavender', 'mist', 'forest', 'ink', 'darcula', 'material', 'monokai', 'mariana', 'breakers', 'solarized-dark', 'solarized-light', 'cobalt', 'idea-classic-light', 'idea-light', 'idea-dark', 'idea-contrast', 'kiro-dark', 'kiro-light', 'one-dark'].indexOf(theme) < 0) theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        var lightThemes = ['light', 'bean', 'parchment', 'lavender', 'mist', 'breakers', 'solarized-light', 'idea-classic-light', 'idea-light', 'kiro-light'];
+        var glass = ['clear', 'tinted', 'solid'].indexOf(saved.glassMaterial) >= 0 ? saved.glassMaterial : 'tinted';
         document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeMode = lightThemes.indexOf(theme) >= 0 ? 'light' : 'dark';
+        document.documentElement.dataset.glass = glass;
       } catch (e) {}
     </script>
   </head>

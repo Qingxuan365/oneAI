@@ -120,7 +120,7 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = React.memo(({ c
   return (
     <aside
       ref={asideRef}
-      className="relative flex h-full shrink-0 flex-col border-l border-line bg-surface"
+      className="glass-surface relative flex h-full shrink-0 flex-col border-l border-line/70"
       style={{ width, maxWidth: `calc(100% - ${MIN_TERMINAL_WIDTH}px)` }}
       aria-label={t('文件预览')}
     >
@@ -133,7 +133,7 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = React.memo(({ c
         onDoubleClick={() => onResetWidth?.()}
         className="absolute -left-1 top-0 z-10 h-full w-2 cursor-col-resize hover:bg-accent/30"
       />
-      <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3">
+      <header className="glass-panel flex h-10 shrink-0 items-center gap-2 border-b border-line/70 px-3">
         <span className="min-w-0 flex-1 truncate text-ui font-medium text-fg" title={filePath}>{name}</span>
         {result && 'size' in result && <span className="shrink-0 text-xs text-fg-faint">{formatSize(result.size)}</span>}
         <button type="button" onClick={() => setReloadCount((count) => count + 1)} className="icon-btn" aria-label={t('重新读取文件')} title={t('重新读取文件')}>

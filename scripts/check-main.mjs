@@ -118,6 +118,10 @@ try {
         import { cleanInstallLogChunk, selectInstallableClis } from './src/main/cli-installer';
         import { buildReviewPrompt, buildReviewTaskTitle } from './src/renderer/src/reviewPrompt';
         import { describeGreetingSlotRanges, normalizeTimeString, resolveWorkGreeting } from './src/renderer/src/workGreeting';
+        import { readWorkspaceBackgroundImage } from './src/main/workspace-background';
+        import { BUILTIN_MACOS_WALLPAPERS, clampBackgroundBlur, clampBackgroundOpacity } from './src/renderer/src/workspaceBackgrounds';
+        import { clampRainIntensity } from './src/renderer/src/components/WorkspaceRain';
+        import { clampSnowIntensity } from './src/renderer/src/components/WorkspaceSnow';
         import { setLanguage as setRendererLanguage } from './src/renderer/src/i18n';
 
         test('Traditional Chinese is detected, translated, and accepted by main-process i18n', () => {
@@ -1392,6 +1396,41 @@ try {
           assert.equal(resolveWorkGreeting({ workStartTime: '09:00', workEndTime: '18:00', nowMs: at(9, 0) }).text, 'Good morning!');
           assert.equal(resolveWorkGreeting({ workStartTime: '09:00', workEndTime: '18:00', nowMs: at(19, 0) }).text, 'Time to rest');
           setRendererLanguage('zh-CN');
+        });
+
+        test('Workspace background image reader validates extensions, reads data URLs, and rain/wallpaper helpers clamp cleanly', async () => {
+          const bgDir = path.join(fixtureRoot, 'bg-images');
+          await fsp.mkdir(bgDir, { recursive: true });
+          const pngFile = path.join(bgDir, 'sample.png');
+          const txtFile = path.join(bgDir, 'not-image.txt');
+          const tinyPng = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082', 'hex');
+          await fsp.writeFile(pngFile, tinyPng);
+          await fsp.writeFile(txtFile, 'plain text');
+
+          const ok = await readWorkspaceBackgroundImage(pngFile);
+          assert.equal(ok.ok, true);
+          if (ok.ok) {
+            assert.equal(ok.dataUrl.startsWith('data:image/png;base64,'), true);
+          }
+          const badExt = await readWorkspaceBackgroundImage(txtFile);
+          assert.equal(badExt.ok, false);
+          const missing = await readWorkspaceBackgroundImage(path.join(bgDir, 'missing.png'));
+          assert.equal(missing.ok, false);
+
+          assert.equal(BUILTIN_MACOS_WALLPAPERS.length, 6);
+          assert.equal(new Set(BUILTIN_MACOS_WALLPAPERS.map((w) => w.id)).size, 6);
+          assert.equal(BUILTIN_MACOS_WALLPAPERS.every((w) => w.dataUrl.startsWith('data:image/svg+xml;charset=utf-8,')), true);
+          assert.equal(clampBackgroundOpacity(120), 85);
+          assert.equal(clampBackgroundOpacity(-5), 5);
+          assert.equal(clampBackgroundBlur(99), 24);
+          assert.equal(clampRainIntensity(0), 0);
+          assert.equal(clampRainIntensity(150), 100);
+          assert.equal(clampRainIntensity(Number.NaN, 35), 35);
+          assert.equal(clampSnowIntensity(0), 0);
+          assert.equal(clampSnowIntensity(-10), 0);
+          assert.equal(clampSnowIntensity(150), 100);
+          assert.equal(clampSnowIntensity(Number.NaN, 40), 40);
+          assert.equal(clampSnowIntensity(42.6), 43);
         });
       `,
     },

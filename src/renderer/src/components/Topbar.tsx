@@ -88,10 +88,10 @@ export const Topbar: React.FC<TopbarProps> = React.memo(({
   };
 
   const isRunning = !isDashboardOpen && activeTask?.status === 'running';
-  const menuItem = 'flex w-full items-center gap-2 px-3 py-2 text-left text-fg-muted transition-colors hover:bg-hover hover:text-fg';
+  const menuItem = 'mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-fg-muted transition-colors hover:bg-accent/15 hover:text-fg';
 
   return (
-    <header className="topbar relative z-10 flex h-11 shrink-0 select-none items-center gap-1.5 border-b border-line bg-panel px-2.5">
+    <header className="topbar glass-panel relative z-10 flex h-11 shrink-0 select-none items-center gap-1.5 border-b border-line/70 px-2.5">
       {/* 左侧：侧栏开关、会话面包屑与终端工具；面包屑在空间不足时自动截断 */}
       <div className="flex min-w-0 flex-1 items-center gap-1.5 text-ui text-fg-muted">
         <button
@@ -105,7 +105,7 @@ export const Topbar: React.FC<TopbarProps> = React.memo(({
         >
           {isSidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
         </button>
-        <div className="h-4 w-px shrink-0 bg-line-strong" />
+        <div className="h-4 w-px shrink-0 bg-line-strong/65" />
         {isDashboardOpen ? (
           <div data-topbar-breadcrumb className="flex min-w-0 items-center gap-1.5">
             <LayoutDashboard size={15} className="shrink-0 text-accent" aria-hidden="true" />
@@ -122,7 +122,7 @@ export const Topbar: React.FC<TopbarProps> = React.memo(({
                   {activeTask.title}
                 </span>
                 {accountName && (
-                  <span className="topbar-account max-w-[7rem] shrink-0 truncate rounded border border-line-strong px-1.5 py-px text-2xs text-fg-subtle" title={t('账号：{name}', { name: accountName })}>
+                  <span className="topbar-account max-w-[7rem] shrink-0 truncate rounded-full border border-line-strong/80 bg-muted/70 px-2 py-px text-2xs text-fg-subtle" title={t('账号：{name}', { name: accountName })}>
                     {accountName}
                   </span>
                 )}
@@ -138,14 +138,14 @@ export const Topbar: React.FC<TopbarProps> = React.memo(({
           </div>
         )}
 
-        {/* 终端工具 */}
+        {/* 终端工具（macOS 液态玻璃分段胶囊容器） */}
         {!isDashboardOpen && activeTask && (
-          <div id="oneai-terminal-tools" role="group" aria-label={t('终端工具')} className="flex shrink-0 items-center gap-0.5 border-l border-line pl-2">
-            <button type="button" onClick={onOpenSearch} title={t('在终端中搜索关键词 (Ctrl+Shift+F)')} aria-label={t('在终端中搜索')} className="icon-btn">
-              <Search size={15} />
+          <div id="oneai-terminal-tools" role="group" aria-label={t('终端工具')} className="ml-1 flex shrink-0 items-center gap-0.5 rounded-xl border border-line/70 bg-muted/55 p-0.5">
+            <button type="button" onClick={onOpenSearch} title={t('在终端中搜索关键词 (Ctrl+Shift+F)')} aria-label={t('在终端中搜索')} className="icon-btn h-6 w-6">
+              <Search size={14} />
             </button>
-            <button type="button" onClick={onClearScreen} title={t('清空当前屏幕与历史缓存 (Ctrl+Shift+K)')} aria-label={t('清空屏幕')} className="icon-btn">
-              <Eraser size={15} />
+            <button type="button" onClick={onClearScreen} title={t('清空当前屏幕与历史缓存 (Ctrl+Shift+K)')} aria-label={t('清空屏幕')} className="icon-btn h-6 w-6">
+              <Eraser size={14} />
             </button>
             <button
               type="button"
@@ -153,9 +153,9 @@ export const Topbar: React.FC<TopbarProps> = React.memo(({
               title={activeTask.status === 'stopped' || activeTask.status === 'error' ? t('启动当前终端') : activeTask.status === 'starting' ? t('终端正在启动') : t('重启当前终端（保持当前目录与配置）')}
               aria-label={t('重启终端')}
               disabled={activeTask.status === 'starting'}
-              className="icon-btn enabled:hover:text-warning"
+              className="icon-btn h-6 w-6 enabled:hover:text-warning"
             >
-              <RotateCcw size={15} />
+              <RotateCcw size={14} />
             </button>
 
             <div className="relative" ref={exportMenuRef}>
@@ -166,13 +166,13 @@ export const Topbar: React.FC<TopbarProps> = React.memo(({
                 aria-label={t('导出或复制会话日志')}
                 aria-haspopup="menu"
                 aria-expanded={isExportMenuOpen}
-                className={`icon-btn ${isExportMenuOpen ? 'bg-hover text-fg' : ''}`}
+                className={`icon-btn h-6 w-6 ${isExportMenuOpen ? 'bg-hover text-fg' : ''}`}
               >
-                {action?.ok ? <Check size={15} className="text-success" /> : <Download size={15} />}
+                {action?.ok ? <Check size={14} className="text-success" /> : <Download size={14} />}
               </button>
 
               {isExportMenuOpen && (
-                <div role="menu" className="absolute left-0 z-50 mt-1.5 w-48 overflow-hidden rounded-lg border border-line-strong bg-elevated py-1 text-xs shadow-xl">
+                <div role="menu" className="glass-popover absolute left-0 z-50 mt-2 w-48 overflow-hidden rounded-xl border border-line-strong/80 py-1 text-xs">
                   <button type="button" role="menuitem" autoFocus onClick={handleCopyLogs} className={menuItem}>
                     <Copy size={13} className="text-fg-subtle" />
                     <span>{t('复制最近会话文本')}</span>

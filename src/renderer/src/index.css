@@ -19,54 +19,122 @@
  */
 :root {
   color-scheme: dark;
-  --color-canvas: 13 17 23;
-  --color-surface: 17 24 33;
-  --color-panel: 20 29 39;
-  --color-elevated: 21 30 40;
-  --color-muted: 27 37 50;
-  --color-control: 38 52 67;
-  --color-control-hover: 52 70 87;
-  --color-hover: 33 46 60;
-  --color-selected: 29 52 71;
-  --color-line: 38 51 65;
-  --color-line-strong: 52 68 83;
-  --color-fg: 226 232 240;
-  --color-fg-muted: 203 213 225;
-  --color-fg-subtle: 148 163 184;
-  --color-fg-faint: 122 137 158;
-  --color-accent: 56 189 248;
-  --color-primary: 2 132 199;
-  --color-primary-hover: 14 165 233;
-  --color-success: 52 211 153;
-  --color-warning: 251 191 36;
-  --color-danger: 251 113 133;
-  --color-violet: 192 132 252;
+  --color-canvas: 22 22 24;
+  --color-surface: 28 28 31;
+  --color-panel: 34 34 38;
+  --color-elevated: 42 42 46;
+  --color-muted: 36 36 40;
+  --color-control: 50 50 56;
+  --color-control-hover: 64 64 72;
+  --color-hover: 48 48 54;
+  --color-selected: 26 60 102;
+  --color-line: 54 54 60;
+  --color-line-strong: 76 76 84;
+  --color-fg: 245 245 247;
+  --color-fg-muted: 209 209 214;
+  --color-fg-subtle: 162 162 170;
+  --color-fg-faint: 138 138 146;
+  --color-accent: 64 156 255;
+  --color-primary: 10 132 255;
+  --color-primary-hover: 45 152 255;
+  --color-success: 48 209 88;
+  --color-warning: 255 214 10;
+  --color-danger: 255 69 58;
+  --color-violet: 191 90 242;
+
+  /* macOS 26/27 Liquid Glass 材质变量（默认 tinted 柔和磨砂；深浅基调与 data-glass 动态调节） */
+  --glass-surface-alpha: 0.86;
+  --glass-panel-alpha: 0.88;
+  --glass-elevated-alpha: 0.9;
+  --glass-card-alpha: 0.78;
+  --glass-blur: 18px;
+  --glass-popover-blur: 24px;
+  --glass-saturate: 155%;
+  --glass-spec-top: rgb(255 255 255 / 0.11);
+  --glass-spec-edge: rgb(255 255 255 / 0.08);
+  --glass-sheen: linear-gradient(180deg, rgb(255 255 255 / 0.045) 0%, transparent 42%);
+  --glass-shadow-popover: 0 20px 44px -12px rgb(0 0 0 / 0.56), 0 4px 14px -2px rgb(0 0 0 / 0.34);
+  --glass-shadow-card: 0 8px 22px -10px rgb(0 0 0 / 0.42), 0 1px 2px rgb(0 0 0 / 0.24);
+  --glass-shadow-btn: 0 1px 2px rgb(0 0 0 / 0.28);
+}
+
+:root[data-theme-mode='light'] {
+  --glass-spec-top: rgb(255 255 255 / 0.78);
+  --glass-spec-edge: rgb(255 255 255 / 0.55);
+  --glass-sheen: linear-gradient(180deg, rgb(255 255 255 / 0.52) 0%, transparent 48%);
+  --glass-shadow-popover: 0 22px 48px -14px rgb(15 23 42 / 0.2), 0 4px 12px -2px rgb(15 23 42 / 0.1);
+  --glass-shadow-card: 0 6px 18px -8px rgb(15 23 42 / 0.1), 0 1px 2px rgb(15 23 42 / 0.06);
+  --glass-shadow-btn: 0 1px 2px rgb(15 23 42 / 0.08);
+}
+
+:root[data-glass='clear'] {
+  --glass-surface-alpha: 0.72;
+  --glass-panel-alpha: 0.74;
+  --glass-elevated-alpha: 0.76;
+  --glass-card-alpha: 0.64;
+  --glass-blur: 24px;
+  --glass-popover-blur: 30px;
+  --glass-saturate: 190%;
+}
+
+:root[data-glass='tinted'] {
+  --glass-surface-alpha: 0.86;
+  --glass-panel-alpha: 0.88;
+  --glass-elevated-alpha: 0.9;
+  --glass-card-alpha: 0.78;
+  --glass-blur: 18px;
+  --glass-popover-blur: 24px;
+  --glass-saturate: 155%;
+}
+
+:root[data-glass='solid'] {
+  --glass-surface-alpha: 1;
+  --glass-panel-alpha: 1;
+  --glass-elevated-alpha: 1;
+  --glass-card-alpha: 0.96;
+  --glass-blur: 0px;
+  --glass-popover-blur: 0px;
+  --glass-saturate: 100%;
+  --glass-sheen: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-surface-alpha: 1;
+    --glass-panel-alpha: 1;
+    --glass-elevated-alpha: 1;
+    --glass-card-alpha: 0.96;
+    --glass-blur: 0px;
+    --glass-popover-blur: 0px;
+    --glass-saturate: 100%;
+    --glass-sheen: none;
+  }
 }
 
 :root[data-theme='light'] {
   color-scheme: light;
   --color-canvas: 255 255 255;
-  --color-surface: 246 248 250;
-  --color-panel: 240 243 246;
-  --color-elevated: 255 255 255;
-  --color-muted: 246 248 250;
-  --color-control: 234 238 242;
-  --color-control-hover: 216 222 228;
-  --color-hover: 234 238 242;
-  --color-selected: 221 240 255;
-  --color-line: 208 215 222;
-  --color-line-strong: 175 184 193;
-  --color-fg: 31 35 40;
-  --color-fg-muted: 66 74 83;
-  --color-fg-subtle: 89 99 110;
-  --color-fg-faint: 110 119 129;
-  --color-accent: 9 105 218;
-  --color-primary: 9 105 218;
-  --color-primary-hover: 8 88 186;
-  --color-success: 26 127 55;
-  --color-warning: 154 103 0;
-  --color-danger: 207 34 46;
-  --color-violet: 130 80 223;
+  --color-surface: 245 245 247;
+  --color-panel: 238 239 242;
+  --color-elevated: 252 252 254;
+  --color-muted: 244 245 248;
+  --color-control: 232 233 237;
+  --color-control-hover: 218 220 226;
+  --color-hover: 234 235 239;
+  --color-selected: 218 235 255;
+  --color-line: 216 218 224;
+  --color-line-strong: 184 188 196;
+  --color-fg: 29 29 31;
+  --color-fg-muted: 66 66 70;
+  --color-fg-subtle: 94 94 100;
+  --color-fg-faint: 112 112 118;
+  --color-accent: 0 113 227;
+  --color-primary: 0 122 255;
+  --color-primary-hover: 0 102 220;
+  --color-success: 36 138 61;
+  --color-warning: 168 104 0;
+  --color-danger: 215 0 21;
+  --color-violet: 137 68 171;
 }
 
 /* 护眼主题：豆沙绿、羊皮纸、薰衣草、雾灰（浅色，降低亮度与蓝光）；暖夜、北极灰蓝、森夜、墨夜（深色，低对比柔和） */
@@ -690,51 +758,92 @@ html, body, #root {
   background-color: rgb(var(--color-canvas));
   color: rgb(var(--color-fg));
   accent-color: rgb(var(--color-accent));
-  font-family: "Segoe UI", "Microsoft YaHei UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   user-select: none;
   overflow: hidden;
 }
 
 .workbench-ui :is(button, input, textarea, [tabindex]):focus-visible {
-  outline: 2px solid rgb(var(--color-accent));
+  outline: 2px solid rgb(var(--color-accent) / 0.85);
   outline-offset: 1px;
 }
 
 ::selection {
-  background: rgb(var(--color-accent) / 0.3);
+  background: rgb(var(--color-accent) / 0.28);
 }
 
-/* 通用控件：图标按钮、按钮、输入框和选项块，各组件共用以保持尺寸与交互一致 */
+/* 通用控件与 macOS Liquid Glass 材质类：各组件共用以保持尺寸、圆角与交互质感一致 */
 @layer components {
+  .glass-surface {
+    background-color: rgb(var(--color-surface) / var(--glass-surface-alpha));
+    background-image: var(--glass-sheen);
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  }
+  .glass-panel {
+    background-color: rgb(var(--color-panel) / var(--glass-panel-alpha));
+    background-image: var(--glass-sheen);
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    box-shadow: inset 0 1px 0 var(--glass-spec-top);
+  }
+  .glass-popover {
+    background-color: rgb(var(--color-elevated) / var(--glass-elevated-alpha));
+    background-image: var(--glass-sheen);
+    backdrop-filter: blur(var(--glass-popover-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-popover-blur)) saturate(var(--glass-saturate));
+    box-shadow: var(--glass-shadow-popover), inset 0 1px 0 var(--glass-spec-top);
+  }
+  .glass-card {
+    background-color: rgb(var(--color-surface) / var(--glass-card-alpha));
+    background-image: var(--glass-sheen);
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    box-shadow: var(--glass-shadow-card), inset 0 1px 0 var(--glass-spec-top);
+  }
+  .glass-segmented {
+    background-color: rgb(var(--color-control) / 0.55);
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.14);
+  }
   .icon-btn {
-    @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-fg-subtle transition-colors enabled:hover:bg-hover enabled:hover:text-fg disabled:cursor-not-allowed disabled:opacity-40;
+    @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-fg-subtle transition-[background-color,color,transform] duration-150 enabled:hover:bg-hover/85 enabled:hover:text-fg enabled:active:scale-95 disabled:cursor-not-allowed disabled:opacity-40;
   }
   .btn {
-    @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md px-3.5 py-1.5 text-ui font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg px-3.5 py-1.5 text-ui font-medium transition-[background-color,border-color,color,transform,box-shadow] duration-150 enabled:active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
     @apply btn bg-primary text-white enabled:hover:bg-primary-hover;
+    box-shadow: var(--glass-shadow-btn), inset 0 1px 0 rgb(255 255 255 / 0.24);
   }
   .btn-secondary {
-    @apply btn border border-line-strong bg-control text-fg-muted enabled:hover:bg-control-hover enabled:hover:text-fg;
+    @apply btn border border-line-strong/80 bg-control/85 text-fg-muted enabled:hover:bg-control-hover enabled:hover:text-fg;
+    box-shadow: var(--glass-shadow-btn), inset 0 1px 0 var(--glass-spec-edge);
   }
   .btn-danger {
-    @apply btn border border-danger/50 bg-danger/10 text-danger enabled:hover:bg-danger/20;
+    @apply btn border border-danger/45 bg-danger/10 text-danger enabled:hover:bg-danger/20;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08);
   }
   .input {
-    @apply w-full rounded-md border border-line-strong bg-canvas px-3 py-2 text-ui text-fg transition-colors placeholder:text-fg-faint focus:border-accent focus:outline-none;
+    @apply w-full rounded-lg border border-line-strong/80 bg-canvas/90 px-3 py-2 text-ui text-fg transition-all duration-150 placeholder:text-fg-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25;
   }
   .option {
-    @apply rounded-md border border-line bg-muted text-xs text-fg-subtle transition-colors hover:bg-hover hover:text-fg;
+    @apply rounded-xl border border-line/90 bg-muted/75 text-xs text-fg-subtle transition-all duration-150 hover:border-line-strong hover:bg-hover/80 hover:text-fg;
+    box-shadow: inset 0 1px 0 var(--glass-spec-edge);
   }
   .option-active {
-    @apply rounded-md border border-accent/60 bg-accent/15 text-xs font-medium text-accent transition-colors;
+    @apply rounded-xl border border-accent/65 bg-accent/15 text-xs font-medium text-accent transition-all duration-150;
+    box-shadow: 0 2px 10px -4px rgb(var(--color-accent) / 0.35), inset 0 1px 0 var(--glass-spec-top);
   }
   .task-neon-running {
+    overflow: hidden;
+    isolation: isolate;
     box-shadow:
-      0 0 0 1px rgb(var(--color-accent) / 0.14),
-      0 0 8px rgb(var(--color-accent) / 0.24),
-      0 0 14px rgb(var(--color-violet) / 0.16);
+      0 0 0 1px rgb(var(--color-accent) / 0.34),
+      0 0 14px -2px rgb(var(--color-accent) / 0.42),
+      0 0 22px -6px rgb(var(--color-violet) / 0.28),
+      inset 0 1px 0 var(--glass-spec-top);
   }
 }
 
@@ -748,36 +857,45 @@ html, body, #root {
   );
 }
 
-/* 弹窗进入动效，遵循系统「减少动态效果」设置 */
+/* 弹窗进入动效（macOS 柔和阻尼曲线），遵循系统「减少动态效果」设置 */
 @keyframes overlay-in {
   from { opacity: 0; }
 }
 @keyframes dialog-in {
-  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  from { opacity: 0; transform: translateY(8px) scale(0.975); }
 }
 @keyframes drawer-in {
-  from { transform: translateX(24px); opacity: 0; }
+  from { transform: translateX(20px); opacity: 0; }
 }
 /* 播放器曲名过长时来回滚动：--marquee-dist 为溢出宽度，--marquee-duration 由组件按距离计算 */
 @keyframes marquee-slide {
   0%, 15% { transform: translateX(0); }
   85%, 100% { transform: translateX(calc(var(--marquee-dist) * -1)); }
 }
-@keyframes topbar-neon-sweep {
+/* macOS 液态玻璃流动光束指示：顶栏扫光束与运行中任务卡片同步流光边框 + 柔光扫过 */
+@keyframes topbar-glass-sweep {
   0% { transform: translateX(0%); }
-  100% { transform: translateX(300%); }
+  100% { transform: translateX(240%); }
+}
+@keyframes task-glass-sweep {
+  0% { transform: translateX(-115%) skewX(-20deg); }
+  100% { transform: translateX(260%) skewX(-20deg); }
+}
+@keyframes task-neon-spin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
 }
 .topbar-neon-track {
   position: absolute;
   left: 0;
   right: 0;
   top: calc(100% + 1px);
-  height: 8px;
+  height: 6px;
   overflow: hidden;
   pointer-events: none;
   z-index: 1;
   opacity: 0;
-  transition: opacity 220ms ease;
+  transition: opacity 240ms ease;
 }
 .topbar-neon-track::before {
   content: '';
@@ -786,7 +904,7 @@ html, body, #root {
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgb(var(--color-accent) / 0.25), rgb(var(--color-violet) / 0.35), rgb(var(--color-accent) / 0.25), transparent);
+  background: linear-gradient(90deg, transparent, rgb(var(--color-accent) / 0.26), rgb(var(--color-violet) / 0.38), rgb(var(--color-accent) / 0.26), transparent);
 }
 .topbar-neon-track.is-running {
   opacity: 1;
@@ -795,36 +913,35 @@ html, body, #root {
   position: absolute;
   top: 0;
   left: 0;
-  width: 25%;
+  width: 30%;
   height: 2px;
   border-radius: 9999px;
   background: linear-gradient(
     90deg,
     transparent 0%,
     rgb(var(--color-accent) / 0.35) 16%,
-    rgb(var(--color-accent) / 0.95) 38%,
-    rgb(var(--color-violet) / 0.95) 55%,
-    rgb(var(--color-success) / 0.9) 72%,
-    rgb(var(--color-accent) / 0.35) 86%,
+    rgb(var(--color-accent) / 0.96) 40%,
+    rgb(255 255 255 / 0.92) 50%,
+    rgb(var(--color-violet) / 0.95) 60%,
+    rgb(var(--color-accent) / 0.35) 84%,
     transparent 100%
   );
-  box-shadow: 0 1px 6px rgb(var(--color-accent) / 0.55), 0 0 10px rgb(var(--color-violet) / 0.35);
+  box-shadow: 0 1px 10px rgb(var(--color-accent) / 0.62), 0 0 14px rgb(var(--color-violet) / 0.35);
 }
-@keyframes task-neon-spin {
-  from { transform: translate(-50%, -50%) rotate(0deg); }
-  to { transform: translate(-50%, -50%) rotate(360deg); }
-}
-.folder-task-flow-base { stop-color: rgb(var(--color-accent) / 0.64); }
+.folder-task-flow-base { stop-color: rgb(var(--color-accent) / 0.42); }
 .folder-task-flow-highlight { stop-color: rgb(var(--color-accent)); }
-.folder-task-flow-middle { stop-color: rgb(var(--color-violet) / 0.88); }
+.folder-task-flow-middle { stop-color: rgb(var(--color-violet) / 0.92); }
+.folder-task-flow-line {
+  filter: drop-shadow(0 0 3px rgb(var(--color-accent) / 0.55));
+}
 .task-neon-ring {
   position: absolute;
   inset: 0;
   border-radius: inherit;
   padding: 1.5px;
-  overflow: hidden;
   pointer-events: none;
   z-index: 1;
+  overflow: hidden;
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
@@ -835,78 +952,69 @@ html, body, #root {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 150%;
+  width: 240%;
   aspect-ratio: 1 / 1;
   transform: translate(-50%, -50%) rotate(0deg);
   background: conic-gradient(
     from 0deg,
-    rgb(var(--color-accent) / 0.18) 0deg,
-    rgb(var(--color-accent) / 0.88) 38deg,
-    rgb(var(--color-violet) / 0.98) 68deg,
-    rgb(var(--color-success) / 0.95) 95deg,
-    rgb(var(--color-accent) / 0.35) 128deg,
-    rgb(var(--color-accent) / 0.15) 180deg,
-    rgb(var(--color-accent) / 0.88) 218deg,
-    rgb(var(--color-violet) / 0.98) 248deg,
-    rgb(var(--color-success) / 0.95) 275deg,
-    rgb(var(--color-accent) / 0.35) 308deg,
-    rgb(var(--color-accent) / 0.18) 360deg
+    rgb(var(--color-accent) / 0.22) 0deg,
+    rgb(var(--color-accent) / 0.95) 28deg,
+    rgb(255 255 255 / 0.95) 48deg,
+    rgb(var(--color-violet) / 0.96) 72deg,
+    rgb(var(--color-accent) / 0.32) 108deg,
+    rgb(var(--color-accent) / 0.18) 180deg,
+    rgb(var(--color-accent) / 0.95) 208deg,
+    rgb(255 255 255 / 0.95) 228deg,
+    rgb(var(--color-violet) / 0.96) 252deg,
+    rgb(var(--color-accent) / 0.32) 288deg,
+    rgb(var(--color-accent) / 0.22) 360deg
   );
+}
+/* 卡片内部同色系玻璃高光扫动，呼应顶部扫光束（位于背景与文字之间） */
+.task-neon-running::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    rgb(var(--color-accent) / 0.14) 30%,
+    rgb(255 255 255 / 0.24) 50%,
+    rgb(var(--color-violet) / 0.14) 70%,
+    transparent 100%
+  );
+  width: 48%;
+  opacity: 0.95;
 }
 .cli-menu-neon-item {
   position: relative;
-  border-radius: 0.375rem;
+  border-radius: 0.5rem;
   margin-inline: 0.25rem;
   width: calc(100% - 0.5rem);
   transition: background-color 140ms ease, color 140ms ease, box-shadow 160ms ease;
 }
 .cli-menu-neon-item:hover,
 .cli-menu-neon-item:focus-visible {
-  background-color: rgb(var(--color-hover));
+  background-color: rgb(var(--color-accent) / 0.14);
   color: rgb(var(--color-fg));
   box-shadow:
-    0 0 0 1px rgb(var(--color-accent) / 0.22),
-    0 0 8px rgb(var(--color-accent) / 0.32),
-    0 0 14px rgb(var(--color-violet) / 0.22);
+    0 0 0 1px rgb(var(--color-accent) / 0.28),
+    inset 0 1px 0 var(--glass-spec-top);
   outline: none;
 }
 .cli-menu-neon-ring {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  padding: 1.5px;
-  overflow: hidden;
   pointer-events: none;
   z-index: 1;
   opacity: 0;
+  border: 1px solid rgb(var(--color-accent) / 0.34);
+  box-shadow: inset 0 1px 0 var(--glass-spec-top);
   transition: opacity 150ms ease;
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask-composite: exclude;
-}
-.cli-menu-neon-ring::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 150%;
-  aspect-ratio: 1 / 1;
-  transform: translate(-50%, -50%) rotate(0deg);
-  background: conic-gradient(
-    from 0deg,
-    rgb(var(--color-accent) / 0.24) 0deg,
-    rgb(var(--color-accent) / 0.95) 40deg,
-    rgb(var(--color-violet) / 0.98) 72deg,
-    rgb(var(--color-success) / 0.95) 102deg,
-    rgb(var(--color-accent) / 0.38) 136deg,
-    rgb(var(--color-accent) / 0.2) 180deg,
-    rgb(var(--color-accent) / 0.95) 220deg,
-    rgb(var(--color-violet) / 0.98) 252deg,
-    rgb(var(--color-success) / 0.95) 282deg,
-    rgb(var(--color-accent) / 0.38) 316deg,
-    rgb(var(--color-accent) / 0.24) 360deg
-  );
 }
 .cli-menu-neon-item:hover .cli-menu-neon-ring,
 .cli-menu-neon-item:focus-visible .cli-menu-neon-ring {
@@ -914,34 +1022,36 @@ html, body, #root {
 }
 @media (prefers-reduced-motion: no-preference) {
   .topbar-neon-track.is-running .topbar-neon-beam {
-    animation: topbar-neon-sweep 2.8s ease-in-out infinite alternate;
+    animation: topbar-glass-sweep 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
     will-change: transform;
   }
   .task-neon-ring::before {
-    animation: task-neon-spin 3.2s linear infinite;
+    animation: task-neon-spin 2.4s linear infinite;
     will-change: transform;
   }
-  .cli-menu-neon-item:hover .cli-menu-neon-ring::before,
-  .cli-menu-neon-item:focus-visible .cli-menu-neon-ring::before {
-    animation: task-neon-spin 2.4s linear infinite;
+  .task-neon-running::after {
+    animation: task-glass-sweep 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
     will-change: transform;
   }
   .marquee-text.is-overflow.is-playing { animation: marquee-slide var(--marquee-duration) linear infinite alternate; }
   .marquee-title-box:hover .marquee-text.is-overflow.is-playing { animation-play-state: paused; }
-  .drawer-panel { animation: drawer-in 180ms ease-out; }
-  .modal-overlay { animation: overlay-in 120ms ease-out; }
-  .modal-panel { animation: dialog-in 160ms ease-out; }
+  .drawer-panel { animation: drawer-in 200ms cubic-bezier(0.22, 1, 0.36, 1); }
+  .modal-overlay { animation: overlay-in 150ms ease-out; }
+  .modal-panel { animation: dialog-in 200ms cubic-bezier(0.22, 1, 0.36, 1); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .folder-task-flow-line { stroke: rgb(var(--color-accent) / 0.72); }
+  .folder-task-flow-line { stroke: rgb(var(--color-accent) / 0.72); filter: none; }
   .topbar-neon-track.is-running .topbar-neon-beam {
     width: 100%;
     transform: none;
-    opacity: 0.7;
+    opacity: 0.75;
   }
   .task-neon-ring::before {
     animation: none;
-    opacity: 0.8;
+    opacity: 0.9;
+  }
+  .task-neon-running::after {
+    display: none;
   }
 }
 
@@ -1032,36 +1142,41 @@ html, body, #root {
 .window-drag button, .window-drag input, .window-drag a, .window-drag select, .topbar button, .topbar input, .topbar a, .topbar [role='menu'] { -webkit-app-region: no-drag; }
 .topbar { padding-right: max(0.625rem, calc(100vw - env(titlebar-area-width, 100vw))); }
 
-/* 细轨道滑块：音乐进度、音量与字号 */
+/* 细轨道滑块（macOS 风格白色圆形微阴影旋钮）：音乐进度、音量与字号 */
 input[type='range'].slim {
   -webkit-appearance: none;
   appearance: none;
   height: 4px;
-  border-radius: 2px;
-  background: rgb(var(--color-line-strong));
+  border-radius: 9999px;
+  background: rgb(var(--color-line-strong) / 0.8);
   cursor: pointer;
 }
 input[type='range'].slim::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  background: rgb(var(--color-accent));
-  border: 2px solid rgb(var(--color-surface));
+  background: #ffffff;
+  border: 1px solid rgb(var(--color-line-strong) / 0.65);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3), 0 0 0 0.5px rgb(0 0 0 / 0.08);
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+input[type='range'].slim:hover::-webkit-slider-thumb {
+  transform: scale(1.06);
 }
 input[type='range'].slim:disabled {
   cursor: not-allowed;
   opacity: 0.4;
 }
 
-/* 播放器进度条：自绘轨道与填充，原生 range 透明覆盖在上面负责拖动与键盘操作；颜色全部取自主题变量 */
+/* 播放器进度条：macOS 磨砂胶囊轨道与柔和强调填充 */
 .seekbar {
   position: relative;
   height: 14px;
-  border-radius: 7px;
-  border: 1px solid rgb(var(--color-accent) / 0.55);
-  background: rgb(var(--color-line-strong) / 0.35);
-  box-shadow: 0 0 6px rgb(var(--color-accent) / 0.25);
+  border-radius: 9999px;
+  border: 1px solid rgb(var(--color-line-strong) / 0.65);
+  background: rgb(var(--color-control) / 0.6);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.16);
   overflow: hidden;
 }
 .seekbar.is-disabled { opacity: 0.45; box-shadow: none; }
@@ -1069,11 +1184,7 @@ input[type='range'].slim:disabled {
 .seekbar-fill {
   position: absolute;
   inset: 0 auto 0 0;
-  background:
-    radial-gradient(ellipse 40px 10px at 20% 30%, rgb(255 255 255 / 0.28), transparent 70%),
-    radial-gradient(ellipse 30px 8px at 70% 70%, rgb(255 255 255 / 0.22), transparent 70%),
-    linear-gradient(90deg, rgb(var(--color-accent) / 0.55), rgb(var(--color-accent) / 0.9));
-  background-size: 64px 100%, 48px 100%, 100% 100%;
+  background: linear-gradient(90deg, rgb(var(--color-accent) / 0.68), rgb(var(--color-primary)));
 }
 .seekbar-fill::after {
   content: '';
@@ -1082,8 +1193,7 @@ input[type='range'].slim:disabled {
   right: 0;
   bottom: 0;
   width: 2px;
-  background: rgb(255 255 255 / 0.95);
-  box-shadow: 0 0 6px 1px rgb(var(--color-accent)), 0 0 2px rgb(255 255 255);
+  background: rgb(255 255 255 / 0.85);
 }
 .seekbar-text {
   position: absolute;
@@ -1110,16 +1220,6 @@ input[type='range'].seek-input {
   cursor: pointer;
 }
 input[type='range'].seek-input:disabled { cursor: not-allowed; }
-@keyframes seekbar-flow {
-  to { background-position: 64px 0, -48px 0, 0 0; }
-}
-@keyframes seekbar-glow {
-  50% { box-shadow: 0 0 10px 2px rgb(var(--color-accent)), 0 0 2px rgb(255 255 255); }
-}
-@media (prefers-reduced-motion: no-preference) {
-  .seekbar.is-playing .seekbar-fill { animation: seekbar-flow 3s linear infinite; }
-  .seekbar.is-playing .seekbar-fill::after { animation: seekbar-glow 1.6s ease-in-out infinite; }
-}
 
 /* 头部和滚动区共用留白与滚动条占位，保持内容左右对齐。 */
 .dashboard-section {
@@ -1127,20 +1227,24 @@ input[type='range'].seek-input:disabled { cursor: not-allowed; }
   scrollbar-gutter: stable;
 }
 
-/* 极细滚动条，颜色随主题 */
+/* macOS 极细悬浮感胶囊滚动条，颜色随主题 */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgb(var(--color-line-strong) / 0.6);
-  border-radius: 3px;
+  background: rgb(var(--color-fg-faint) / 0.34);
+  border-radius: 9999px;
+  border: 1.5px solid transparent;
+  background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(var(--color-line-strong));
+  background: rgb(var(--color-fg-faint) / 0.62);
+  border: 1.5px solid transparent;
+  background-clip: content-box;
 }
 
 /* xterm.js 容器样式适配：严禁在 .xterm 上加 padding，避免与字符矩阵发生错位与滚动拖影 */
@@ -1188,6 +1292,15 @@ input[type='range'].seek-input:disabled { cursor: not-allowed; }
 
 /* 终端视口底色与 xterm 主题背景一致，避免主题切换瞬间露出旧底色。 */
 .xterm .xterm-viewport { background-color: rgb(var(--color-canvas)); }
+
+/* 启用工作区壁纸背景时，让底层壁纸与可读性遮罩自然透出，同时保留液态玻璃侧栏、顶栏与弹窗的实时磨砂折射 */
+:root[data-has-bg='true'] .workbench-ui,
+:root[data-has-bg='true'] #oneai-dashboard-view,
+:root[data-has-bg='true'] #oneai-statusbar,
+:root[data-has-bg='true'] .term-host,
+:root[data-has-bg='true'] .xterm .xterm-viewport {
+  background-color: transparent !important;
+}
 
 /* 终端链接需按住 Ctrl 单击才打开：未按住 Ctrl 时悬停不显示手型光标 */
 .term-host:not(.ctrl-held) .xterm.xterm-cursor-pointer,

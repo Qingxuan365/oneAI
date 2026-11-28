@@ -42,12 +42,12 @@ function stateFile(): string {
 function defaultAppearance(preferDark = true): Pick<WindowState, 'backgroundColor' | 'titleBarOverlay'> {
   return preferDark
     ? {
-        backgroundColor: '#0d1117',
-        titleBarOverlay: { color: '#141d27', symbolColor: '#e2e8f0', height: 43 },
+        backgroundColor: '#161618',
+        titleBarOverlay: { color: '#222226', symbolColor: '#f5f5f7', height: 43 },
       }
     : {
         backgroundColor: '#ffffff',
-        titleBarOverlay: { color: '#f0f3f6', symbolColor: '#1f2328', height: 43 },
+        titleBarOverlay: { color: '#eeeff2', symbolColor: '#1d1d1f', height: 43 },
       };
 }
 

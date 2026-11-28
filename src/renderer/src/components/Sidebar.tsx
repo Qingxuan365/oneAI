@@ -57,15 +57,15 @@ function FolderTaskPulses({ runningIds, layoutKey }: { runningIds: string; layou
   return (
     <svg ref={svg} width={xMax + 1} height={yMax + 1} data-folder-task-pulses aria-hidden="true"
       className="pointer-events-none absolute -left-px -top-[5px] !mt-0 overflow-visible text-accent"
-      fill="none" stroke={`url(#${gradientId})`} strokeWidth="1.7" strokeLinecap="round">
+      fill="none" stroke={`url(#${gradientId})`} strokeWidth="1.5" strokeLinecap="round">
       <defs>
         <linearGradient id={gradientId} gradientUnits="userSpaceOnUse" x2="14" y2="24" spreadMethod="repeat">
           <stop offset="0" className="folder-task-flow-base" />
-          <stop offset=".38" className="folder-task-flow-highlight" />
-          <stop offset=".65" className="folder-task-flow-middle" />
+          <stop offset=".42" className="folder-task-flow-highlight" />
+          <stop offset=".68" className="folder-task-flow-middle" />
           <stop offset="1" className="folder-task-flow-base" />
           <animateTransform attributeName="gradientTransform" type="translate" from="0 0" to="14 24"
-            dur="1s" repeatCount="indefinite" />
+            dur="1.4s" repeatCount="indefinite" />
         </linearGradient>
       </defs>
       <path d={`M 1 0 V ${yMax}`} className="folder-task-flow-line" />
@@ -622,7 +622,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
       role="menu"
       tabIndex={-1}
       style={menuPos ?? fallbackPos}
-      className={`fixed z-50 max-h-[calc(100vh-16px)] ${menu.kind === 'task' ? 'w-60' : 'w-56'} overflow-y-auto overflow-x-hidden rounded-md border border-line-strong bg-elevated py-1 text-ui text-fg shadow-xl outline-none`}
+      className={`glass-popover fixed z-50 max-h-[calc(100vh-16px)] ${menu.kind === 'task' ? 'w-60' : 'w-56'} overflow-y-auto overflow-x-hidden rounded-xl border border-line-strong/80 py-1 text-ui text-fg outline-none`}
       onClick={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
       onKeyDown={handleMenuKeyDown}
@@ -772,7 +772,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
         left: Math.min((menuPos ?? fallbackPos).left + 244, window.innerWidth - 232),
         top: (menuPos ?? fallbackPos).top,
       }}
-      className="fixed z-50 max-h-[calc(100vh-16px)] w-56 overflow-y-auto overflow-x-hidden rounded-md border border-line-strong bg-elevated py-1 text-ui text-fg shadow-xl outline-none"
+      className="glass-popover fixed z-50 max-h-[calc(100vh-16px)] w-56 overflow-y-auto overflow-x-hidden rounded-xl border border-line-strong/80 py-1 text-ui text-fg outline-none"
       onClick={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
       onKeyDown={handleReviewSubmenuKeyDown}
@@ -820,10 +820,10 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
       aria-current={isHomeActive ? 'page' : undefined}
       aria-label={t('主页')}
       title={t('主页')}
-      className={`flex shrink-0 items-center justify-center rounded-md transition-colors ${
+      className={`flex shrink-0 items-center justify-center rounded-lg transition-all duration-150 ${
         isCollapsed ? 'h-9 w-9' : 'h-8 gap-2 px-2.5 text-ui'
       } ${
-        isHomeActive ? 'bg-selected font-medium text-accent' : 'text-fg-muted hover:bg-hover hover:text-fg'
+        isHomeActive ? 'bg-selected/90 font-medium text-accent shadow-sm' : 'text-fg-muted hover:bg-hover/80 hover:text-fg'
       }`}
     >
       <House size={isCollapsed ? 16 : 15} aria-hidden="true" />
@@ -834,13 +834,13 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   // 折叠后保留窄条：每个文件夹一个按钮（点击新建任务）及其下的任务序号按钮（带品牌标与状态点，支持切换、右键菜单与中键关闭），底部保留添加文件夹、设置与展开入口
   if (isCollapsed) {
     return (
-      <aside ref={asideRef} id="oneai-sidebar" aria-label={t('任务列表（已折叠）')} className="flex h-full w-12 shrink-0 select-none flex-col items-center border-r border-line bg-surface">
-        <div className="window-drag flex h-11 w-full shrink-0 items-center justify-center border-b border-line bg-panel">
+      <aside ref={asideRef} id="oneai-sidebar" aria-label={t('任务列表（已折叠）')} className="glass-surface flex h-full w-12 shrink-0 select-none flex-col items-center border-r border-line/70">
+        <div className="window-drag glass-panel flex h-11 w-full shrink-0 items-center justify-center border-b border-line/70">
           <AppLogo size={20} />
         </div>
 
         {(onOpenDashboard || onOpenHome) && (
-          <div className="flex w-full shrink-0 flex-col items-center gap-1 border-b border-line py-1.5">
+          <div className="flex w-full shrink-0 flex-col items-center gap-1 border-b border-line/70 py-1.5">
             {onOpenDashboard && <button
               type="button"
               data-dashboard-nav
@@ -848,8 +848,8 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
               aria-current={isDashboardActive ? 'page' : undefined}
               title={t('数据面板 (Ctrl+Shift+D)')}
               aria-label={t('数据面板')}
-              className={`relative flex h-9 w-9 items-center justify-center rounded-md transition-colors ${
-                isDashboardActive ? 'bg-selected text-accent' : 'text-fg-subtle hover:bg-hover hover:text-fg'
+              className={`relative flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-150 ${
+                isDashboardActive ? 'bg-selected/90 text-accent shadow-sm' : 'text-fg-subtle hover:bg-hover/80 hover:text-fg'
               }`}
             >
               <LayoutDashboard size={16} />
@@ -874,7 +874,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                   aria-label={t('在 {name} 中新建任务', { name })}
                   aria-haspopup="menu"
                   aria-expanded={menu?.kind === 'new' && menu.folderPath === folder.path}
-                  className="group relative flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-hover"
+                  className="group relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-hover/80"
                 >
                   <Folder size={17} className="text-accent" />
                   <Plus size={10} className="absolute bottom-0.5 right-0.5 rounded-full bg-surface text-fg-faint group-hover:text-accent" aria-hidden="true" />
@@ -905,7 +905,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                       aria-current={isActive ? 'true' : undefined}
                       title={`${t('{label}（{status}）', { label, status: `${statusMeta.label}${isUnread ? t('，待查看') : ''}` })}${order <= 9 ? ` Ctrl+${order}` : ''}`}
                       aria-label={t('{label}，{status}', { label, status: `${statusMeta.label}${isUnread ? t('，待查看') : ''}` })}
-                      className={`relative flex h-9 w-9 shrink-0 items-center justify-center ${order >= 10 ? 'gap-0.5' : 'gap-1'} rounded-md font-mono text-xs tabular-nums transition-colors ${isActive ? 'bg-selected font-medium text-fg' : isUnread ? 'bg-accent font-semibold text-canvas hover:bg-accent/85' : 'text-fg-subtle hover:bg-hover hover:text-fg'} ${isRunning ? 'task-neon-running' : ''}`}
+                      className={`relative flex h-9 w-9 shrink-0 items-center justify-center ${order >= 10 ? 'gap-0.5' : 'gap-1'} rounded-lg font-mono text-xs tabular-nums transition-all duration-150 ${isActive ? 'bg-selected/90 font-medium text-fg shadow-sm' : isUnread ? 'bg-accent font-semibold text-canvas hover:bg-accent/85' : 'text-fg-subtle hover:bg-hover/80 hover:text-fg'} ${isRunning ? 'task-neon-running' : ''}`}
                     >
                       {isRunning && <span className="task-neon-ring" aria-hidden="true" data-task-neon="running" />}
                       {order < 100 && <BrandIcon icon={cli?.icon ?? task.groupId} size={11} />}
@@ -919,7 +919,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
           })}
         </div>
 
-        <div className="flex w-full shrink-0 flex-col items-center gap-1 border-t border-line bg-panel py-2">
+        <div className="glass-panel flex w-full shrink-0 flex-col items-center gap-1 border-t border-line/70 py-2">
           {showUpdateBadge && onOpenUpdate && (
             <button
               type="button"
@@ -954,9 +954,9 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   }
 
   return (
-    <aside ref={asideRef} id="oneai-sidebar" style={width ? { width } : undefined} className={`relative flex ${width ? '' : 'w-80'} bg-surface border-r border-line flex-col h-full select-none shrink-0 text-fg-muted`}>
+    <aside ref={asideRef} id="oneai-sidebar" style={width ? { width } : undefined} className={`glass-surface relative flex ${width ? '' : 'w-80'} border-r border-line/70 flex-col h-full select-none shrink-0 text-fg-muted`}>
       {/* 侧边栏顶部：应用品牌、版本号、标语与问候语 */}
-      <div className="window-drag shrink-0 border-b border-line bg-panel px-3.5 pb-3 pt-4 text-center">
+      <div className="window-drag glass-panel shrink-0 border-b border-line/70 px-3.5 pb-3 pt-4 text-center">
         <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1">
           <AppLogo size={34} />
           <div className="flex min-w-0 items-baseline gap-1.5" data-sidebar-brand-title>
@@ -992,17 +992,17 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
       </div>
 
       {(onOpenDashboard || onOpenHome) && (
-        <div className="flex shrink-0 items-center gap-1 border-b border-line px-2 py-2">
+        <div className="flex shrink-0 items-center gap-1 border-b border-line/70 px-2.5 py-2">
           {onOpenDashboard && <button
             type="button"
             data-dashboard-nav
             onClick={onOpenDashboard}
             aria-current={isDashboardActive ? 'page' : undefined}
             title={t('数据面板 (Ctrl+Shift+D)')}
-            className={`relative flex h-8 min-w-0 flex-1 items-center gap-2.5 rounded-md px-2.5 text-left text-ui transition-colors ${
+            className={`relative flex h-8 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-ui transition-all duration-150 ${
               isDashboardActive
-                ? 'bg-selected font-medium text-fg'
-                : 'text-fg-muted hover:bg-hover hover:text-fg'
+                ? 'bg-selected/90 font-medium text-fg shadow-sm'
+                : 'text-fg-muted hover:bg-hover/80 hover:text-fg'
             }`}
           >
             {isDashboardActive && <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-accent" aria-hidden="true" />}
@@ -1015,7 +1015,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
 
       {/* 文件夹与任务树 */}
       <div className="flex-1 overflow-y-auto px-2 pb-3">
-        <div className="sticky top-0 z-10 flex items-center justify-between bg-surface px-2 pb-1.5 pt-3 text-2xs text-fg-faint">
+        <div className="sticky top-0 z-10 flex items-center justify-between bg-surface/85 px-2 pb-1.5 pt-3 text-2xs text-fg-faint backdrop-blur-md">
           <span className="font-semibold tracking-wider">{t('当前任务')}<span className="ml-1.5 tabular-nums">{tasks.length}</span></span>
           <span className="flex items-center gap-1.5">
             {runningCount > 0 && <span className="tabular-nums">{t('{n} 个运行中', { n: runningCount })}</span>}
@@ -1094,10 +1094,10 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                       : null;
                     setMenu({ x: e.clientX, y: e.clientY, kind: 'folder', folderPath: folder.path });
                   }}
-                  className={`group flex items-center rounded-md pr-1 text-ui transition-colors ${
+                  className={`group flex items-center rounded-lg pr-1 text-ui transition-colors ${
                     hasActiveChild && !folder.isExpanded
-                      ? 'bg-selected/60 text-fg'
-                      : `hover:bg-hover hover:text-fg ${hasActiveChild ? 'text-fg' : 'text-fg-muted'}`
+                      ? 'bg-selected/65 text-fg'
+                      : `hover:bg-hover/80 hover:text-fg ${hasActiveChild ? 'text-fg' : 'text-fg-muted'}`
                   }`}
                 >
                   <button type="button" draggable data-keep-focus
@@ -1271,12 +1271,12 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                             setDraggedTask(null);
                             setTaskDropTargetId(null);
                           }}
-                          className={`group/task relative flex items-center rounded-md text-ui transition-colors ${
+                          className={`group/task relative flex items-center rounded-lg text-ui transition-all duration-150 ${
                             isActive
-                              ? 'bg-selected font-medium text-fg'
+                              ? 'bg-selected/90 font-medium text-fg shadow-sm'
                               : isUnread
-                                ? 'font-medium text-fg hover:bg-hover'
-                                : 'text-fg-subtle hover:bg-hover hover:text-fg'
+                                ? 'font-medium text-fg hover:bg-hover/80'
+                                : 'text-fg-subtle hover:bg-hover/80 hover:text-fg'
                           } ${isRunning ? 'task-neon-running' : ''} ${draggedTask?.id === task.id ? 'opacity-50' : draggedTask && draggedTask.folder !== key ? 'opacity-45' : ''} ${
                             dropEdge === 'before' ? 'shadow-[inset_0_2px_0_rgb(var(--color-accent))]' : dropEdge === 'after' ? 'shadow-[inset_0_-2px_0_rgb(var(--color-accent))]' : ''
                           }`}
@@ -1361,7 +1361,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
         {/* 最近任务：由历史会话按文件夹归类，已在上面显示的文件夹不重复；点击会话即恢复为当前任务 */}
         {recentFolders.length > 0 && (
           <div data-recent-section>
-            <div className="sticky top-0 z-10 flex items-center justify-between bg-surface px-2 pb-1.5 pt-4 text-2xs text-fg-faint">
+            <div className="sticky top-0 z-10 flex items-center justify-between bg-surface/85 px-2 pb-1.5 pt-4 text-2xs text-fg-faint backdrop-blur-md">
               <button
                 type="button"
                 onClick={toggleRecentSection}
@@ -1398,7 +1398,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                           menuTriggerRef.current = e.currentTarget;
                           setMenu({ x: e.clientX, y: e.clientY, kind: 'recent-folder', folderPath: recent.path });
                         }}
-                        className="flex h-8 w-full items-center gap-2 rounded-md pl-4 pr-2 text-left text-ui text-fg-muted transition-colors hover:bg-hover hover:text-fg"
+                        className="flex h-8 w-full items-center gap-2 rounded-lg pl-4 pr-2 text-left text-ui text-fg-muted transition-colors hover:bg-hover/80 hover:text-fg"
                       >
                         <ChevronRight size={13} className={`shrink-0 text-fg-faint transition-transform ${isOpen ? 'rotate-90' : ''}`} aria-hidden="true" />
                         <Folder size={15} className="shrink-0 text-fg-subtle" aria-hidden="true" />
@@ -1415,7 +1415,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                               data-history-id={entry.id}
                               onClick={() => onResumeHistory?.(entry)}
                               title={`${entry.title}\n${t('恢复此会话')}`}
-                              className="flex h-8 w-full items-center gap-2 rounded-md pl-2.5 pr-2 text-left text-ui text-fg-subtle transition-colors hover:bg-hover hover:text-fg"
+                              className="flex h-8 w-full items-center gap-2 rounded-lg pl-2.5 pr-2 text-left text-ui text-fg-subtle transition-colors hover:bg-hover/80 hover:text-fg"
                             >
                               <BrandIcon icon={entry.cliId} size={14} />
                               <span className="truncate">{entry.title}</span>
@@ -1424,7 +1424,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                             </button>
                           ))}
                           {recent.total > recent.entries.length && onOpenHistory && (
-                            <button type="button" onClick={onOpenHistory} className="flex h-7 w-full items-center rounded-md px-2.5 text-xs text-fg-faint hover:bg-hover hover:text-fg-muted">
+                            <button type="button" onClick={onOpenHistory} className="flex h-7 w-full items-center rounded-lg px-2.5 text-xs text-fg-faint hover:bg-hover/80 hover:text-fg-muted">
                               {t('还有 {n} 个，查看全部…', { n: recent.total - recent.entries.length })}
                             </button>
                           )}
@@ -1442,11 +1442,11 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
       {showMusicPlayer && <MusicPlayer key="music-player" directory={musicDirectory} streams={musicStreams} />}
 
       {/* 侧边栏底部：添加文件夹与设置 */}
-      <div className="flex h-16 shrink-0 items-center gap-1 border-t border-line bg-panel px-2">
+      <div className="glass-panel flex h-16 shrink-0 items-center gap-1 border-t border-line/70 px-2">
         <button
           type="button"
           onClick={onAddFolder}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui font-medium text-fg-muted transition-colors hover:bg-hover hover:text-fg"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-ui font-medium text-fg-muted transition-colors hover:bg-hover/80 hover:text-fg"
           title={t('把另一个本地文件夹加入侧栏；不会结束已在运行的终端')}
         >
           <FolderPlus size={15} className="shrink-0 text-accent" />

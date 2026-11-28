@@ -175,6 +175,10 @@ export type FilePreviewResult =
   | { kind: 'image'; path: string; size: number; dataUrl: string }
   | { kind: 'binary' | 'too-large' | 'error'; path: string; size?: number; message?: string };
 
+export type WorkspaceBackgroundImageResult =
+  | { ok: true; path: string; dataUrl: string }
+  | { ok: false; canceled?: boolean; error?: string };
+
 export interface DirectoryTreeEntry {
   name: string;
   relPath: string;   // 相对于项目根目录的正斜杠路径
