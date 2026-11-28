@@ -42,6 +42,7 @@ interface OnboardingModalProps {
 }
 
 const SHOWCASE_ICON_IDS = ['claude', 'codex', 'gemini', 'agy', 'pi', 'kimi', 'opencode', 'cursor-agent', 'copilot', 'grok', 'qwen', 'kiro-cli'];
+const MAX_VISIBLE_INSTALL_CARDS = 5;
 const MAX_LOG_CHARS = 64_000;
 const GIT_DOWNLOAD_URL = 'https://git-scm.com/downloads/win';
 const NODE_DOWNLOAD_URL = 'https://nodejs.org/';
@@ -82,6 +83,13 @@ function cliDescription(id: string): string {
     case 'agy': return t('Google Antigravity 终端智能体');
     case 'pi': return t('轻量可扩展的多模型终端编程代理');
     case 'kimi': return t('月之暗面 Kimi Code 终端助手');
+    case 'cursor-agent': return t('Cursor 官方终端编程代理');
+    case 'gemini': return t('Google 开源终端 AI 编程代理');
+    case 'copilot': return t('GitHub 官方 Copilot 终端代理');
+    case 'grok': return t('xAI 官方 Grok Build 终端代理');
+    case 'kiro-cli': return t('AWS Kiro 官方终端开发代理');
+    case 'opencode': return t('开源多模型终端 AI 编程代理');
+    case 'qwen': return t('阿里通义千问开源终端编程代理');
     default: return '';
   }
 }
@@ -317,9 +325,15 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     } catch {}
   };
 
-  const needsGitWarning = useMemo(() => {
-    if (!envInfo || envInfo.hasGit || envInfo.platform !== 'win32') return false;
-    return selectedIds.some((id) => installableClis.find((cli) => cli.id === id)?.installer.requiresGit);
+  const gitWarning = useMemo(() => {
+    if (!envInfo || envInfo.hasGit || envInfo.platform !== 'win32') return null;
+    const needed = selectedIds
+      .map((id) => installableClis.find((cli) => cli.id === id))
+      .filter((cli): cli is KnownCliInfo & { installer: NonNullable<KnownCliInfo['installer']> } => Boolean(cli?.installer.requiresGit));
+    if (needed.length === 0) return null;
+    return t('{names} 在 Windows 上运行依赖 Git for Windows，当前未检测到 Git，建议一并安装。', {
+      names: needed.map((cli) => cli.name).join(' / '),
+    });
   }, [envInfo, selectedIds, installableClis]);
 
   const nodeWarning = useMemo(() => {
@@ -331,17 +345,24 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     const minVersions = needed.map((cli) => cli.installer.minNodeVersion).filter((v): v is string => Boolean(v));
     const requiredVersion = minVersions.sort(compareSemverAsc).at(-1);
     const missingNode = envInfo.hasNode === false;
-    const outdatedNode = envInfo.hasNode === true && Boolean(requiredVersion) && Boolean(envInfo.nodeVersion) && !isVersionAtLeast(envInfo.nodeVersion, requiredVersion);
-    if (!missingNode && !outdatedNode) return null;
-    const names = needed.map((cli) => cli.name).join(' / ');
+    const outdatedClis = envInfo.hasNode === true && envInfo.nodeVersion
+      ? needed.filter((cli) => cli.installer.minNodeVersion && !isVersionAtLeast(envInfo.nodeVersion, cli.installer.minNodeVersion))
+      : [];
+    if (!missingNode && outdatedClis.length === 0) return null;
     if (missingNode) {
+      const names = needed.map((cli) => cli.name).join(' / ');
       return requiredVersion
         ? t('{names} 需要 Node.js {version} 或更高版本，当前未检测到 Node.js，请先安装后再继续。', { names, version: requiredVersion })
         : t('{names} 运行依赖 Node.js，当前未检测到 Node.js，请先安装后再继续。', { names });
     }
+    const outdatedMinVersion = outdatedClis
+      .map((cli) => cli.installer.minNodeVersion)
+      .filter((v): v is string => Boolean(v))
+      .sort(compareSemverAsc)
+      .at(-1)!;
     return t('{names} 需要 Node.js {version} 或更高版本，当前版本为 v{current}，建议先升级后再继续。', {
-      names,
-      version: requiredVersion!,
+      names: outdatedClis.map((cli) => cli.name).join(' / '),
+      version: outdatedMinVersion,
       current: envInfo.nodeVersion!,
     });
   }, [envInfo, selectedIds, installableClis]);
@@ -518,7 +539,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
 
           {/* 右栏：未安装 CLI 多选自动安装 */}
           <section className="flex min-h-0 flex-col gap-3 p-5 md:col-span-7 md:overflow-y-auto" aria-label={t('一键安装常用 CLI')}>
-            <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="flex shrink-0 flex-wrap items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <h3 className="text-ui font-semibold text-fg">{t('一键安装常用 CLI')}</h3>
                 <p className="mt-0.5 text-xs leading-relaxed text-fg-muted">
@@ -538,11 +559,11 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
               )}
             </div>
 
-            {needsGitWarning && (
-              <div className="flex items-start gap-2 rounded-lg border border-warning/35 bg-warning/10 px-3 py-2 text-xs text-warning" role="note" data-cli-git-warning>
+            {gitWarning && (
+              <div className="flex shrink-0 items-start gap-2 rounded-lg border border-warning/35 bg-warning/10 px-3 py-2 text-xs text-warning" role="note" data-cli-git-warning>
                 <AlertTriangle size={14} className="mt-0.5 shrink-0" />
                 <div className="min-w-0 flex-1 leading-relaxed">
-                  <span>{t('Claude Code 与 Kimi Code 在 Windows 上运行依赖 Git for Windows，当前未检测到 Git，建议一并安装。')}</span>
+                  <span>{gitWarning}</span>
                   <button
                     type="button"
                     onClick={() => void window.electronAPI?.openExternal?.(GIT_DOWNLOAD_URL)}
@@ -556,7 +577,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             )}
 
             {nodeWarning && (
-              <div className="flex items-start gap-2 rounded-lg border border-warning/35 bg-warning/10 px-3 py-2 text-xs text-warning" role="note" data-cli-node-warning>
+              <div className="flex shrink-0 items-start gap-2 rounded-lg border border-warning/35 bg-warning/10 px-3 py-2 text-xs text-warning" role="note" data-cli-node-warning>
                 <AlertTriangle size={14} className="mt-0.5 shrink-0" />
                 <div className="min-w-0 flex-1 leading-relaxed">
                   <span>{nodeWarning}</span>
@@ -583,7 +604,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 <div className="space-y-1">
                   <p className="text-ui font-semibold text-fg">{t('推荐 CLI 已全部安装')}</p>
                   <p className="text-xs leading-relaxed text-fg-muted">
-                    {t('Claude Code、Codex、Antigravity、Pi 与 Kimi Code 均已就绪，可以直接开始使用。')}
+                    {t('展示的 {n} 款常用 CLI 均已就绪，可以直接开始使用。', { n: installableClis.length })}
                   </p>
                 </div>
               </div>
@@ -592,7 +613,15 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 {t('暂未读取到可自动安装的 CLI 清单，可前往「设置 → CLI」手动管理。')}
               </div>
             ) : (
-              <div className="space-y-2" data-installable-cli-list>
+              // 最多完整展示 5 张安装卡片（单卡约 5.5rem + 边框，间距 0.5rem），超出时内部滚动，避免撑高欢迎页弹窗
+              <div
+                className={
+                  visibleInstallList.length > MAX_VISIBLE_INSTALL_CARDS
+                    ? 'min-h-[12rem] max-h-[calc(29.5rem+16px)] space-y-2 overflow-y-auto pr-1'
+                    : 'space-y-2'
+                }
+                data-installable-cli-list
+              >
                 {visibleInstallList.map((cli) => {
                   const status: CliInstallPhase = installStatuses[cli.id] ?? (detectedIdSet.has(cli.id) ? 'done' : 'idle');
                   const isDone = status === 'done';
@@ -735,7 +764,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             )}
 
             {(installLog || isInstalling) && (
-              <div className="rounded-lg border border-line bg-surface" data-cli-install-log>
+              <div className="shrink-0 rounded-lg border border-line bg-surface" data-cli-install-log>
                 <button
                   type="button"
                   onClick={() => setLogExpanded((prev) => !prev)}

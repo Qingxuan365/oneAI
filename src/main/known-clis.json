@@ -31,8 +31,27 @@
       "requiresGit": true
     }
   },
-  { "id": "opencode", "name": "OpenCode", "command": "opencode" },
-  { "id": "grok", "name": "Grok Build", "command": "grok" },
+  {
+    "id": "opencode",
+    "name": "OpenCode",
+    "command": "opencode",
+    "installer": {
+      "featuredOrder": 6,
+      "powershellCommand": "npm install -g @opencode/cli@latest",
+      "docsUrl": "https://opencode.ai/docs",
+      "requiresNode": true
+    }
+  },
+  {
+    "id": "grok",
+    "name": "Grok Build",
+    "command": "grok",
+    "installer": {
+      "featuredOrder": 7,
+      "powershellCommand": "irm https://x.ai/cli/install.ps1 | iex",
+      "docsUrl": "https://docs.x.ai/overview"
+    }
+  },
   {
     "id": "agy",
     "name": "Antigravity",
@@ -43,19 +62,68 @@
       "docsUrl": "https://antigravity.google/docs/getting-started"
     }
   },
-  { "id": "qwen", "name": "Qwen Code", "command": "qwen" },
+  {
+    "id": "qwen",
+    "name": "Qwen Code",
+    "command": "qwen",
+    "installer": {
+      "featuredOrder": 8,
+      "powershellCommand": "irm https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.ps1 | iex",
+      "docsUrl": "https://github.com/QwenLM/qwen-code"
+    }
+  },
   { "id": "aider", "name": "Aider", "command": "aider" },
-  { "id": "cursor-agent", "name": "Cursor Agent", "command": "agent", "aliases": ["cursor-agent"] },
-  { "id": "copilot", "name": "GitHub Copilot", "command": "copilot" },
+  {
+    "id": "cursor-agent",
+    "name": "Cursor Agent",
+    "command": "agent",
+    "aliases": ["cursor-agent"],
+    "installer": {
+      "featuredOrder": 9,
+      "powershellCommand": "irm 'https://cursor.com/install?win32=true' | iex",
+      "docsUrl": "https://cursor.com/docs/cli/installation",
+      "requiresGit": true
+    }
+  },
+  {
+    "id": "copilot",
+    "name": "GitHub Copilot",
+    "command": "copilot",
+    "installer": {
+      "featuredOrder": 10,
+      "powershellCommand": "winget install --id GitHub.Copilot -e --accept-package-agreements --accept-source-agreements",
+      "docsUrl": "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli"
+    }
+  },
   { "id": "amp", "name": "Amp", "command": "amp" },
   { "id": "droid", "name": "Droid", "command": "droid" },
   { "id": "crush", "name": "Crush", "command": "crush" },
   { "id": "goose", "name": "Goose", "command": "goose" },
   { "id": "iflow", "name": "iFlow CLI", "command": "iflow" },
   { "id": "auggie", "name": "Auggie", "command": "auggie" },
-  { "id": "kiro-cli", "name": "Kiro CLI", "command": "kiro-cli" },
+  {
+    "id": "kiro-cli",
+    "name": "Kiro CLI",
+    "command": "kiro-cli",
+    "installer": {
+      "featuredOrder": 11,
+      "powershellCommand": "irm https://cli.kiro.dev/install.ps1 | iex",
+      "docsUrl": "https://kiro.dev/docs/cli/installation/"
+    }
+  },
   { "id": "cline", "name": "Cline", "command": "cline" },
-  { "id": "gemini", "name": "Gemini CLI", "command": "gemini" },
+  {
+    "id": "gemini",
+    "name": "Gemini CLI",
+    "command": "gemini",
+    "installer": {
+      "featuredOrder": 12,
+      "powershellCommand": "npm install -g @google/gemini-cli",
+      "docsUrl": "https://geminicli.com/docs/get-started/installation",
+      "requiresNode": true,
+      "minNodeVersion": "20.0.0"
+    }
+  },
   { "id": "vibe", "name": "Mistral Vibe", "command": "vibe" },
   { "id": "kilo", "name": "Kilo Code", "command": "kilo", "aliases": ["kilocode"] },
   { "id": "continue", "name": "Continue", "command": "cn" },

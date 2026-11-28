@@ -1236,15 +1236,24 @@ app.whenReady().then(async () => {
       window.drawOnboarding([{ id: 'codex', name: 'Codex', icon: 'codex' }, { id: 'claude', name: 'Claude Code', icon: 'claude' }], { mode: 'install', initialLanguage: 'zh-CN', resetKey: 'install-1' }); await tick();
       const installCards = () => [...dialog().querySelectorAll('[data-installable-cli]')].map(el => el.getAttribute('data-installable-cli'));
       check('install mode opens directly on the welcome installer with dismissible close button and no Back button', dialog().querySelector('[data-onboarding-step="welcome"]') && dialog().querySelector('button[aria-label="关闭"]')?.disabled === false && !dialog().textContent.includes('上一步') && !dialog().textContent.includes('工作文件夹'));
-      check('already installed CLIs are filtered out and remaining CLIs are sorted alphabetically', installCards().join('|') === 'agy|kimi|pi' && dialog().querySelectorAll('[data-showcase-cli]').length >= 5);
-      check('Git and Node warnings stay hidden until a dependent CLI is checked while Pi card shows Node requirement badge', !dialog().querySelector('[data-cli-git-warning]') && !dialog().querySelector('[data-cli-node-warning]') && dialog().querySelector('[data-cli-node-badge="pi"]')?.getAttribute('data-node-problem') === 'true' && dialog().querySelector('[data-cli-node-badge="pi"]')?.textContent.includes('22.19.0+'));
+      check('already installed CLIs are filtered out and remaining CLIs are sorted alphabetically', installCards().join('|') === 'agy|cursor-agent|gemini|copilot|grok|kimi|kiro-cli|opencode|pi|qwen' && dialog().querySelectorAll('[data-showcase-cli]').length === 12);
+      const installListEl = dialog().querySelector('[data-installable-cli-list]');
+      const installCardEls = [...dialog().querySelectorAll('[data-installable-cli]')];
+      const listRect = installListEl.getBoundingClientRect();
+      const fifthRect = installCardEls[4].getBoundingClientRect();
+      const sixthRect = installCardEls[5].getBoundingClientRect();
+      check('installable CLI list shows 5 cards and scrolls internally when more than 5 items exist', installListEl.scrollHeight > installListEl.clientHeight && getComputedStyle(installListEl).overflowY === 'auto' && fifthRect.bottom <= listRect.bottom + 1 && sixthRect.top >= listRect.bottom - 1);
+      check('Git and Node warnings stay hidden until a dependent CLI is checked while Pi, Gemini and OpenCode show Node requirement badges', !dialog().querySelector('[data-cli-git-warning]') && !dialog().querySelector('[data-cli-node-warning]') && dialog().querySelector('[data-cli-node-badge="pi"]')?.getAttribute('data-node-problem') === 'true' && dialog().querySelector('[data-cli-node-badge="pi"]')?.textContent.includes('22.19.0+') && dialog().querySelector('[data-cli-node-badge="gemini"]')?.textContent.includes('20.0.0+') && Boolean(dialog().querySelector('[data-cli-node-badge="opencode"]')));
       dialog().querySelector('#cli-install-check-kimi').click(); await tick();
-      check('checking Kimi without Git shows the Git for Windows warning and updates install button count', Boolean(dialog().querySelector('[data-cli-git-warning]')) && dialog().querySelector('[data-cli-install-start]')?.textContent.includes('1'));
+      check('checking Kimi without Git shows the Git for Windows warning naming Kimi Code and updates install button count', Boolean(dialog().querySelector('[data-cli-git-warning]')) && dialog().querySelector('[data-cli-git-warning]').textContent.includes('Kimi Code') && dialog().querySelector('[data-cli-install-start]')?.textContent.includes('1'));
+      dialog().querySelector('#cli-install-check-cursor-agent').click(); await tick();
+      check('checking Cursor Agent without Git adds Cursor Agent to the Git warning', dialog().querySelector('[data-cli-git-warning]')?.textContent.includes('Cursor Agent'));
+      dialog().querySelector('#cli-install-check-cursor-agent').click(); await tick();
       dialog().querySelector('#cli-install-check-pi').click(); await tick();
       check('checking Pi without Node.js shows the Node.js warning with download link', Boolean(dialog().querySelector('[data-cli-node-warning]')) && dialog().querySelector('[data-cli-node-warning]').textContent.includes('22.19.0') && (dialog().querySelector('[data-cli-node-warning] button').click(), window.events.includes('open:https://nodejs.org/')));
       dialog().querySelector('#cli-install-check-pi').click(); await tick();
       dialog().querySelector('[data-cli-select-all]').click(); await tick();
-      check('select all checks every remaining installable CLI', dialog().querySelector('[data-cli-install-start]')?.textContent.includes('3') && dialog().querySelector('[data-cli-select-all]')?.textContent.includes('取消全选'));
+      check('select all checks every remaining installable CLI', dialog().querySelector('[data-cli-install-start]')?.textContent.includes('10') && dialog().querySelector('[data-cli-select-all]')?.textContent.includes('取消全选'));
       dialog().querySelector('[aria-label="复制 Antigravity 安装命令"]').click(); await tick();
       dialog().querySelector('[aria-label="查看 Antigravity 官方文档"]').click(); await tick();
       check('copy command and open docs actions invoke clipboard and shell APIs', window.events.some(e => e.startsWith('copy:irm https://antigravity.google/cli/install.ps1')) && window.events.includes('open:https://antigravity.google/docs/getting-started'));
@@ -1277,21 +1286,43 @@ app.whenReady().then(async () => {
       dialog().querySelector('[data-cli-install-start]').click(); await tick();
       check('early install rejection marks queued items as error instead of hanging in queued', dialog().querySelector('[data-installable-cli="kimi"]')?.getAttribute('data-install-status') === 'error' && dialog().querySelector('[data-installable-cli="kimi"]')?.textContent.includes('Unsupported platform'));
 
-      // 旧版本 Node.js 同样触发升级提示
+      // 旧版本 Node.js（20.18.0）满足 Gemini CLI (20.0.0+)，但对 Pi (22.19.0+) 触发升级提示且只点名 Pi
       window.cliEnvFixture = { hasGit: true, hasNode: true, nodeVersion: '20.18.0', platform: 'win32' };
       window.drawOnboarding([{ id: 'codex', name: 'Codex', icon: 'codex' }, { id: 'claude', name: 'Claude Code', icon: 'claude' }], { mode: 'install', initialLanguage: 'zh-CN', resetKey: 'install-old-node' }); await tick();
+      dialog().querySelector('#cli-install-check-gemini').click(); await tick();
+      check('Node.js 20.18.0 satisfies Gemini CLI 20.0.0+ without warning', !dialog().querySelector('[data-cli-node-warning]'));
       dialog().querySelector('#cli-install-check-pi').click(); await tick();
-      check('outdated Node.js triggers upgrade warning when Pi is checked', Boolean(dialog().querySelector('[data-cli-node-warning]')) && dialog().querySelector('[data-cli-node-warning]').textContent.includes('v20.18.0'));
+      check('outdated Node.js triggers upgrade warning naming only Pi when both Gemini and Pi are checked', Boolean(dialog().querySelector('[data-cli-node-warning]')) && dialog().querySelector('[data-cli-node-warning]').textContent.includes('v20.18.0') && dialog().querySelector('[data-cli-node-warning]').textContent.includes('Pi') && !dialog().querySelector('[data-cli-node-warning]').textContent.includes('Gemini CLI'));
 
-      // 全部推荐 CLI 已安装时显示完成态
+      // 恰好 5 款未安装时不出现内部滚动条
       window.drawOnboarding([
         { id: 'claude', name: 'Claude Code', icon: 'claude' },
         { id: 'codex', name: 'Codex', icon: 'codex' },
         { id: 'agy', name: 'Antigravity', icon: 'agy' },
         { id: 'pi', name: 'Pi', icon: 'pi' },
         { id: 'kimi', name: 'Kimi Code', icon: 'kimi' },
+        { id: 'opencode', name: 'OpenCode', icon: 'opencode' },
+        { id: 'grok', name: 'Grok Build', icon: 'grok' },
+      ], { mode: 'install', initialLanguage: 'zh-CN', resetKey: 'install-exact-five' }); await tick();
+      const fiveListEl = dialog().querySelector('[data-installable-cli-list]');
+      check('installable CLI list does not scroll when 5 or fewer items remain', dialog().querySelectorAll('[data-installable-cli]').length === 5 && fiveListEl.scrollHeight <= fiveListEl.clientHeight && getComputedStyle(fiveListEl).overflowY !== 'auto');
+
+      // 全部 12 款推荐 CLI 已安装时显示完成态
+      window.drawOnboarding([
+        { id: 'claude', name: 'Claude Code', icon: 'claude' },
+        { id: 'codex', name: 'Codex', icon: 'codex' },
+        { id: 'agy', name: 'Antigravity', icon: 'agy' },
+        { id: 'pi', name: 'Pi', icon: 'pi' },
+        { id: 'kimi', name: 'Kimi Code', icon: 'kimi' },
+        { id: 'opencode', name: 'OpenCode', icon: 'opencode' },
+        { id: 'grok', name: 'Grok Build', icon: 'grok' },
+        { id: 'qwen', name: 'Qwen Code', icon: 'qwen' },
+        { id: 'cursor-agent', name: 'Cursor Agent', icon: 'cursor-agent' },
+        { id: 'copilot', name: 'GitHub Copilot', icon: 'copilot' },
+        { id: 'kiro-cli', name: 'Kiro CLI', icon: 'kiro-cli' },
+        { id: 'gemini', name: 'Gemini CLI', icon: 'gemini' },
       ], { mode: 'install', initialLanguage: 'zh-CN', resetKey: 'install-all-done' }); await tick();
-      check('when all recommended CLIs are installed the empty-ready panel is shown', Boolean(dialog().querySelector('[data-all-clis-installed]')));
+      check('when all 12 featured CLIs are installed the empty-ready panel is shown', Boolean(dialog().querySelector('[data-all-clis-installed]')) && dialog().querySelector('[data-all-clis-installed]').textContent.includes('12'));
       window.cliEnvFixture = { hasGit: true, hasNode: true, nodeVersion: '22.20.0', platform: 'win32' };
       window.cliInstallHandler = async () => ({ ok: true, results: {}, installedIds: [] });
 

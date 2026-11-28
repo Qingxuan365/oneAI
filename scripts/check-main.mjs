@@ -1232,16 +1232,26 @@ try {
           const featured = known
             .filter((cli) => Boolean(cli.installer?.powershellCommand))
             .sort((a, b) => a.installer!.featuredOrder - b.installer!.featuredOrder);
-          assert.deepEqual(featured.map((cli) => cli.id), ['claude', 'codex', 'agy', 'pi', 'kimi']);
+          assert.deepEqual(
+            featured.map((cli) => cli.id),
+            ['claude', 'codex', 'agy', 'pi', 'kimi', 'opencode', 'grok', 'qwen', 'cursor-agent', 'copilot', 'kiro-cli', 'gemini'],
+          );
+          const validInstallerCmd = (cmd: string) =>
+            /^irm ['"]?https:\\/\\/[^'"]+['"]? \\| iex$/.test(cmd)
+            || /^npm install -g [@a-z0-9\\/_.-]+$/i.test(cmd)
+            || /^winget install --id [A-Za-z0-9._-]+ -e --accept-package-agreements --accept-source-agreements$/.test(cmd);
           for (const cli of featured) {
-            assert.equal(cli.installer!.powershellCommand.startsWith('irm https://'), true);
-            assert.equal(cli.installer!.powershellCommand.endsWith(' | iex'), true);
+            assert.equal(validInstallerCmd(cli.installer!.powershellCommand), true, 'valid installer command for ' + cli.id);
             assert.equal(cli.installer!.docsUrl.startsWith('https://'), true);
           }
           assert.equal(featured.find((cli) => cli.id === 'claude')?.installer?.requiresGit, true);
           assert.equal(featured.find((cli) => cli.id === 'kimi')?.installer?.requiresGit, true);
+          assert.equal(featured.find((cli) => cli.id === 'cursor-agent')?.installer?.requiresGit, true);
           assert.equal(featured.find((cli) => cli.id === 'pi')?.installer?.requiresNode, true);
           assert.equal(featured.find((cli) => cli.id === 'pi')?.installer?.minNodeVersion, '22.19.0');
+          assert.equal(featured.find((cli) => cli.id === 'gemini')?.installer?.requiresNode, true);
+          assert.equal(featured.find((cli) => cli.id === 'gemini')?.installer?.minNodeVersion, '20.0.0');
+          assert.equal(featured.find((cli) => cli.id === 'opencode')?.installer?.requiresNode, true);
 
           // Node.js version parsing and minimum version comparison
           assert.equal(parseNodeVersion('v22.19.0\\n'), '22.19.0');
@@ -1255,8 +1265,8 @@ try {
           assert.equal(isNodeVersionAtLeast(undefined, '22.19.0'), false);
 
           // Preserves request order, deduplicates, and rejects unknown or non-installable IDs
-          const selected = selectInstallableClis(['kimi', 'opencode', 'claude', 'kimi', 'not-a-cli', 42, null]);
-          assert.deepEqual(selected.map((cli) => cli.id), ['kimi', 'claude']);
+          const selected = selectInstallableClis(['kimi', 'aider', 'claude', 'opencode', 'kimi', 'not-a-cli', 42, null]);
+          assert.deepEqual(selected.map((cli) => cli.id), ['kimi', 'claude', 'opencode']);
           assert.deepEqual(selectInstallableClis('claude'), []);
 
           // Strips CSI and OSC sequences and normalizes carriage returns
