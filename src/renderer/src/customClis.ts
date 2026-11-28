@@ -1,4 +1,4 @@
-import { CliDef, CustomCli } from './types';
+import { CliDef, CustomCli, SessionFormat } from './types';
 import { t } from './i18n';
 
 export function newCustomCliId(): string {
@@ -6,8 +6,10 @@ export function newCustomCliId(): string {
 }
 
 export function toCliDef(cli: CustomCli): CliDef {
-  return { id: cli.id, name: cli.name, icon: 'terminal', defaultCommand: cli.command, custom: true };
+  return { id: cli.id, name: cli.name, icon: 'terminal', defaultCommand: cli.command, custom: true, sessionFormat: cli.sessionFormat };
 }
+
+export const SESSION_FORMATS: readonly SessionFormat[] = ['claude', 'codex', 'kimi'];
 
 /** 读取已保存的自定义 CLI 时过滤掉结构不完整的条目 */
 export function sanitizeCustomClis(value: unknown): CustomCli[] {
@@ -19,6 +21,9 @@ export function sanitizeCustomClis(value: unknown): CustomCli[] {
       && typeof item.command === 'string' && item.command.trim().length > 0;
     if (ok) seen.add(item.id);
     return ok;
+  }).map((item) => {
+    const { sessionFormat, ...rest } = item;
+    return SESSION_FORMATS.includes(sessionFormat as SessionFormat) ? { ...rest, sessionFormat } : rest;
   });
 }
 

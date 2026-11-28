@@ -117,13 +117,18 @@ export interface CliDef {
   icon: string;            // 品牌专属 Logo，未内置的 CLI 回退为通用终端图标
   defaultCommand: string;  // 默认拉起命令模版
   custom?: boolean;        // 用户在「设置 → CLI」里自定义的 CLI：启动时整条命令交给 PowerShell 解析
+  sessionFormat?: SessionFormat; // 自定义 CLI 复用的内置会话格式，用于读取任务摘要
 }
+
+/** 自定义 CLI 可复用的内置会话格式（会话文件由 Claude Code / Codex / Kimi Code 写入的 CLI 的包装命令适用） */
+export type SessionFormat = 'claude' | 'codex' | 'kimi';
 
 /** 用户自定义的 CLI（AppSettings.customClis）：名称与完整启动命令，没有品牌图标，用通用终端图标 */
 export interface CustomCli {
   id: string;
   name: string;
   command: string;         // 完整启动命令，可带参数，如 `mycli --model x`
+  sessionFormat?: SessionFormat; // 会话文件格式；缺省表示不读取会话
 }
 
 // 在线音乐：一个音频直链、电台流或 .m3u / .pls 歌单地址；name 为空时播放器用网址主机名代替
@@ -158,6 +163,8 @@ export interface AppSettings {
   glassMaterial: GlassMaterial; // macOS 27 风格液态玻璃材质档位：clear（清透玻璃）/ tinted（柔和磨砂，默认）/ solid（纯实色）
   rainIntensity: number; // 工作区下雨强度（0 关闭，1 ~ 100 调节雨势大小，默认 0）
   snowIntensity: number; // 工作区下雪强度（0 关闭，1 ~ 100 调节雪势大小，默认 0）
+  whiteNoiseKind: 'off' | 'follow' | 'rain' | 'wind' | 'brown'; // 白噪音类型：关闭 / 跟随雨雪画面 / 雨声 / 风声 / 棕噪音（实时合成），默认 off
+  whiteNoiseVolume: number; // 白噪音音量（0 ~ 100，默认 40）
   workspaceBackgroundPreset: WorkspaceBackgroundPreset; // 工作区背景：无背景 / 内置 macOS 风格壁纸 / 自定义本地图片
   workspaceBackgroundImage: string; // 自定义工作区背景图片绝对路径（仅 preset === 'custom' 时使用）
   workspaceBackgroundOpacity: number; // 工作区背景可见度（5 ~ 85%，默认 32）

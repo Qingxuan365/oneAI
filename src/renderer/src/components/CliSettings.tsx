@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Pencil, Plus, RotateCw, Trash2 } from 'lucide-react';
-import { CustomCli } from '../types';
+import { CustomCli, SessionFormat } from '../types';
 import { sortClisAlphabetically } from '../clis';
-import { newCustomCliId, validateCustomCli } from '../customClis';
+import { SESSION_FORMATS, newCustomCliId, validateCustomCli } from '../customClis';
 import { t } from '../i18n';
 import { BrandIcon } from './BrandIcon';
 
@@ -29,7 +29,14 @@ interface Draft {
   id?: string;
   name: string;
   command: string;
+  sessionFormat?: SessionFormat;
 }
+
+const SESSION_FORMAT_LABELS: Record<SessionFormat, string> = {
+  claude: 'Claude Code',
+  codex: 'Codex',
+  kimi: 'Kimi Code',
+};
 
 const label = 'mb-1.5 block text-xs font-medium text-fg-muted';
 
@@ -82,7 +89,7 @@ export const CliSettings: React.FC<CliSettingsProps> = ({ fallbackKnownClis, cus
       setError(problem);
       return;
     }
-    const saved: CustomCli = { id: draft.id ?? newCustomCliId(), name: draft.name.trim(), command: draft.command.trim() };
+    const saved: CustomCli = { id: draft.id ?? newCustomCliId(), name: draft.name.trim(), command: draft.command.trim(), ...(draft.sessionFormat ? { sessionFormat: draft.sessionFormat } : {}) };
     onChange(draft.id ? customClis.map((cli) => (cli.id === saved.id ? saved : cli)) : [...customClis, saved]);
     setDraft(null);
     setError('');
@@ -142,7 +149,7 @@ export const CliSettings: React.FC<CliSettingsProps> = ({ fallbackKnownClis, cus
 
         {customClis.length === 0 && !draft && (
           <p className="rounded-md border border-dashed border-line px-3 py-3 text-xs leading-relaxed text-fg-faint">
-            {t('还没有自定义 CLI。添加后它会和内置 CLI 一样出现在文件夹「+」菜单里，使用通用终端图标；额度、任务摘要、历史会话与用量统计只对内置的 CLI 提供。')}
+            {t('还没有自定义 CLI。添加后它会和内置 CLI 一样出现在文件夹「+」菜单里，使用通用终端图标；额度、历史会话与用量统计只对内置的 CLI 提供；如果它是 Claude Code、Codex 或 Kimi Code 的包装命令，可选择会话格式来显示任务摘要。')}
           </p>
         )}
 
@@ -156,6 +163,7 @@ export const CliSettings: React.FC<CliSettingsProps> = ({ fallbackKnownClis, cus
                     <InstalledBadge installed={installed} id={cli.id} />
                   </span>
                   <span className="block truncate font-mono text-xs text-fg-faint" title={cli.command}>{cli.command}</span>
+                  {cli.sessionFormat && <span className="block truncate text-xs text-fg-faint">{t('会话格式：{name}', { name: SESSION_FORMAT_LABELS[cli.sessionFormat] })}</span>}
                 </span>
                 {confirmDeleteId === cli.id ? (
                   <span className="flex shrink-0 items-center gap-1.5">
@@ -165,7 +173,7 @@ export const CliSettings: React.FC<CliSettingsProps> = ({ fallbackKnownClis, cus
                   </span>
                 ) : (
                   <span className="flex shrink-0 items-center gap-1">
-                    <button type="button" onClick={() => { setDraft({ id: cli.id, name: cli.name, command: cli.command }); setError(''); }} className="icon-btn" title={t('编辑')} aria-label={t('编辑 {name}', { name: cli.name })}>
+                    <button type="button" onClick={() => { setDraft({ id: cli.id, name: cli.name, command: cli.command, sessionFormat: cli.sessionFormat }); setError(''); }} className="icon-btn" title={t('编辑')} aria-label={t('编辑 {name}', { name: cli.name })}>
                       <Pencil size={13} />
                     </button>
                     <button type="button" onClick={() => setConfirmDeleteId(cli.id)} className="icon-btn enabled:hover:text-danger" title={t('删除')} aria-label={t('删除 {name}', { name: cli.name })}>
@@ -196,6 +204,17 @@ export const CliSettings: React.FC<CliSettingsProps> = ({ fallbackKnownClis, cus
                 onChange={(e) => setDraft({ ...draft, command: e.target.value })} />
               <p className="mt-1.5 text-xs text-fg-faint">
                 {t('可带参数，在新任务的终端（PowerShell）里原样执行，需要这个命令已在 PATH 中；也可以写完整路径，路径有空格时加引号。未找到命令时它不会出现在新建菜单里。')}
+              </p>
+            </div>
+            <div>
+              <label htmlFor="custom-cli-session-format" className={label}>{t('会话格式')}</label>
+              <select id="custom-cli-session-format" className="input" value={draft.sessionFormat ?? ''}
+                onChange={(e) => setDraft({ ...draft, sessionFormat: (e.target.value || undefined) as SessionFormat | undefined })}>
+                <option value="">{t('不读取会话')}</option>
+                {SESSION_FORMATS.map((format) => <option key={format} value={format}>{SESSION_FORMAT_LABELS[format]}</option>)}
+              </select>
+              <p className="mt-1.5 text-xs text-fg-faint">
+                {t('如果这个命令是 Claude Code、Codex 或 Kimi Code 的包装（会话仍写入它们默认的本机目录），选择对应格式后，任务行会显示最近一条用户消息。')}
               </p>
             </div>
             <div className="flex justify-end gap-2">

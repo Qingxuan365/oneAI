@@ -12,6 +12,7 @@ import { MusicStreamsSettings } from './MusicStreamsSettings';
 import { TERMINAL_FONT_FAMILY } from './TerminalViewport';
 import { clampRainIntensity } from './WorkspaceRain';
 import { clampSnowIntensity } from './WorkspaceSnow';
+import { WhiteNoiseKind, clampWhiteNoiseVolume, isWhiteNoiseKind } from '../whiteNoise';
 import { BUILTIN_MACOS_WALLPAPERS, clampBackgroundBlur, clampBackgroundOpacity } from '../workspaceBackgrounds';
 import {
   DEFAULT_GREETING_MESSAGES,
@@ -95,6 +96,14 @@ const SNOW_PRESETS: { value: number; label: string }[] = [
   { value: 55, label: T('中雪') },
   { value: 80, label: T('大雪') },
   { value: 100, label: T('暴雪') },
+];
+
+const WHITE_NOISE_OPTIONS: { value: WhiteNoiseKind; label: string }[] = [
+  { value: 'off', label: T('已关闭') },
+  { value: 'follow', label: T('跟随雨雪') },
+  { value: 'rain', label: T('雨声') },
+  { value: 'wind', label: T('风声') },
+  { value: 'brown', label: T('棕噪音') },
 ];
 
 const CURSOR_STYLES: { id: AppSettings['terminalCursorStyle']; name: string; desc: string; icon: string }[] = [
@@ -241,6 +250,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [bgSelecting, setBgSelecting] = useState(false);
   const rainIntensity = clampRainIntensity(settings.rainIntensity, 0);
   const snowIntensity = clampSnowIntensity(settings.snowIntensity, 0);
+  const whiteNoiseKind = isWhiteNoiseKind(settings.whiteNoiseKind) ? settings.whiteNoiseKind : 'off';
+  const whiteNoiseVolume = clampWhiteNoiseVolume(settings.whiteNoiseVolume, 40);
   const bgPreset = settings.workspaceBackgroundPreset ?? 'none';
   const bgOpacity = clampBackgroundOpacity(settings.workspaceBackgroundOpacity, 32);
   const bgBlur = clampBackgroundBlur(settings.workspaceBackgroundBlur, 0);
@@ -857,6 +868,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </span>
                     </div>
                   </>
+                )}
+              </Section>
+
+              <Section title={t('白噪音')} hint={t('实时合成的环境声，不占安装包体积；关闭后不占用音频资源')}>
+                <div className="grid grid-cols-5 gap-1.5" role="group" aria-label={t('白噪音')}>
+                  {WHITE_NOISE_OPTIONS.map((option) => {
+                    const active = whiteNoiseKind === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        data-white-noise={option.value}
+                        aria-pressed={active}
+                        onClick={() => update({ whiteNoiseKind: option.value })}
+                        className={`py-1.5 text-center ${optionClass(active)}`}
+                      >
+                        {t(option.label)}
+                      </button>
+                    );
+                  })}
+                </div>
+                {whiteNoiseKind === 'follow' && (
+                  <div className="text-xs text-fg-faint">{t('下雨时播放雨声，下雪时播放风声；音量随雨雪强度变化')}</div>
+                )}
+                {whiteNoiseKind !== 'off' && (
+                  <div className={row}>
+                    <span className="block">{t('音量')}</span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="5"
+                        aria-label={t('白噪音音量')}
+                        data-white-noise-slider
+                        value={whiteNoiseVolume}
+                        onChange={(e) => update({ whiteNoiseVolume: clampWhiteNoiseVolume(Number(e.target.value), 40) })}
+                        className="slim w-36"
+                      />
+                      <span className="w-9 text-right font-mono text-xs text-fg-faint">{whiteNoiseVolume}%</span>
+                    </span>
+                  </div>
                 )}
               </Section>
 

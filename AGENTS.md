@@ -120,7 +120,7 @@ d:/GitHub/OneAI/
 │           │   ├── AppLogo.tsx           # 应用 Logo
 │           │   ├── WorkspaceBackground.tsx # 全工作区背景层（内置 6 套 macOS 壁纸或本地图片，带可见度遮罩与模糊度）
 │           │   ├── WorkspaceRain.tsx     # 全工作区下雨氛围 Canvas 层（可开关与 0~100 连续调节雨势，pointer-events: none）
-│           │   └── WorkspaceSnow.tsx     # 全工作区下雪氛围 Canvas 层（三层景深雪花与冰晶，可开关与 0~100 连续调节雪势，pointer-events: none）
+│           │   └── WorkspaceSnow.tsx     # 全工作区下雪氛围 Canvas 层（三层景深：远景柔和圆点、中景六角小雪片、近景旋转树枝状与蓬松团状雪片，单张图集离屏精灵批量绘制，可开关与 0~100 连续调节雪势，pointer-events: none）
 │           └── types/index.ts            # 前端类型与 window.electronAPI 声明
 ```
 
@@ -165,7 +165,7 @@ interface Account {
 
 文件夹与任务约定：任务是一个全局有序数组（数组顺序即侧栏顺序，也是 Ctrl+Tab / Ctrl+数字 的顺序），与 `folders`（有序）、`activeTaskId`、`lastFolder`、`extraClis` 一起作为 `v2` 状态持久化；任务只能在所属文件夹内调整顺序、不能跨文件夹；多个文件夹的终端同时运行，切换任务或文件夹不得结束终端；旧的按工作区存储的数据只在首次启动时迁移，之后原样保留、不再更新、不得删除。
 
-自定义 CLI 约定：`AppSettings.customClis`（`{ id: 'custom-xxxx', name, command }`）由用户在「设置 → CLI」维护，运行时转成 `CliDef`（`custom: true`，通用终端图标），启动时整条命令交给 PowerShell 解析（`createSession` 的 `shell` 选项）；检测与内置 CLI 一样按 `PATH` 进行，命令不存在时隐藏；删除时必须关闭并移除其任务；额度、任务摘要、历史会话、用量统计和多账号不对自定义 CLI 提供；「恢复默认设置」不清除自定义 CLI、账号、语言和首次引导状态。
+自定义 CLI 约定：`AppSettings.customClis`（`{ id: 'custom-xxxx', name, command }`）由用户在「设置 → CLI」维护，运行时转成 `CliDef`（`custom: true`，通用终端图标），启动时整条命令交给 PowerShell 解析（`createSession` 的 `shell` 选项）；检测与内置 CLI 一样按 `PATH` 进行，命令不存在时隐藏；删除时必须关闭并移除其任务；额度、历史会话、用量统计和多账号不对自定义 CLI 提供；任务摘要仅在其设置了「会话格式」（claude / codex / kimi，适用于这些 CLI 的包装命令，会话仍写入默认目录）时提供；「恢复默认设置」不清除自定义 CLI、账号、语言和首次引导状态。
 
 在线音乐约定：`AppSettings.musicStreams`（`{ id, name, url }`）由用户在「设置 → 提醒 → 音乐播放器」添加，支持音频直链、电台流和 `.m3u` / `.pls` 歌单（主进程 `music:resolve-stream` 展开，只接受 http(s)，不支持 `.m3u8`）；不内置任何电台或默认链接，添加前不得发起任何网络请求；在线曲目走独立的 audio 元素（跨域音频接入分析器会被静音），不做频谱；「恢复默认设置」不清除。
 

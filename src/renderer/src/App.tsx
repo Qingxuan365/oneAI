@@ -9,12 +9,13 @@ import { BrandIcon } from './components/BrandIcon';
 import { AppLogo } from './components/AppLogo';
 import { WorkspaceRain, clampRainIntensity } from './components/WorkspaceRain';
 import { WorkspaceSnow, clampSnowIntensity } from './components/WorkspaceSnow';
+import { clampWhiteNoiseVolume, isWhiteNoiseKind, resolveWhiteNoise, setWhiteNoise } from './whiteNoise';
 import { WorkspaceBackground } from './components/WorkspaceBackground';
 import { clampBackgroundBlur, clampBackgroundOpacity, findBuiltinWallpaper, isWorkspaceBackgroundPreset } from './workspaceBackgrounds';
 import { CliDef, CustomCli, FolderEntry, GitStatusResult, TaskSession, QuotaData, AppSettings, ThemeId, HistoryEntry, Account, TaskSummary, UpdateState, KnownCliInfo } from './types';
 import { version as appVersion } from '../../../package.json';
 import { BUILTIN_CLIS, MODEL_PICKER_COMMANDS, sortClisAlphabetically } from './clis';
-import { SUMMARY_CLIS, formatAgo } from './taskSummary';
+import { summaryFormatOf, formatAgo } from './taskSummary';
 import { ensureFolder, folderKey, folderName, groupRecent, historySessionKey, loadAppState, moveBefore, nextTaskTitle, orderedTasks, scheduleSaveAppState, tasksInFolder } from './workspaceState';
 import { accountCli, quotaKey, sanitizeAccounts, toSessionAccount } from './accounts';
 import { sanitizeCustomClis, toCliDef } from './customClis';
@@ -49,6 +50,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   glassMaterial: 'tinted',
   rainIntensity: 0,
   snowIntensity: 0,
+  whiteNoiseKind: 'off',
+  whiteNoiseVolume: 40,
   workspaceBackgroundPreset: 'none',
   workspaceBackgroundImage: '',
   workspaceBackgroundOpacity: 32,
@@ -123,6 +126,8 @@ function loadSavedSettings(): AppSettings {
           : DEFAULT_SETTINGS.glassMaterial,
         rainIntensity: clampRainIntensity(saved?.rainIntensity, DEFAULT_SETTINGS.rainIntensity),
         snowIntensity: clampSnowIntensity(saved?.snowIntensity, DEFAULT_SETTINGS.snowIntensity),
+        whiteNoiseKind: isWhiteNoiseKind(saved?.whiteNoiseKind) ? saved.whiteNoiseKind : DEFAULT_SETTINGS.whiteNoiseKind,
+        whiteNoiseVolume: clampWhiteNoiseVolume(saved?.whiteNoiseVolume, DEFAULT_SETTINGS.whiteNoiseVolume),
         workspaceBackgroundPreset: isWorkspaceBackgroundPreset(saved?.workspaceBackgroundPreset)
           ? saved.workspaceBackgroundPreset
           : DEFAULT_SETTINGS.workspaceBackgroundPreset,
@@ -261,6 +266,10 @@ export const App: React.FC = () => {
   }), [askConfirm]);
   // 字体与外观设置状态（自动持久化到 localStorage）
   const [settings, setSettings] = useState<AppSettings>(loadSavedSettings);
+  useEffect(() => {
+    const { sound, level } = resolveWhiteNoise(settings.whiteNoiseKind, settings.whiteNoiseVolume, settings.rainIntensity, settings.snowIntensity);
+    setWhiteNoise(sound, level);
+  }, [settings.whiteNoiseKind, settings.whiteNoiseVolume, settings.rainIntensity, settings.snowIntensity]);
   const closeToTray = settings.closeToTray === true;
   useEffect(() => {
     window.electronAPI?.setCloseToTray?.(closeToTray);
@@ -863,13 +872,16 @@ export const App: React.FC = () => {
   const summariesRef = useRef(summaries);
   summariesRef.current = summaries;
   const settledStoppedIdsRef = useRef(new Set<string>());
-  const summaryCandidates = useMemo(() => tasks
-    .filter((task) => SUMMARY_CLIS.has(task.groupId))
-    .flatMap((task) => {
+  const summaryCandidates = useMemo(() => {
+    const cliById = new Map(allClis.map((cli) => [cli.id, cli]));
+    return tasks.flatMap((task) => {
+      const format = summaryFormatOf(task.groupId, cliById.get(task.groupId));
+      if (!format) return [];
       const account = task.accountId ? settings.accounts.find((item) => item.id === task.accountId) : undefined;
       if (task.accountId && !account) return [];
-      return [{ id: task.id, alive: isTaskAlive(task.status), cliId: task.groupId, cwd: task.cwd, createdAt: task.createdAt, historyId: task.historyId, configDir: account?.configDir }];
-    }), [tasks, settings.accounts]);
+      return [{ id: task.id, alive: isTaskAlive(task.status), cliId: format, cwd: task.cwd, createdAt: task.createdAt, historyId: task.historyId, configDir: account?.configDir }];
+    });
+  }, [tasks, settings.accounts, allClis]);
   const summaryKey = JSON.stringify([summaryCandidates, activeTaskId]);
   useEffect(() => {
     const read = window.electronAPI?.getTaskSummaries;

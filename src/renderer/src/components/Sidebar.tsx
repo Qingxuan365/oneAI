@@ -15,7 +15,7 @@ type ReviewGitHint =
   | { kind: 'non-git' };
 import { TASK_STATUS_META, isTaskAlive } from '../taskStatus';
 import { folderKey, folderName, historySessionKey, orderedTasks, RecentFolder } from '../workspaceState';
-import { SUMMARY_CLIS, formatAgo, formatClock } from '../taskSummary';
+import { summaryFormatOf, formatAgo, formatClock } from '../taskSummary';
 import { BrandIcon } from './BrandIcon';
 import { AppLogo } from './AppLogo';
 import { MusicPlayer } from './MusicPlayer';
@@ -1229,7 +1229,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                       const cli = cliOf(task);
                       const account = accountOf(task);
                       // 第二行：最近一条用户消息；还没有消息时显示「新会话 · 时间」；尚未读到时占位，避免读到后行高跳动
-                      const hasSummary = SUMMARY_CLIS.has(task.groupId);
+                      const hasSummary = Boolean(summaryFormatOf(task.groupId, cli));
                       const summary = summaries[task.id];
                       const summaryLine = !hasSummary ? '' : summary ? (summary.text ?? t('新会话 · {time}', { time: formatClock(task.createdAt, clockOffsetHours) })) : '\u00a0';
                       const dropEdge = taskDropTargetId === task.id && draggedTask

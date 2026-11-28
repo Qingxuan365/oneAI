@@ -123,6 +123,8 @@ try {
         import { clampRainIntensity } from './src/renderer/src/components/WorkspaceRain';
         import { clampSnowIntensity } from './src/renderer/src/components/WorkspaceSnow';
         import { setLanguage as setRendererLanguage } from './src/renderer/src/i18n';
+        import { sanitizeCustomClis, toCliDef } from './src/renderer/src/customClis';
+        import { summaryFormatOf } from './src/renderer/src/taskSummary';
 
         test('Traditional Chinese is detected, translated, and accepted by main-process i18n', () => {
           for (const locale of ['zh-TW', 'zh-HK', 'zh_MO', 'zh-Hant', 'zh-Hant-CN']) assert.equal(detectLanguage(locale), 'zh-TW');
@@ -1431,6 +1433,21 @@ try {
           assert.equal(clampSnowIntensity(150), 100);
           assert.equal(clampSnowIntensity(Number.NaN, 40), 40);
           assert.equal(clampSnowIntensity(42.6), 43);
+        });
+
+        test('custom CLIs keep a valid session format and only mapped ones show task summaries', () => {
+          const [wrapped, plain, bogus] = sanitizeCustomClis([
+            { id: 'custom-a', name: 'A', command: 'a', sessionFormat: 'claude' },
+            { id: 'custom-b', name: 'B', command: 'b' },
+            { id: 'custom-c', name: 'C', command: 'c', sessionFormat: 'opencode' },
+          ]);
+          assert.equal(wrapped.sessionFormat, 'claude');
+          assert.equal('sessionFormat' in plain, false);
+          assert.equal('sessionFormat' in bogus, false);
+          assert.equal(summaryFormatOf('custom-a', toCliDef(wrapped)), 'claude');
+          assert.equal(summaryFormatOf('custom-b', toCliDef(plain)), undefined);
+          assert.equal(summaryFormatOf('codex'), 'codex');
+          assert.equal(summaryFormatOf('opencode'), undefined);
         });
       `,
     },

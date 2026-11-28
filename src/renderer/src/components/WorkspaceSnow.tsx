@@ -18,7 +18,10 @@ interface WorkspaceSnowProps {
 interface SnowFlake {
   x: number;
   y: number;
-  layer: 0 | 1 | 2;
+  /** 图集单元序号，决定雪花形状（圆点 / 小雪片 / 树枝状雪片 / 团状雪片） */
+  cell: number;
+  /** 绘制边长（CSS 像素） */
+  size: number;
   radius: number;
   speed: number;
   drift: number;
@@ -26,7 +29,8 @@ interface SnowFlake {
   swayFreq: number;
   phase: number;
   alphaBucket: 0 | 1 | 2;
-  crystal: boolean;
+  /** 近层大雪片：旋转并带翻转感，走单独的变换绘制路径 */
+  spins: boolean;
   rotation: number;
   spin: number;
 }
@@ -34,7 +38,8 @@ interface SnowFlake {
 interface SnowPalette {
   core: [string, string, string];
   glow: [string, string, string];
-  crystalStroke: string;
+  flakeStroke: string;
+  flakeFill: string;
   settled: string;
 }
 
@@ -51,8 +56,14 @@ interface SnowBank {
   columns: SnowColumn[];
 }
 
-const DOT_SPRITE_HALF = 16;
-const CRYSTAL_SPRITE_HALF = 24;
+/** 图集单元边长；所有雪花精灵画在同一张离屏 canvas 上，帧循环只做 drawImage 取图 */
+const SPRITE_CELL = 64;
+const SPRITE_HALF = SPRITE_CELL / 2;
+const CELL_DOT = 0; // 3 个：远 / 中 / 近三档透明度的柔和圆点
+const CELL_SIMPLE = 3; // 3 个：简化六角雪片，预烘焙三种朝向（六角对称，无需实时旋转）
+const CELL_DENDRITE = 6; // 1 个：精细树枝状六角雪片
+const CELL_FLUFFY = 7; // 2 个：蓬松团状雪片
+const ATLAS_CELLS = 9;
 const SNOW_BANK_COLUMN_WIDTH = 20;
 const SNOW_BANK_HOLD_SEC = 2.5;
 const MAX_TEXT_BANK_DEPTH = 7;
@@ -97,7 +108,8 @@ function resolveSnowPalette(theme: ThemeId): SnowPalette {
         `rgb(${accent} / 0.14)`,
         `rgb(${accent} / 0.18)`,
       ],
-      crystalStroke: `rgb(${accent} / 0.48)`,
+      flakeStroke: `rgb(${accent} / 0.62)`,
+      flakeFill: `rgb(${accent} / 0.20)`,
       settled: `rgb(${accent} / 0.31)`,
     };
   }
@@ -112,71 +124,131 @@ function resolveSnowPalette(theme: ThemeId): SnowPalette {
       `rgb(${accent} / 0.16)`,
       'rgb(255 255 255 / 0.22)',
     ],
-    crystalStroke: 'rgb(245 250 255 / 0.72)',
+    flakeStroke: 'rgb(248 252 255 / 0.92)',
+    flakeFill: 'rgb(235 246 255 / 0.30)',
     settled: 'rgb(230 244 255 / 0.70)',
   };
 }
 
-function createDotSprite(coreColor: string, glowColor: string): HTMLCanvasElement {
-  const size = DOT_SPRITE_HALF * 2;
-  const sprite = document.createElement('canvas');
-  sprite.width = size;
-  sprite.height = size;
-  const sctx = sprite.getContext('2d');
-  if (!sctx) return sprite;
-  const c = DOT_SPRITE_HALF;
-  const unitR = DOT_SPRITE_HALF / 2;
+function drawDot(sctx: CanvasRenderingContext2D, cx: number, cy: number, coreColor: string, glowColor: string) {
+  const unitR = SPRITE_HALF / 2;
   sctx.fillStyle = glowColor;
   sctx.beginPath();
-  sctx.arc(c, c, unitR * 1.9, 0, Math.PI * 2);
+  sctx.arc(cx, cy, unitR * 1.9, 0, Math.PI * 2);
   sctx.fill();
   sctx.fillStyle = coreColor;
   sctx.beginPath();
-  sctx.arc(c, c, unitR, 0, Math.PI * 2);
+  sctx.arc(cx, cy, unitR, 0, Math.PI * 2);
   sctx.fill();
-  return sprite;
 }
 
-function createCrystalSprite(glowColor: string, strokeColor: string): HTMLCanvasElement {
-  const size = CRYSTAL_SPRITE_HALF * 2;
-  const sprite = document.createElement('canvas');
-  sprite.width = size;
-  sprite.height = size;
-  const sctx = sprite.getContext('2d');
-  if (!sctx) return sprite;
-  const c = CRYSTAL_SPRITE_HALF;
-  const r = CRYSTAL_SPRITE_HALF * 0.62;
-  sctx.fillStyle = glowColor;
+interface FlakeBranch {
+  at: number;
+  len: number;
+}
+
+/** 六角雪片：实心六边形中心加六条主臂，每条主臂按 60° 长出对称分叉 */
+function drawSnowflake(
+  sctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  orientation: number,
+  hubRadius: number,
+  branches: readonly FlakeBranch[],
+  palette: SnowPalette,
+) {
+  const r = SPRITE_HALF * 0.8;
+  sctx.save();
+  sctx.translate(cx, cy);
+  sctx.rotate(orientation);
+  sctx.fillStyle = palette.glow[2];
   sctx.beginPath();
-  sctx.arc(c, c, r * 1.45, 0, Math.PI * 2);
+  sctx.arc(0, 0, r * 1.25, 0, Math.PI * 2);
   sctx.fill();
 
-  sctx.translate(c, c);
-  sctx.strokeStyle = strokeColor;
-  sctx.lineWidth = Math.max(1.2, r * 0.14);
+  sctx.strokeStyle = palette.flakeStroke;
+  sctx.fillStyle = palette.flakeFill;
+  sctx.lineWidth = Math.max(2, r * 0.17);
   sctx.lineCap = 'round';
+  sctx.lineJoin = 'round';
   sctx.beginPath();
-  for (let arm = 0; arm < 3; arm++) {
+  for (let k = 0; k < 6; k++) {
+    const a = (k * Math.PI) / 3;
+    const hx = Math.cos(a) * r * hubRadius;
+    const hy = Math.sin(a) * r * hubRadius;
+    if (k === 0) sctx.moveTo(hx, hy);
+    else sctx.lineTo(hx, hy);
+  }
+  sctx.closePath();
+  sctx.fill();
+  sctx.stroke();
+
+  sctx.beginPath();
+  for (let arm = 0; arm < 6; arm++) {
     const a = (arm * Math.PI) / 3;
-    const cos = Math.cos(a);
-    const sin = Math.sin(a);
-    sctx.moveTo(-cos * r, -sin * r);
-    sctx.lineTo(cos * r, sin * r);
-    const branchAt = r * 0.58;
-    const branchLen = r * 0.28;
-    for (const dir of [-1, 1]) {
-      const bx = cos * branchAt * dir;
-      const by = sin * branchAt * dir;
-      const b1 = a + Math.PI / 4;
-      const b2 = a - Math.PI / 4;
-      sctx.moveTo(bx, by);
-      sctx.lineTo(bx + Math.cos(b1) * branchLen * dir, by + Math.sin(b1) * branchLen * dir);
-      sctx.moveTo(bx, by);
-      sctx.lineTo(bx + Math.cos(b2) * branchLen * dir, by + Math.sin(b2) * branchLen * dir);
+    const ux = Math.cos(a);
+    const uy = Math.sin(a);
+    sctx.moveTo(ux * r * hubRadius, uy * r * hubRadius);
+    sctx.lineTo(ux * r, uy * r);
+    for (const { at, len } of branches) {
+      const bx = ux * r * at;
+      const by = uy * r * at;
+      for (const dir of [-1, 1]) {
+        const b = a + (dir * Math.PI) / 3;
+        sctx.moveTo(bx, by);
+        sctx.lineTo(bx + Math.cos(b) * r * len, by + Math.sin(b) * r * len);
+      }
     }
   }
   sctx.stroke();
-  return sprite;
+  sctx.restore();
+}
+
+/** 蓬松团状雪片：若干半透明圆团叠加，中心自然更密；偏移量固定，重建主题时外形一致 */
+const FLUFFY_BLOBS: readonly (readonly [number, number, number][])[] = [
+  [[0, 0, 0.42], [-0.34, -0.12, 0.3], [0.32, -0.2, 0.28], [0.1, 0.34, 0.3], [-0.2, 0.3, 0.24], [0.4, 0.18, 0.2]],
+  [[0, 0, 0.4], [0.3, 0.1, 0.32], [-0.36, 0.16, 0.26], [-0.1, -0.36, 0.3], [0.22, -0.32, 0.22], [-0.3, -0.3, 0.2]],
+];
+
+function drawFluffy(sctx: CanvasRenderingContext2D, cx: number, cy: number, variant: number, palette: SnowPalette) {
+  const r = SPRITE_HALF * 0.78;
+  const blobs = FLUFFY_BLOBS[variant];
+  sctx.fillStyle = palette.glow[2];
+  for (const [ox, oy, br] of blobs) {
+    sctx.beginPath();
+    sctx.arc(cx + ox * r, cy + oy * r, br * r * 1.45, 0, Math.PI * 2);
+    sctx.fill();
+  }
+  sctx.fillStyle = palette.core[1];
+  for (const [ox, oy, br] of blobs) {
+    sctx.beginPath();
+    sctx.arc(cx + ox * r, cy + oy * r, br * r, 0, Math.PI * 2);
+    sctx.fill();
+  }
+}
+
+const SIMPLE_BRANCHES: readonly FlakeBranch[] = [{ at: 0.58, len: 0.28 }];
+const DENDRITE_BRANCHES: readonly FlakeBranch[] = [
+  { at: 0.4, len: 0.3 },
+  { at: 0.68, len: 0.2 },
+];
+
+/** 把全部雪花形状一次性画进单张图集；仅在启用或主题变化时重建 */
+function createSnowAtlas(palette: SnowPalette): HTMLCanvasElement {
+  const atlas = document.createElement('canvas');
+  atlas.width = SPRITE_CELL * ATLAS_CELLS;
+  atlas.height = SPRITE_CELL;
+  const sctx = atlas.getContext('2d');
+  if (!sctx) return atlas;
+  const centerOf = (cell: number) => cell * SPRITE_CELL + SPRITE_HALF;
+  for (let i = 0; i < 3; i++) {
+    drawDot(sctx, centerOf(CELL_DOT + i), SPRITE_HALF, palette.core[i], palette.glow[i]);
+    drawSnowflake(sctx, centerOf(CELL_SIMPLE + i), SPRITE_HALF, (i * Math.PI) / 9, 0.34, SIMPLE_BRANCHES, palette);
+  }
+  drawSnowflake(sctx, centerOf(CELL_DENDRITE), SPRITE_HALF, 0, 0.2, DENDRITE_BRANCHES, palette);
+  drawFluffy(sctx, centerOf(CELL_FLUFFY), SPRITE_HALF, 0, palette);
+  drawFluffy(sctx, centerOf(CELL_FLUFFY + 1), SPRITE_HALF, 1, palette);
+  return atlas;
 }
 
 function makeFlake(width: number, height: number, factor: number, randomY: boolean): SnowFlake {
@@ -185,21 +257,40 @@ function makeFlake(width: number, height: number, factor: number, randomY: boole
   const depth = layer === 0 ? 0.58 : layer === 1 ? 0.92 : 1.32;
   const radius = (1.1 + factor * 1.4) * depth * (0.78 + Math.random() * 0.48);
   const baseSpeed = (22 + factor * 56) * depth;
-  const crystal = layer === 2 && Math.random() < 0.36;
+  // 远层保持柔和圆点作景深虚化；中层为简化六角雪片；近层 70% 树枝状雪片、30% 蓬松团状雪片
+  let cell: number;
+  let size: number;
+  let spins = false;
+  if (layer === 0) {
+    cell = CELL_DOT + Math.floor(Math.random() * 3);
+    size = radius * 4;
+  } else if (layer === 1) {
+    cell = CELL_SIMPLE + Math.floor(Math.random() * 3);
+    size = radius * 4.6;
+  } else if (Math.random() < 0.7) {
+    cell = CELL_DENDRITE;
+    size = radius * 4.8;
+    spins = true;
+  } else {
+    cell = CELL_FLUFFY + Math.floor(Math.random() * 2);
+    size = radius * 5.2;
+    spins = true;
+  }
   const alphaRoll = Math.random();
   const alphaBucket: 0 | 1 | 2 = alphaRoll < 0.33 ? 0 : alphaRoll < 0.67 ? 1 : 2;
   return {
     x: Math.random() * (width + 160) - 80,
     y: randomY ? Math.random() * height : -radius * 4 - Math.random() * 120,
-    layer,
-    radius: crystal ? radius * 1.35 : radius,
+    cell,
+    size,
+    radius: layer === 0 ? radius : radius * 1.2,
     speed: baseSpeed * (0.78 + Math.random() * 0.44),
     drift: (6 + factor * 22) * depth * (0.65 + Math.random() * 0.7),
     swayAmp: (8 + factor * 16) * (layer === 0 ? 0.65 : layer === 1 ? 1 : 1.25),
     swayFreq: 0.55 + Math.random() * 0.95,
     phase: Math.random() * Math.PI * 2,
     alphaBucket,
-    crystal,
+    spins,
     rotation: Math.random() * Math.PI * 2,
     spin: (Math.random() - 0.5) * 0.9,
   };
@@ -220,12 +311,7 @@ export const WorkspaceSnow: React.FC<WorkspaceSnowProps> = React.memo(({ intensi
   useEffect(() => {
     if (!active) return;
     const palette = resolveSnowPalette(theme);
-    const dotSprites: [HTMLCanvasElement, HTMLCanvasElement, HTMLCanvasElement] = [
-      createDotSprite(palette.core[0], palette.glow[0]),
-      createDotSprite(palette.core[1], palette.glow[1]),
-      createDotSprite(palette.core[2], palette.glow[2]),
-    ];
-    const crystalSprite = createCrystalSprite(palette.glow[2], palette.crystalStroke);
+    const atlas = createSnowAtlas(palette);
 
     let width = Math.max(1, window.innerWidth);
     let height = Math.max(1, window.innerHeight);
@@ -333,7 +419,7 @@ export const WorkspaceSnow: React.FC<WorkspaceSnowProps> = React.memo(({ intensi
             const f = flakes[i];
             f.y += f.speed * dt;
             f.x += (f.drift + Math.sin(elapsed * f.swayFreq + f.phase) * f.swayAmp) * dt;
-            if (f.crystal) f.rotation += f.spin * dt;
+            if (f.spins) f.rotation += f.spin * dt;
             const margin = f.radius * 4 + 40;
             const tip = f.y + f.radius;
             let landed = tip >= height;
@@ -357,46 +443,43 @@ export const WorkspaceSnow: React.FC<WorkspaceSnowProps> = React.memo(({ intensi
               }
             }
             if (landed || f.x > width + margin || f.x < -margin) {
-              const next = makeFlake(width, height, factor, false);
-              next.layer = f.layer;
-              flakes[i] = next;
+              flakes[i] = makeFlake(width, height, factor, false);
             }
           }
         }
 
-        // 按透明度分桶批量绘制圆点雪花，将每帧 globalAlpha 状态切换从数百次降至 3 次
+        // 圆点与小雪片不旋转，按透明度分桶从图集批量取图，每帧 globalAlpha 切换仅 3 次
         for (let bucket = 0; bucket < FLAKE_ALPHA_BUCKETS.length; bucket++) {
           ctx.globalAlpha = FLAKE_ALPHA_BUCKETS[bucket];
           for (let i = 0; i < flakes.length; i++) {
             const f = flakes[i];
-            if (f.crystal || f.alphaBucket !== bucket) continue;
-            const drawSize = f.radius * 4;
-            const half = drawSize * 0.5;
-            ctx.drawImage(dotSprites[f.layer], f.x - half, f.y - half, drawSize, drawSize);
+            if (f.spins || f.alphaBucket !== bucket) continue;
+            const half = f.size * 0.5;
+            ctx.drawImage(atlas, f.cell * SPRITE_CELL, 0, SPRITE_CELL, SPRITE_CELL, f.x - half, f.y - half, f.size, f.size);
           }
         }
 
-        // 集中绘制旋转六角冰晶，最后统一恢复单位变换
-        let drewCrystal = false;
+        // 近层大雪片集中绘制：旋转加横向缩放模拟空中翻转，最后统一恢复单位变换
+        let drewSpinner = false;
         for (let bucket = 0; bucket < FLAKE_ALPHA_BUCKETS.length; bucket++) {
           let alphaSet = false;
           for (let i = 0; i < flakes.length; i++) {
             const f = flakes[i];
-            if (!f.crystal || f.alphaBucket !== bucket) continue;
+            if (!f.spins || f.alphaBucket !== bucket) continue;
             if (!alphaSet) {
               ctx.globalAlpha = FLAKE_ALPHA_BUCKETS[bucket];
               alphaSet = true;
             }
-            drewCrystal = true;
-            const drawSize = (f.radius / (CRYSTAL_SPRITE_HALF * 0.62)) * (CRYSTAL_SPRITE_HALF * 2);
-            const half = drawSize * 0.5;
+            drewSpinner = true;
+            const half = f.size * 0.5;
+            const flip = 0.5 + 0.5 * Math.abs(Math.cos(elapsed * f.swayFreq * 1.3 + f.phase));
             const cos = Math.cos(f.rotation);
             const sin = Math.sin(f.rotation);
-            ctx.setTransform(cos * scaleX, sin * scaleY, -sin * scaleX, cos * scaleY, f.x * scaleX, f.y * scaleY);
-            ctx.drawImage(crystalSprite, -half, -half, drawSize, drawSize);
+            ctx.setTransform(cos * flip * scaleX, sin * flip * scaleY, -sin * scaleX, cos * scaleY, f.x * scaleX, f.y * scaleY);
+            ctx.drawImage(atlas, f.cell * SPRITE_CELL, 0, SPRITE_CELL, SPRITE_CELL, -half, -half, f.size, f.size);
           }
         }
-        if (drewCrystal) ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+        if (drewSpinner) ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
 
         ctx.globalAlpha = 1;
         ctx.beginPath();

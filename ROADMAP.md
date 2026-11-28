@@ -32,6 +32,7 @@
 - [x] 2026-11-19 09:15 版本号升到 2.2.2 并生成安装包 `OneAI-Setup-2.2.2.exe`（85319058 字节），随 GitHub Release `v2.2.2` 发布；包含运行中转圈、任务完成提示音、休息提醒称呼与输出静默判断修复。
 
 ### 待办 / 后续增强
+- [ ] 桌面验收白噪音（设置 → 提醒）：雨声 / 风声 / 棕噪音的实际听感与音量曲线、「跟随雨雪」切换时的淡入淡出、启动后首次点击才出声的自动播放限制。
 - [ ] 桌面验收最新 macOS Liquid Glass 全局视觉、三档玻璃材质切换、工作区背景（6 套内置 macOS 壁纸、自定义本地图片、可见度 / 模糊度与透明终端叠加）、全工作区雨雪效果（雨景与雪景默认关闭、独立开关及 0% ~ 100% 强度调节）以及运行中任务卡片环绕流光边框的实际桌面观感与核显占用。
 - [ ] 桌面验收 26 款 CLI 官方图标观感、右键任务卡片「一键审核」在真实 CLI 启动就绪后的自动投递审核体验，以及「设置 → 时间」工作时间段与自定义问候语的桌面观感。
 - [ ] 桌面验收 2.3.2 新交互：目录树「Git 提交」弹窗的实际提交与 diff 观感、侧栏文件夹「+」菜单按首字母排序及 hover 霓虹流光框视觉手感，以及无 Node.js / 低版本 Node.js 环境下欢迎页 Pi 的提醒与跳转。
@@ -75,6 +76,10 @@
 - 会话日志缓冲保留最近约 2 MiB 输出；更早内容不会出现在复制和导出的日志中。
 
 ## 4. 最近验证
+- **2026-11-28 22:18** OneAI 2.3.7 发布前验证通过 `npx tsc --noEmit`、`check:i18n`（974 键 0 缺失）、`check:main` 与 `build:win`；[Windows x64 安装包](D:/GitHub/OneAI/release/OneAI-Setup-2.3.7.exe) 85,755,032 字节（未签名），SHA-512 与 `latest.yml`（version 2.3.7）一致，`blockmap` 89,191 字节。
+- **2026-11-28 22:11** 新增白噪音（[whiteNoise.ts](D:/GitHub/OneAI/src/renderer/src/whiteNoise.ts)）：`tsc --noEmit` 无报错、`check:i18n`（974 键 0 缺失）与 `check:main` 通过；未跑 `check:ui`，未实际听音。
+- **2026-11-28 22:30** 自定义 CLI 会话格式：`tsc --noEmit`、`check:i18n`（966 键 0 缺失）、`check:main`（31/31，新增会话格式清洗与摘要映射单测）、`check:ui`（642 项全部通过）通过；未用真实包装命令手工验证。
+- **2026-11-28 21:41** 下雪效果改为雪片形态（[WorkspaceSnow.tsx](D:/GitHub/OneAI/src/renderer/src/components/WorkspaceSnow.tsx)）：通过 `npx tsc --noEmit` 无报错与 `check:ui` 全部通过；未做帧耗时对比，真实桌面端观感与性能待手工验收。
 - **2026-11-28 17:38** OneAI 2.3.6 发布前验证通过 `npx tsc --noEmit`、`check:i18n`、`check:main`（30/30）、`check:ui`（0 项失败）与 `build:win`。已核对 [Windows x64 安装包](D:/GitHub/OneAI/release/OneAI-Setup-2.3.6.exe) （85,751,958 字节，未签名）的 SHA-512 与 `latest.yml`（version 2.3.6）一致，`OneAI-Setup-2.3.6.exe.blockmap` 为 89,116 字节。
 - **2026-11-28 17:30** 修复 `check:ui` 中「零未捕获渲染错误」断言的换行转义（原先生成的检查脚本有语法错误，导致 Electron 崩溃、检查一直挂起），通过 `npx tsc --noEmit`、`check:i18n`（962 键无缺失）、`check:main` 与 `check:ui`（643/643）。`build:win` 重新生成 [Windows x64 安装包](D:/GitHub/OneAI/release/OneAI-Setup-2.3.5.exe) （北京时间 2026-11-28 17:30，85,752,059 字节，未签名），SHA-512 与 `latest.yml` 一致，`blockmap` 为 88,978 字节；该改动随 2.3.6 发布。
 - **2026-11-28 16:21** CLI 置顶、顶部扫光与状态栏雨雪碰撞通过类型检查、`check:main`（30/30）、`check:i18n`（962 键无缺失）与 `check:ui`（640/640，输出另记录一条 `dimensions` 异常）。使用隔离配置完整退出和重新启动 Electron，确认置顶顺序恢复。1440×900 与 3840×2160 下以模拟 120 Hz 帧时钟验证 100% 雨雪、文字上的水花与积雪融化、36 FPS 上限及暂停行为。Windows 安装包已生成，大小 85,833,999 字节，未签名。
@@ -93,14 +98,13 @@
 - **2026-11-27 17:40** OneAI 2.3.1 通过类型检查、`check:i18n`（792 个键，0 缺失）、`check:main`（24/24）、`check:ui`（566/566）与 `build:win`。已核对 [Windows x64 安装包](D:/GitHub/OneAI/release/OneAI-Setup-2.3.1.exe) （北京时间 2026-11-27 17:40:35，85,707,872 字节）的大小、`latest.yml`（338 字节）中的版本号与 SHA-512，以及 `OneAI-Setup-2.3.1.exe.blockmap`（89,070 字节）。
 - **2026-11-27 17:33** TypeScript 生产构建、主进程（24/24）、多语言（792 个键，0 缺失）、界面回归（566/566）和 Windows x64 NSIS 打包通过。打包版通过真实鼠标点击在 Antigravity 1.5.18 终端打开原生模型选择器。Electron 对照检查确认卡片间距由 2 px 增至 6 px，运行光效和连线正常。已核对 [Windows x64 安装包](D:/GitHub/OneAI/release/OneAI-Setup-2.3.0.exe) （北京时间 2026-11-27 17:32:27，85,707,936 字节）的大小、SHA-512 和增量更新块映射。
 - **2026-11-27 17:18** 状态栏模型入口与侧栏完整连线通过类型检查、`check:main`（24/24）、`check:i18n`（792 个键，0 缺失）、`check:ui`（561/561）及 Windows x64 NSIS 打包。Electron 回归覆盖焦点报告期间仍提交命令、连线持续流向任务卡片和减少动态效果时的静态连线。新打包的 OneAI 通过真实鼠标点击打开隔离 Codex 会话的原生模型选择器。已核对 `latest.yml` 的文件大小和 SHA-512。[Windows x64 安装包](D:/GitHub/OneAI/release/OneAI-Setup-2.3.0.exe) （北京时间 2026-11-27 17:17:14，85,705,860 字节，未签名）。
-- **2026-11-27 16:59** 分支切换、冲突对比、原生模型入口、Codex 模型信息兜底与侧栏脉冲线通过生产构建、`check:main`（24/24）、`check:i18n`（792 个键，0 缺失）及 `check:ui`（559/559）。用 Windows Electron 和临时 Git 仓库实测分支切换、未提交改动保护与冲突对比。隔离的真实 Codex CLI 通过 ConPTY 打开原生模型选择器，测试退出时出现 `AttachConsole` 清理提示。
-- **2026-11-27 16:17** 主页和项目目录树复制文件通过类型检查、`check:main`（22/22）、`check:i18n`（769 个键，0 缺失）和 `check:ui`（545/545）。Windows 文件数据对象检查通过，覆盖中文文件名、空格和复制操作标记。
-- **2026-11-27 09:23** OneAI 2.3.0 通过类型检查、`check:main`（21/21）、`check:i18n`（766 个键，0 缺失）、`check:ui`（535/535）及 `build:win`。已核对安装包和应用内版本、`latest.yml` 中的 SHA-512 与文件大小，以及增量更新块映射。[Windows x64 安装包](D:/GitHub/OneAI/release/OneAI-Setup-2.3.0.exe) （北京时间 2026-11-27 09:23:00，85,701,753 字节，未签名）。
-- **2026-11-27 07:55** 状态竞争修复通过类型检查、`check:main`（21/21）、`check:i18n`（766 个键，0 缺失）、`check:ui`（535/535）和 `build:win`。延迟采样回归覆盖提前进入等待、重复提示、终端退出、重开后收到旧结果，以及返回结果后立即重新判断。移除采样保护的隔离对照复现提前切换。已核对 [Windows 安装包](D:/GitHub/OneAI/release/shell-activity-status/OneAI-Setup-2.2.10.exe) （北京时间 2026-11-27 07:54:58，85,697,353 字节，未签名）及更新元数据中的版本和 SHA-512。
 
 
 
 ## 5. 最近完成
+- **2026-11-28 22:18** OneAI 版本升至 2.3.7，纳入白噪音（雨声 / 风声 / 棕噪音）、自定义 CLI 会话格式与雪片形态下雪效果；提交并推送至 `main` 与 `v2.3.7`，上传安装包、`latest.yml` 与 `.blockmap` 至 GitHub Release v2.3.7。独立网络工具 `tools/` 未纳入本次发布。
+- **2026-11-28 22:30** 自定义 CLI 新增「会话格式」（claude / codex / kimi，设置 → CLI）：适用于这些 CLI 的包装命令，任务行第二行即可显示最近一条用户消息；额度、历史会话与用量统计仍只对内置 CLI 提供。[customClis.ts](D:/GitHub/OneAI/src/renderer/src/customClis.ts)、[taskSummary.ts](D:/GitHub/OneAI/src/renderer/src/taskSummary.ts)、[CliSettings.tsx](D:/GitHub/OneAI/src/renderer/src/components/CliSettings.tsx)
+- **2026-11-28 21:41** 下雪效果由圆点改为雪片：远景保持柔和圆点，中景为六角小雪片（预烘焙 3 种朝向，不旋转），近景为旋转翻转的树枝状与蓬松团状雪片（占总数约 18%）。所有形状合并进单张离屏图集，帧循环仅 drawImage 取图，雪花总数、36 FPS 限帧与零开销停帧机制不变。[WorkspaceSnow.tsx](D:/GitHub/OneAI/src/renderer/src/components/WorkspaceSnow.tsx)
 - **2026-11-28 17:38** OneAI 版本升至 2.3.6，纳入文件夹「+」菜单 CLI 一键置顶、顶部霓虹灯条放慢、状态栏雨滴水花与积雪效果，以及 `check:ui` 断言修复；提交并推送至 `main` 与 `v2.3.6`，上传 Windows 安装包、`latest.yml` 与 `.blockmap` 至 GitHub Release v2.3.6。独立网络工具 `tools/` 未纳入本次发布。
 - **2026-11-28 16:21** 文件夹「+」菜单支持一键置顶或取消置顶 CLI，所有文件夹共享设置，应用重启后恢复。顶部霓虹灯条单程由 2.4 秒放慢到 4 秒。雨滴碰到底部状态栏最下面一行的文字会向上飞溅，雪花会在文字上沿慢慢堆积后融化。雨雪共用位置缓存，水花上限为 28 处，积雪合并绘制。[功能说明](D:/GitHub/OneAI/docs/features.zh-CN.md)
 - **2026-11-28 15:28** OneAI 版本升至 2.3.5，纳入 CPU / GPU 占用专项优化（工作区雨景默认改为关闭、雨雪 36 FPS 限帧与窗口失焦停帧、雪景离屏精灵图集与零帧缓冲重分配、收敛 Liquid Glass 实时 `backdrop-filter`、静默任务暂停 WMI 进程采样、`oneai-bg://` 流式本地壁纸与离屏预烘焙模糊、按需启用终端透明）并移除运行中任务卡片内部白色斜向扫光动画；提交并推送至 `main` 与 `v2.3.5`，上传 Windows 安装包、`latest.yml` 与 `.blockmap` 至 [GitHub Release v2.3.5](https://github.com/Qingxuan365/oneAI/releases/tag/v2.3.5) 。独立网络工具 `tools/` 未纳入本次发布。
@@ -119,7 +123,4 @@
 - **2026-11-27 17:40** OneAI 版本升至 2.3.1，纳入后台静默 Shell 追踪、关闭到系统托盘、目录树本地分支切换与只读 Git 冲突对比、目录树复制文件、底部状态栏原生模型选择器（含 Antigravity）、侧栏主页入口与脉冲连线等改进；提交并推送至 `main` 与 `v2.3.1`，上传 Windows 安装包、`latest.yml` 与 `.blockmap` 至 [GitHub Release v2.3.1](https://github.com/Qingxuan365/oneAI/releases/tag/v2.3.1) 。独立网络工具 `tools/` 未纳入本次发布。
 - **2026-11-27 17:33** 状态栏接入 Antigravity 原生模型选择器。侧栏文件夹「+」菜单优先显示 Claude Code、Codex、Antigravity、Kimi Code、Pi、OpenCode，其后是其他已安装的 CLI 和系统终端。展开侧栏的相邻任务卡片间距增至 6 px。
 - **2026-11-27 17:18** 修复点击确认时 xterm 的焦点报告被当成新输入、导致原生模型命令取消提交的问题。展开侧栏时，主题色渐变沿完整连线从文件夹持续流向运行中的任务卡片，减少动态效果时显示静态连线。已重建 OneAI 2.3.0 Windows x64 安装包、`latest.yml` 和增量更新块映射。
-- **2026-11-27 16:59** 目录树增加本地分支切换和只读 Git 冲突对比。底部模型入口在确认输入框为空后打开受支持 CLI 的原生选择器，Codex 摘要缺少模型元数据时保留可用的模型名与思考强度。界面回归窗口静音，仍检查提示音触发次数。
-- **2026-11-27 16:17** 在侧栏 Dashboard 右侧添加「主页」，回到初始任务页并保留后台终端。折叠侧栏保留主页图标。
-- **2026-11-27 09:23** 应用及锁文件版本升级至 2.3.0，纳入后台 Shell 检测、任务状态切换保护和关闭到系统托盘。已生成本地 Windows 安装包及更新文件。
 

@@ -3,6 +3,12 @@ import { t } from './i18n';
 /** 任务行第二行（会话里最近一条用户消息）目前只支持有可读会话文件的 CLI；其他 CLI 保持单行，不显示编造的信息 */
 export const SUMMARY_CLIS: ReadonlySet<string> = new Set(['claude', 'codex', 'kimi']);
 
+/** 任务读取会话时使用的会话格式：内置 CLI 就是自身 id，自定义 CLI 取其「会话格式」，不支持则返回 undefined */
+export function summaryFormatOf(groupId: string, cli?: { sessionFormat?: string }): string | undefined {
+  if (SUMMARY_CLIS.has(groupId)) return groupId;
+  return cli?.sessionFormat && SUMMARY_CLIS.has(cli.sessionFormat) ? cli.sessionFormat : undefined;
+}
+
 /** offsetHours 与顶栏时钟共用「设置 → 时间」里的增加小时数，保证「新会话 · 时间」与顶栏时钟对得上 */
 export function formatClock(timestamp: number, offsetHours = 0): string {
   const date = new Date(timestamp + (Number.isFinite(offsetHours) ? offsetHours : 0) * 3_600_000);
