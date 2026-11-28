@@ -49,7 +49,23 @@ function FolderTaskPulses({ runningIds, layoutKey }: { runningIds: string; layou
     const observer = new ResizeObserver(measure);
     observer.observe(list);
     rows.forEach((row) => observer.observe(row));
-    return () => observer.disconnect();
+    const syncPlayback = () => {
+      const node = svg.current;
+      if (!node || typeof node.pauseAnimations !== 'function') return;
+      const focused = typeof document.hasFocus === 'function' ? document.hasFocus() : true;
+      if (document.hidden || !focused) node.pauseAnimations();
+      else node.unpauseAnimations();
+    };
+    syncPlayback();
+    window.addEventListener('focus', syncPlayback);
+    window.addEventListener('blur', syncPlayback);
+    document.addEventListener('visibilitychange', syncPlayback);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('focus', syncPlayback);
+      window.removeEventListener('blur', syncPlayback);
+      document.removeEventListener('visibilitychange', syncPlayback);
+    };
   }, [runningIds, layoutKey]);
 
   const yMax = Math.max(0, ...routes.map((route) => route.y));

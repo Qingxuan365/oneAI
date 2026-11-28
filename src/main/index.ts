@@ -18,7 +18,7 @@ import { setupWorkspaceStore } from './workspace-store';
 import { registerMusicScheme, setupMusicLibrary } from './music-library';
 import { allowPreviewFilePaths, isImageExtension, setupFilePreview } from './file-preview';
 import { setupProjectTree } from './project-tree';
-import { setupWorkspaceBackground } from './workspace-background';
+import { registerBackgroundScheme, setupWorkspaceBackground } from './workspace-background';
 import { bindWindowState, loadWindowState, WindowStateTracker } from './window-state';
 import { getLanguage, setLanguage, t } from './i18n';
 import { quoteTerminalPath } from '../shared/paths';
@@ -27,6 +27,7 @@ import { startDiagnostics, timed, watchWindow } from './diagnostics';
 import { setupUpdater, updaterService } from './updater';
 
 registerMusicScheme();
+registerBackgroundScheme();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

@@ -591,6 +591,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
   useEffect(() => {
     const resolved = resolveXtermTheme(theme, transparentBackground);
     instancesRef.current.forEach(({ term }) => {
+      if (Boolean(term.options.allowTransparency) !== transparentBackground) term.options.allowTransparency = transparentBackground;
       term.options.theme = resolved;
       try { term.refresh(0, term.rows - 1); } catch {}
     });
@@ -1058,7 +1059,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
           smoothScrollDuration: smoothScroll ? SMOOTH_SCROLL_MS : 0,
           cursorInactiveStyle: 'none',
           convertEol: false,
-          allowTransparency: true,
+          allowTransparency: transparentBackground,
           scrollback: 5000,
           // Alt+单击默认会向 CLI 发一串方向键来「移动光标」，在自绘界面的 CLI 里会造成乱跳
           altClickMovesCursor: false,

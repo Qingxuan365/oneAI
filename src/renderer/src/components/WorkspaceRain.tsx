@@ -28,8 +28,10 @@ interface RainSplash {
 
 const MAX_DPR = 2;
 const MAX_DT_SEC = 0.05;
+// 限制氛围层最大绘制帧率为 36 FPS，避免在 120Hz/144Hz/240Hz 高刷屏上产生数倍全屏透明图层合成开销
+const TARGET_FRAME_INTERVAL_MS = 1000 / 36;
 
-export function clampRainIntensity(value: unknown, fallback = 35): number {
+export function clampRainIntensity(value: unknown, fallback = 0): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
   return Math.max(0, Math.min(100, Math.round(value)));
 }
@@ -73,57 +75,71 @@ function makeDrop(width: number, height: number, factor: number, randomY: boolea
 
 /**
  * 全工作区下雨氛围层：纯 Canvas 2D 分层绘制，pointer-events: none 不干扰任何交互，
- * 窗口隐藏或强度为 0 时零动画开销，并遵循系统「减少动态效果」设置。
+ * 固定 36 FPS 帧率上限，拖动滑块热更新雨滴数量不重分配 GPU 帧缓冲，窗口隐藏/失焦或强度为 0 时零动画开销。
  */
 export const WorkspaceRain: React.FC<WorkspaceRainProps> = React.memo(({ intensity, theme }) => {
   const level = clampRainIntensity(intensity, 0);
+  const active = level > 0;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const levelRef = useRef(level);
+  levelRef.current = level;
+  const reconcileRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    if (level <= 0) return;
+    if (!active) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const factor = level / 100;
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const colors = resolveRainColors(theme);
-    const windRatio = 0.08 + factor * 0.14;
-    const widths: [number, number, number] = [
-      0.65 + factor * 0.35,
-      0.85 + factor * 0.55,
-      1.15 + factor * 0.75,
-    ];
 
     let width = Math.max(1, window.innerWidth);
     let height = Math.max(1, window.innerHeight);
     let drops: RainDrop[] = [];
     const splashes: RainSplash[] = [];
     let rafId = 0;
-    let lastTime = 0;
+    let lastDrawTime = 0;
+    let windowFocused = typeof document.hasFocus === 'function' ? document.hasFocus() : true;
 
-    const targetCount = () => {
+    const currentFactor = () => Math.max(0.01, levelRef.current / 100);
+
+    const targetCount = (factor: number) => {
       const areaScale = Math.max(0.55, Math.min(2.2, (width * height) / (1440 * 900)));
       return Math.round((24 + factor * 186) * areaScale);
+    };
+
+    const syncDropPool = (factor: number) => {
+      const desired = targetCount(factor);
+      if (drops.length < desired) {
+        while (drops.length < desired) drops.push(makeDrop(width, height, factor, true));
+      } else if (drops.length > desired) {
+        drops.length = desired;
+      }
     };
 
     const syncSize = () => {
       width = Math.max(1, window.innerWidth);
       height = Math.max(1, window.innerHeight);
       const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
-      canvas.width = Math.round(width * dpr);
-      canvas.height = Math.round(height * dpr);
+      const nextW = Math.round(width * dpr);
+      const nextH = Math.round(height * dpr);
+      if (canvas.width !== nextW) canvas.width = nextW;
+      if (canvas.height !== nextH) canvas.height = nextH;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      const desired = targetCount();
-      if (drops.length < desired) {
-        while (drops.length < desired) drops.push(makeDrop(width, height, factor, true));
-      } else if (drops.length > desired) {
-        drops = drops.slice(0, desired);
-      }
+      syncDropPool(currentFactor());
     };
 
     const renderFrame = (dt: number) => {
+      const factor = currentFactor();
+      const windRatio = 0.08 + factor * 0.14;
+      const widths: [number, number, number] = [
+        0.65 + factor * 0.35,
+        0.85 + factor * 0.55,
+        1.15 + factor * 0.75,
+      ];
+
       ctx.clearRect(0, 0, width, height);
       ctx.lineCap = 'round';
 
@@ -168,27 +184,33 @@ export const WorkspaceRain: React.FC<WorkspaceRainProps> = React.memo(({ intensi
           const s = splashes[i];
           s.age += dt;
           if (s.age >= s.maxAge) {
-            splashes.splice(i, 1);
+            splashes[i] = splashes[splashes.length - 1];
+            splashes.pop();
             continue;
           }
           const progress = s.age / s.maxAge;
           const rx = s.radius * (0.35 + progress * 0.95);
           const ry = Math.max(0.8, rx * 0.28);
-          ctx.save();
           ctx.globalAlpha = 1 - progress;
           ctx.beginPath();
           ctx.ellipse(s.x, s.y, rx, ry, 0, Math.PI, Math.PI * 2);
           ctx.stroke();
-          ctx.restore();
         }
+        ctx.globalAlpha = 1;
       }
     };
 
+    const shouldPause = () => document.hidden || !windowFocused;
+
     const tick = (now: number) => {
       rafId = 0;
-      if (document.hidden) return;
-      const dt = lastTime > 0 ? Math.min(MAX_DT_SEC, (now - lastTime) / 1000) : 1 / 60;
-      lastTime = now;
+      if (shouldPause()) return;
+      if (lastDrawTime > 0 && now - lastDrawTime < TARGET_FRAME_INTERVAL_MS - 1) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+      const dt = lastDrawTime > 0 ? Math.min(MAX_DT_SEC, (now - lastDrawTime) / 1000) : 1 / 36;
+      lastDrawTime = now;
       renderFrame(dt);
       rafId = requestAnimationFrame(tick);
     };
@@ -198,17 +220,31 @@ export const WorkspaceRain: React.FC<WorkspaceRainProps> = React.memo(({ intensi
         renderFrame(0);
         return;
       }
-      if (document.hidden || rafId) return;
-      lastTime = 0;
+      if (shouldPause() || rafId) return;
+      lastDrawTime = 0;
       rafId = requestAnimationFrame(tick);
     };
 
-    const onVisibility = () => {
-      if (document.hidden) {
-        if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
-      } else {
-        start();
+    const stop = () => {
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = 0;
       }
+    };
+
+    const onVisibility = () => {
+      if (shouldPause()) stop();
+      else start();
+    };
+
+    const onFocus = () => {
+      windowFocused = true;
+      start();
+    };
+
+    const onBlur = () => {
+      windowFocused = false;
+      stop();
     };
 
     const onResize = () => {
@@ -216,18 +252,32 @@ export const WorkspaceRain: React.FC<WorkspaceRainProps> = React.memo(({ intensi
       if (reducedMotion) renderFrame(0);
     };
 
+    reconcileRef.current = () => {
+      syncDropPool(currentFactor());
+      if (reducedMotion) renderFrame(0);
+    };
+
     syncSize();
     start();
     window.addEventListener('resize', onResize);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
-      if (rafId) cancelAnimationFrame(rafId);
+      reconcileRef.current = null;
+      stop();
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [level, theme]);
+  }, [active, theme]);
 
-  if (level <= 0) return null;
+  useEffect(() => {
+    if (active) reconcileRef.current?.();
+  }, [active, level]);
+
+  if (!active) return null;
 
   return (
     <canvas

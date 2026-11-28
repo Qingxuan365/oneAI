@@ -239,7 +239,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   });
   const [bgError, setBgError] = useState('');
   const [bgSelecting, setBgSelecting] = useState(false);
-  const rainIntensity = clampRainIntensity(settings.rainIntensity, 35);
+  const rainIntensity = clampRainIntensity(settings.rainIntensity, 0);
   const snowIntensity = clampSnowIntensity(settings.snowIntensity, 0);
   const bgPreset = settings.workspaceBackgroundPreset ?? 'none';
   const bgOpacity = clampBackgroundOpacity(settings.workspaceBackgroundOpacity, 32);

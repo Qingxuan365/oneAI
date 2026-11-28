@@ -799,8 +799,6 @@ html, body, #root {
   .glass-card {
     background-color: rgb(var(--color-surface) / var(--glass-card-alpha));
     background-image: var(--glass-sheen);
-    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
     box-shadow: var(--glass-shadow-card), inset 0 1px 0 var(--glass-spec-top);
   }
   .glass-segmented {
@@ -847,6 +845,33 @@ html, body, #root {
   }
 }
 
+/*
+ * 按需启用实时 backdrop-filter：
+ * 1. 纯实色档位（solid）或系统开启「降低透明度」时，显式关闭所有 backdrop-filter 合成通道；
+ * 2. 未启用工作区壁纸（无 data-has-bg）时，平铺在单色画布上的侧栏与顶栏背后只有纯色，关闭无效高斯模糊（仅保留悬浮菜单与弹窗）；
+ * 3. 已在磨砂容器内部的子面板只保留半透明色值与高光边线，避免多层嵌套重复创建离屏模糊纹理。
+ */
+:root[data-glass='solid'] :is(.glass-surface, .glass-panel, .glass-popover, .glass-card, .modal-overlay),
+:root[data-glass='solid'] #oneai-sidebar .backdrop-blur-md {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+@media (prefers-reduced-transparency: reduce) {
+  :is(.glass-surface, .glass-panel, .glass-popover, .glass-card, .modal-overlay),
+  #oneai-sidebar .backdrop-blur-md {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
+:root:not([data-has-bg='true']) :is(.glass-surface, .glass-panel) {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+:is(.glass-surface, .glass-popover) :is(.glass-surface, .glass-panel) {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 /* Dashboard 热力图无日志日期斜线底纹，颜色取自当前主题语义变量 */
 .heatmap-cell-missing {
   background-color: rgb(var(--color-control) / 0.35);
@@ -872,14 +897,10 @@ html, body, #root {
   0%, 15% { transform: translateX(0); }
   85%, 100% { transform: translateX(calc(var(--marquee-dist) * -1)); }
 }
-/* macOS 液态玻璃流动光束指示：顶栏扫光束与运行中任务卡片同步流光边框 + 柔光扫过 */
+/* macOS 液态玻璃流动光束指示：顶栏扫光束与运行中任务卡片同步柔和主题色流光边框（不含卡片内部白色扫光） */
 @keyframes topbar-glass-sweep {
   0% { transform: translateX(0%); }
   100% { transform: translateX(240%); }
-}
-@keyframes task-glass-sweep {
-  0% { transform: translateX(-115%) skewX(-20deg); }
-  100% { transform: translateX(260%) skewX(-20deg); }
 }
 @keyframes task-neon-spin {
   from { transform: translate(-50%, -50%) rotate(0deg); }
@@ -920,8 +941,7 @@ html, body, #root {
     90deg,
     transparent 0%,
     rgb(var(--color-accent) / 0.35) 16%,
-    rgb(var(--color-accent) / 0.96) 40%,
-    rgb(255 255 255 / 0.92) 50%,
+    rgb(var(--color-accent) / 0.96) 45%,
     rgb(var(--color-violet) / 0.95) 60%,
     rgb(var(--color-accent) / 0.35) 84%,
     transparent 100%
@@ -932,7 +952,7 @@ html, body, #root {
 .folder-task-flow-highlight { stop-color: rgb(var(--color-accent)); }
 .folder-task-flow-middle { stop-color: rgb(var(--color-violet) / 0.92); }
 .folder-task-flow-line {
-  filter: drop-shadow(0 0 3px rgb(var(--color-accent) / 0.55));
+  /* 不加 SVG drop-shadow 滤镜，避免 SMIL 渐变动画每帧触发主线程高斯阴影重绘 */
 }
 .task-neon-ring {
   position: absolute;
@@ -958,36 +978,15 @@ html, body, #root {
   background: conic-gradient(
     from 0deg,
     rgb(var(--color-accent) / 0.22) 0deg,
-    rgb(var(--color-accent) / 0.95) 28deg,
-    rgb(255 255 255 / 0.95) 48deg,
+    rgb(var(--color-accent) / 0.95) 36deg,
     rgb(var(--color-violet) / 0.96) 72deg,
     rgb(var(--color-accent) / 0.32) 108deg,
     rgb(var(--color-accent) / 0.18) 180deg,
-    rgb(var(--color-accent) / 0.95) 208deg,
-    rgb(255 255 255 / 0.95) 228deg,
+    rgb(var(--color-accent) / 0.95) 216deg,
     rgb(var(--color-violet) / 0.96) 252deg,
     rgb(var(--color-accent) / 0.32) 288deg,
     rgb(var(--color-accent) / 0.22) 360deg
   );
-}
-/* 卡片内部同色系玻璃高光扫动，呼应顶部扫光束（位于背景与文字之间） */
-.task-neon-running::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  z-index: 0;
-  background: linear-gradient(
-    105deg,
-    transparent 0%,
-    rgb(var(--color-accent) / 0.14) 30%,
-    rgb(255 255 255 / 0.24) 50%,
-    rgb(var(--color-violet) / 0.14) 70%,
-    transparent 100%
-  );
-  width: 48%;
-  opacity: 0.95;
 }
 .cli-menu-neon-item {
   position: relative;
@@ -1029,9 +1028,9 @@ html, body, #root {
     animation: task-neon-spin 2.4s linear infinite;
     will-change: transform;
   }
-  .task-neon-running::after {
-    animation: task-glass-sweep 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-    will-change: transform;
+  :root[data-window-focused='false'] .topbar-neon-track.is-running .topbar-neon-beam,
+  :root[data-window-focused='false'] .task-neon-ring::before {
+    animation-play-state: paused;
   }
   .marquee-text.is-overflow.is-playing { animation: marquee-slide var(--marquee-duration) linear infinite alternate; }
   .marquee-title-box:hover .marquee-text.is-overflow.is-playing { animation-play-state: paused; }
@@ -1049,9 +1048,6 @@ html, body, #root {
   .task-neon-ring::before {
     animation: none;
     opacity: 0.9;
-  }
-  .task-neon-running::after {
-    display: none;
   }
 }
 

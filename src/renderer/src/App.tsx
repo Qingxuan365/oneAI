@@ -22,7 +22,7 @@ import { sanitizeMusicStreams } from './musicStreams';
 import { dateLocale, isLanguage, setLanguage, systemLanguage, t } from './i18n';
 import { quoteTerminalPath } from '../../shared/paths';
 import { THEME_MODE } from './themes';
-import { forgetUserActivity, hasVisibleOutput, isTaskAlive, isUserEcho, startOutcome } from './taskStatus';
+import { forgetUserActivity, getLastUserActivityAt, hasVisibleOutput, isTaskAlive, isUserEcho, startOutcome } from './taskStatus';
 import { playTaskDoneSound } from './taskDoneSound';
 import { buildReviewPrompt, buildReviewTaskTitle } from './reviewPrompt';
 import { DEFAULT_GREETING_MESSAGES, DEFAULT_WORK_END_TIME, DEFAULT_WORK_START_TIME, normalizeTimeString, sanitizeGreetingMessages } from './workGreeting';
@@ -47,7 +47,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   onboardingDone: false,
   theme: 'system',
   glassMaterial: 'tinted',
-  rainIntensity: 35,
+  rainIntensity: 0,
   snowIntensity: 0,
   workspaceBackgroundPreset: 'none',
   workspaceBackgroundImage: '',
@@ -88,6 +88,8 @@ const appOpenedAt = Date.now();
 const IDLE_AFTER_MS = 4_000;
 const DONE_NOTIFY_AFTER_MS = 10_000;
 const SHELL_POLL_INTERVAL_MS = 2_000;
+const HIDDEN_MUTED_SHELL_POLL_INTERVAL_MS = 15_000;
+const QUIET_SHELL_POLL_GRACE_MS = 12_000;
 const SHELL_ACTIVITY_TTL_MS = 6_000;
 const SHELL_ACTIVITY_CLIS = new Set(['claude', 'codex', 'agy', 'kimi', 'pi']);
 const STARTUP_GRACE_MS = 5_000;
@@ -445,6 +447,22 @@ export const App: React.FC = () => {
     else delete document.documentElement.dataset.hasBg;
     document.documentElement.style.colorScheme = THEME_MODE[resolvedTheme];
   }, [resolvedTheme, resolvedGlass, hasWorkspaceBackground]);
+
+  useEffect(() => {
+    const syncFocus = () => {
+      const focused = !document.hidden && (typeof document.hasFocus === 'function' ? document.hasFocus() : true);
+      document.documentElement.dataset.windowFocused = focused ? 'true' : 'false';
+    };
+    syncFocus();
+    window.addEventListener('focus', syncFocus);
+    window.addEventListener('blur', syncFocus);
+    document.addEventListener('visibilitychange', syncFocus);
+    return () => {
+      window.removeEventListener('focus', syncFocus);
+      window.removeEventListener('blur', syncFocus);
+      document.removeEventListener('visibilitychange', syncFocus);
+    };
+  }, []);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCliInstallerOpen, setIsCliInstallerOpen] = useState(false);
   const [knownClis, setKnownClis] = useState<KnownCliInfo[]>([]);
@@ -487,7 +505,7 @@ export const App: React.FC = () => {
   const [newTaskContext, setNewTaskContext] = useState<{ folderPath: string; cliId?: string; accountId?: string } | null>(null);
   const isNewTaskOpen = newTaskContext !== null;
 
-  // 动态应用全局 UI 界面缩放比例
+  // 动态应用全局 UI 界面缩放比例，并对设置写盘做 200ms 防抖（避免拖动滑块时高频同步序列化阻塞主线程）
   useEffect(() => {
     const scaleMap: Record<AppSettings['uiScale'], string> = {
       compact: '14.5px',      // 90%
@@ -496,9 +514,22 @@ export const App: React.FC = () => {
       large: '20px',          // 125%
     };
     document.documentElement.style.fontSize = scaleMap[settings.uiScale] || '17.5px';
-    try {
-      localStorage.setItem('onedesktop_settings', JSON.stringify(settings));
-    } catch {}
+  }, [settings.uiScale]);
+
+  useEffect(() => {
+    const flush = () => {
+      try {
+        localStorage.setItem('onedesktop_settings', JSON.stringify(settingsRef.current));
+      } catch {}
+    };
+    const timer = window.setTimeout(flush, 200);
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('beforeunload', flush);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('pagehide', flush);
+      window.removeEventListener('beforeunload', flush);
+    };
   }, [settings]);
 
   useEffect(() => {
@@ -953,9 +984,25 @@ export const App: React.FC = () => {
       if (task && (task.status === 'idle' || task.status === 'waiting' || task.status === 'running')) pendingDone.set(id, startedAt);
     });
     const pollShells = async (now: number) => {
-      if (!readShellActivity || pollingStarts || now - lastShellPoll < SHELL_POLL_INTERVAL_MS) return;
+      if (!readShellActivity || pollingStarts) return;
       const candidates = tasksRef.current.filter((task) => SHELL_ACTIVITY_CLIS.has(task.groupId) && task.status !== 'starting' && isTaskAlive(task.status));
       if (!hadShellCandidates && candidates.length === 0) return;
+      // 所有候选任务均已稳定静默（无运行态、无已知活跃子 Shell，且距最近输入/输出/启动均超过 12s）时，跳过全机 Win32_Process 枚举；
+      // 若候选刚从非空变为 0，仍放行一次空调用让主进程关闭常驻 PowerShell。
+      const hasActiveOrRecent = candidates.length === 0 || activeShells.size > 0 || candidates.some((task) => {
+        if (task.status === 'running') return true;
+        const lastAct = Math.max(
+          lastOutput.get(task.id) ?? -Infinity,
+          getLastUserActivityAt(task.id),
+          startedAtRef.current.get(task.id) ?? -Infinity,
+        );
+        return now - lastAct <= QUIET_SHELL_POLL_GRACE_MS;
+      });
+      if (!hasActiveOrRecent) return;
+      const interval = document.hidden && candidates.length > 0 && settingsRef.current.taskDoneSoundEnabled === false
+        ? HIDDEN_MUTED_SHELL_POLL_INTERVAL_MS
+        : SHELL_POLL_INTERVAL_MS;
+      if (now - lastShellPoll < interval) return;
       hadShellCandidates = candidates.length > 0;
       const starts = new Map(candidates.map(({ id }) => [id, startedAtRef.current.get(id)]));
       pollingStarts = starts;

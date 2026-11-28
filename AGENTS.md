@@ -57,7 +57,7 @@ d:/GitHub/OneAI/
 │   │   ├── project-tree.ts    # 项目目录树：按层懒加载读取项目内目录（含实路径边界与符号链接防循环校验）
 │   │   ├── music-library.ts   # 音乐：扫描本地音乐目录、经 oneai-music:// 流式协议（及兼容读取）提供本地音频，并把在线音乐的 .m3u / .pls 歌单展开成曲目（只接受 http(s)）
 │   │   ├── workspace-store.ts # 工作区状态落盘：启动同步读取，运行期异步串行原子写入，退出前兜底刷盘
-│   │   ├── workspace-background.ts # 工作区背景图片：通过原生文件对话框选择并校验本地图片（最大 15 MB），返回 data URL
+│   │   ├── workspace-background.ts # 工作区背景图片：通过原生文件对话框选择并校验本地图片（最大 15 MB），经 oneai-bg:// 只读流式协议（或单测回退 data URL）提供给渲染进程
 │   │   ├── window-state.ts    # 窗口状态落盘：尺寸、位置（含多屏越界保护）、最大化状态与上次主题底色 / 标题栏覆盖层色值
 │   │   ├── updater.ts         # 软件更新：基于 electron-updater 检测 GitHub Releases、应用内下载与重启覆盖安装（开发模式、便携版或缺少 latest.yml 时降级为 Releases API 检测并跳转浏览器下载）
 │   │   └── session-history.ts # 读取 Claude / Codex（含 archived_sessions 与 .jsonl.zst）/ Kimi 本机及多账号目录历史会话与恢复命令（按文件签名缓存）

@@ -87,7 +87,7 @@ export default defineConfig({
             "default-src 'self'",
             `script-src ${scriptSrc}`,
             "style-src 'self' 'unsafe-inline'",
-            "img-src 'self' data: blob:",
+            "img-src 'self' oneai-bg: data: blob:",
             "media-src 'self' oneai-music: https: http: data: blob:",
             "font-src 'self' data:",
             "connect-src 'self' oneai-music:",

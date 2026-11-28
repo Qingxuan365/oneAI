@@ -253,7 +253,7 @@ await build({
       </div>));
     };
     function SettingsHarness() {
-      const [settings, setSettings] = React.useState({ theme: 'dark', glassMaterial: 'tinted', rainIntensity: 35, snowIntensity: 0, workspaceBackgroundPreset: 'none', workspaceBackgroundImage: '', workspaceBackgroundOpacity: 32, workspaceBackgroundBlur: 0, voiceReminderEnabled: true, workReminderHours: 1, workStartTime: '09:00', workEndTime: '18:00', greetingMessages: { morning: '', noon: '', afternoon: '', evening: '' }, terminalFontSize: 15, terminalLineHeight: 1.3, uiScale: 'comfortable', terminalCursorStyle: 'bar', terminalCursorBlink: true, previewMinimap: true, musicDirectory: '', musicPlayerVisible: true, musicStreams: [], clockOffsetHours: 0, topbarDateVisible: true, language: 'zh-CN', onboardingDone: true, accounts: [], customClis: [] });
+      const [settings, setSettings] = React.useState({ theme: 'dark', glassMaterial: 'tinted', rainIntensity: 0, snowIntensity: 0, workspaceBackgroundPreset: 'none', workspaceBackgroundImage: '', workspaceBackgroundOpacity: 32, workspaceBackgroundBlur: 0, voiceReminderEnabled: true, workReminderHours: 1, workStartTime: '09:00', workEndTime: '18:00', greetingMessages: { morning: '', noon: '', afternoon: '', evening: '' }, terminalFontSize: 15, terminalLineHeight: 1.3, uiScale: 'comfortable', terminalCursorStyle: 'bar', terminalCursorBlink: true, previewMinimap: true, musicDirectory: '', musicPlayerVisible: true, musicStreams: [], clockOffsetHours: 0, topbarDateVisible: true, language: 'zh-CN', onboardingDone: true, accounts: [], customClis: [] });
       setLanguage(settings.language);
       window.currentSettings = () => settings;
       window.currentCustomClis = () => settings.customClis;
@@ -490,9 +490,11 @@ app.whenReady().then(async () => {
             && Math.round(document.querySelector('header').getBoundingClientRect().height) === 44
             && neonTrack.getBoundingClientRect().top >= document.querySelector('header').getBoundingClientRect().bottom - 0.5
             && (reducedMotion || getComputedStyle(neonBeam).animationName === 'topbar-glass-sweep'));
-          check('running sidebar task row shows sweeping macOS glass ring and shimmer', Boolean(taskRow?.classList.contains('task-neon-running'))
+          check('running sidebar task row shows orbiting accent ring without white inner sweep', Boolean(taskRow?.classList.contains('task-neon-running'))
             && Boolean(taskRing)
-            && (reducedMotion || (getComputedStyle(taskRing, '::before').animationName === 'task-neon-spin' && getComputedStyle(taskRow, '::after').animationName === 'task-glass-sweep')));
+            && getComputedStyle(taskRow, '::after').content === 'none'
+            && getComputedStyle(taskRow, '::after').animationName === 'none'
+            && (reducedMotion || getComputedStyle(taskRing, '::before').animationName === 'task-neon-spin'));
         } else {
           check(status + ' topbar glass beam stays idle', neonTrack?.dataset.topbarNeon === 'idle'
             && !neonTrack.classList.contains('is-running')
@@ -1048,9 +1050,10 @@ app.whenReady().then(async () => {
       document.documentElement.dataset.glass = 'solid';
       const solidAlpha = getComputedStyle(document.documentElement).getPropertyValue('--glass-panel-alpha').trim();
       const solidBlur = getComputedStyle(document.documentElement).getPropertyValue('--glass-blur').trim();
+      const solidDialogBlur = getComputedStyle(document.querySelector('[role="dialog"]')).backdropFilter;
       document.documentElement.dataset.glass = 'tinted';
       glassButtons[1].click(); await tick(100);
-      check('data-glass tiers adjust CSS backdrop blur and panel translucency variables', parseFloat(clearAlpha) < parseFloat(solidAlpha) && parseFloat(clearBlur) > 0 && parseFloat(solidBlur) === 0);
+      check('data-glass tiers adjust CSS backdrop blur and panel translucency variables and solid disables backdrop-filter', parseFloat(clearAlpha) < parseFloat(solidAlpha) && parseFloat(clearBlur) > 0 && parseFloat(solidBlur) === 0 && solidDialogBlur === 'none');
 
       // 工作区背景与内置 6 套 macOS 壁纸 + 自定义本地图片 + 清除
       const bgPresets = [...document.querySelectorAll('[aria-label="工作区壁纸预设"] button[data-bg-preset]')];
@@ -1064,17 +1067,19 @@ app.whenReady().then(async () => {
       document.querySelector('[data-bg-clear]').click(); await tick(100);
       check('clearing workspace background restores none and unmounts background layer', window.currentSettings().workspaceBackgroundPreset === 'none' && !bgLayer());
 
-      // 工作区下雨效果：开关、强度预设与 Canvas pointer-events: none
+      // 工作区下雨效果：默认关闭零开销、开关恢复、强度预设与 Canvas pointer-events: none
       const rainSwitch = () => document.querySelector('[role="switch"][aria-label="开启下雨效果"]');
       const rainCanvas = () => document.querySelector('[data-workspace-rain]');
-      check('workspace rain canvas is mounted with pointer-events none by default', Boolean(rainCanvas()) && rainCanvas().dataset.rainIntensity === '35' && getComputedStyle(rainCanvas()).pointerEvents === 'none' && rainSwitch()?.getAttribute('aria-checked') === 'true');
+      check('workspace rain canvas is not mounted by default when intensity is 0', !rainCanvas() && rainSwitch()?.getAttribute('aria-checked') === 'false');
       rainSwitch().click(); await tick(100);
-      check('toggling rain switch off sets intensity to 0 and unmounts rain canvas', window.currentSettings().rainIntensity === 0 && !rainCanvas() && rainSwitch()?.getAttribute('aria-checked') === 'false');
-      rainSwitch().click(); await tick(100);
-      check('toggling rain switch back on restores previous non-zero intensity', window.currentSettings().rainIntensity === 35 && rainCanvas()?.dataset.rainIntensity === '35');
+      check('toggling rain switch on mounts rain canvas with default 35% intensity and pointer-events none', window.currentSettings().rainIntensity === 35 && Boolean(rainCanvas()) && rainCanvas().dataset.rainIntensity === '35' && getComputedStyle(rainCanvas()).pointerEvents === 'none' && rainSwitch()?.getAttribute('aria-checked') === 'true');
       const stormBtn = document.querySelector('[data-rain-preset="100"]');
       stormBtn.click(); await tick(100);
       check('rain intensity preset adjusts rain size to 100%', window.currentSettings().rainIntensity === 100 && rainCanvas()?.dataset.rainIntensity === '100');
+      rainSwitch().click(); await tick(100);
+      check('toggling rain switch off sets intensity to 0 and unmounts rain canvas', window.currentSettings().rainIntensity === 0 && !rainCanvas() && rainSwitch()?.getAttribute('aria-checked') === 'false');
+      rainSwitch().click(); await tick(100);
+      check('toggling rain switch back on restores previous non-zero intensity', window.currentSettings().rainIntensity === 100 && rainCanvas()?.dataset.rainIntensity === '100');
       document.querySelector('[data-rain-preset="0"]').click(); await tick(100);
       check('rain preset Off turns rain off cleanly', window.currentSettings().rainIntensity === 0 && !rainCanvas());
 
@@ -2504,6 +2509,12 @@ app.whenReady().then(async () => {
         delayedSample(activeShells);
         await wait();
         check('a negative sample settles an already quiet session without waiting for another timer tick', row('codex')?.textContent.includes('等待输入') && tones === 6);
+        activeShells = [];
+        await advance(2000);
+        await advance(15000);
+        sampledIds = null;
+        await advance(6000);
+        check('settled idle/waiting sessions pause background WMI shell polling until new activity arrives', sampledIds === null);
         const modelPicker = document.querySelector('#oneai-statusbar button[aria-label="切换模型"]');
         const statusbar = document.getElementById('oneai-statusbar');
         check('Codex model and effort remain visible when the usage summary lacks model metadata', modelPicker?.textContent.includes('Codex Fixture') && statusbar.textContent.includes('high') && statusbar.textContent.includes('33%'));

@@ -156,7 +156,7 @@ export interface AppSettings {
   onboardingDone: boolean; // 首次引导（选择语言、认识各入口）是否已完成；完成后不再弹出
   theme: 'system' | ThemeId; // 应用主题，默认跟随系统（仅在 light / dark 间切换）
   glassMaterial: GlassMaterial; // macOS 27 风格液态玻璃材质档位：clear（清透玻璃）/ tinted（柔和磨砂，默认）/ solid（纯实色）
-  rainIntensity: number; // 工作区下雨强度（0 关闭，1 ~ 100 调节雨势大小，默认 35）
+  rainIntensity: number; // 工作区下雨强度（0 关闭，1 ~ 100 调节雨势大小，默认 0）
   snowIntensity: number; // 工作区下雪强度（0 关闭，1 ~ 100 调节雪势大小，默认 0）
   workspaceBackgroundPreset: WorkspaceBackgroundPreset; // 工作区背景：无背景 / 内置 macOS 风格壁纸 / 自定义本地图片
   workspaceBackgroundImage: string; // 自定义工作区背景图片绝对路径（仅 preset === 'custom' 时使用）

@@ -35,5 +35,6 @@ export function startOutcome(result?: SessionCreateResult, currentStatus?: TaskS
 export const USER_ECHO_MS = 1000;
 const lastUserActivity = new Map<string, number>();
 export const noteUserActivity = (id: string) => { lastUserActivity.set(id, Date.now()); };
+export const getLastUserActivityAt = (id: string) => lastUserActivity.get(id) ?? -Infinity;
 export const isUserEcho = (id: string, now = Date.now()) => now - (lastUserActivity.get(id) ?? -Infinity) < USER_ECHO_MS;
 export const forgetUserActivity = (id: string) => { lastUserActivity.delete(id); };
