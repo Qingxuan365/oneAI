@@ -556,6 +556,40 @@ export function sanitizeTerminalData(data: string): string {
   return res;
 }
 
+/**
+ * xterm 5 的 Viewport 在构造器（setTimeout）与 reset()（requestAnimationFrame）中排入了
+ * 不可取消的 syncScrollArea / _innerRefresh 回调；term.dispose() 清空渲染器后若回调再触发，
+ * 读取 _renderService.dimensions 会抛出 TypeError。销毁前先短路回调并取消挂起刷新帧。
+ */
+export function disposeTerminalSafely(term: Terminal): void {
+  try {
+    const viewport = (term as unknown as {
+      _core?: {
+        viewport?: {
+          syncScrollArea?: () => void;
+          _innerRefresh?: () => void;
+          _refreshAnimationFrame?: number | null;
+        };
+      };
+    })._core?.viewport;
+    if (viewport) {
+      if (typeof viewport._refreshAnimationFrame === 'number') {
+        cancelAnimationFrame(viewport._refreshAnimationFrame);
+        viewport._refreshAnimationFrame = null;
+      }
+      viewport.syncScrollArea = () => {};
+      viewport._innerRefresh = () => {};
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    term.dispose();
+  } catch {
+    // ignore
+  }
+}
+
 function resolveXtermTheme(theme: ThemeId, transparentBackground: boolean) {
   const base = TERMINAL_THEMES[theme];
   return transparentBackground ? { ...base, background: 'rgba(0, 0, 0, 0)' } : base;
@@ -1024,7 +1058,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
           instance.disposeImeAnchor?.();
           instance.searchAddon?.dispose();
           instance.webglAddon?.dispose();
-          instance.term.dispose();
+          disposeTerminalSafely(instance.term);
           instance.container.remove();
         } catch {
           // ignore
@@ -1543,7 +1577,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
         const preKey = `${activeTaskId}:${syncBucket}`;
         if (!lastSizeSyncRef.current.startsWith(`${preKey}:`)) {
           requestAnimationFrame(() => {
-            if (hiddenRef.current) return;
+            if (hiddenRef.current || instancesRef.current.get(activeTaskId) !== activeInstance) return;
             try {
               activeInstance.fitAddon.fit();
               const { cols, rows } = activeInstance.term;
@@ -1617,7 +1651,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
         try { instance.fitAddon.fit(); } catch { /* ignore */ }
         instance.flush();
         setTimeout(() => {
-          if (hiddenRef.current || activeTaskIdRef.current !== id) return;
+          if (hiddenRef.current || activeTaskIdRef.current !== id || instancesRef.current.get(id) !== instance) return;
           try {
             instance.fitAddon.fit();
             // 鼠标刚点中目标任务行时保留其焦点以便 F2 重命名 / Alt+方向键排序；通过快捷键从别处切来时聚焦终端
@@ -1645,7 +1679,7 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
     try { instance.fitAddon.fit(); } catch { /* ignore */ }
     instance.flush();
     const timer = setTimeout(() => {
-      if (hiddenRef.current) return;
+      if (hiddenRef.current || instancesRef.current.get(activeTaskId) !== instance) return;
       try {
         instance.fitAddon.fit();
         const keepOnTarget = document.activeElement?.closest(`[data-task-id="${CSS.escape(activeTaskId)}"]`)?.querySelector('[data-keep-focus]') === document.activeElement;
@@ -1721,11 +1755,21 @@ export const TerminalViewport = React.memo(forwardRef<TerminalViewportRef, Termi
       unsubExit?.();
       for (const taskId of [...pendingPromptsRef.current.keys()]) cancelQueuedPrompt(taskId);
       instancesRef.current.forEach((instance) => {
-        if (instance.flushTimer) {
-          clearTimeout(instance.flushTimer);
-          instance.flushTimer = null;
+        try {
+          if (instance.flushTimer) {
+            clearTimeout(instance.flushTimer);
+            instance.flushTimer = null;
+          }
+          instance.disposeImeAnchor?.();
+          instance.searchAddon?.dispose();
+          instance.webglAddon?.dispose();
+          disposeTerminalSafely(instance.term);
+          instance.container.remove();
+        } catch {
+          // ignore
         }
       });
+      instancesRef.current.clear();
     };
   }, []);
 

@@ -271,6 +271,8 @@ export const EN: Record<string, string> = {
   '该文件已不在冲突列表中': 'This file is no longer in the conflict list',
   '用 {name} 新建': 'New with {name}',
   '自定义命令与目录…': 'Custom command and directory…',
+  '置顶 {name}': 'Pin {name}',
+  '取消置顶 {name}': 'Unpin {name}',
   '任务列表（已折叠）': 'Task list (collapsed)',
   '{name}{branch} -- 点击在此文件夹新建任务': '{name}{branch} -- click to create a task in this folder',
   '在 {name} 中新建任务': 'New task in {name}',

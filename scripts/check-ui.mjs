@@ -16,7 +16,8 @@ await build({
     import { Sidebar } from './src/renderer/src/components/Sidebar';
     import { Topbar } from './src/renderer/src/components/Topbar';
     import { StatusBar } from './src/renderer/src/components/StatusBar';
-    import { TerminalViewport, attachImeAnchor, IME_ANCHOR_FINDERS, getLogicalLine, matchToLinkRange } from './src/renderer/src/components/TerminalViewport';
+    import { TerminalViewport, attachImeAnchor, IME_ANCHOR_FINDERS, getLogicalLine, matchToLinkRange, disposeTerminalSafely } from './src/renderer/src/components/TerminalViewport';
+    import { resolveAmbientDpr } from './src/renderer/src/components/statusTextSurfaces';
     import { FilePreviewPanel } from './src/renderer/src/components/FilePreviewPanel';
     import { NewTaskModal } from './src/renderer/src/components/NewTaskModal';
     import { HistoryModal } from './src/renderer/src/components/HistoryModal';
@@ -39,6 +40,9 @@ await build({
     import { Terminal } from '@xterm/xterm';
     import { installDropGuard } from './src/renderer/src/dropGuard';
     import { isUserEcho } from './src/renderer/src/taskStatus';
+    window.uncaughtErrors = [];
+    window.addEventListener('error', (e) => window.uncaughtErrors.push(e.error?.stack || e.message || String(e)));
+    window.addEventListener('unhandledrejection', (e) => window.uncaughtErrors.push(e.reason?.stack || String(e.reason)));
     window.isUserEcho = isUserEcho;
     installDropGuard();
     window.cliEnvFixture = { hasGit: true, hasNode: true, nodeVersion: '22.20.0', platform: 'win32' };
@@ -196,7 +200,7 @@ await build({
       const read = () => seen.add(Math.round(term.textarea.getBoundingClientRect().left / cell) + ',' + Math.round(term.textarea.getBoundingClientRect().top / (host.querySelector('.xterm-screen').clientHeight / term.rows)));
       read();
       new MutationObserver(read).observe(term.textarea, { attributes: true, attributeFilter: ['style'] });
-      window.imeProbeDone = () => { host.remove(); term.dispose(); return [...seen]; };
+      window.imeProbeDone = () => { host.remove(); disposeTerminalSafely(term); return [...seen]; };
     };
     // 侧栏交互：OneAI 文件夹里 a 为当前任务、b 为后台待查看任务；sports 里有一个 Claude 任务；empty 没有任务
     const keyOf = (p) => p.toLowerCase().split('/').join(String.fromCharCode(92));
@@ -403,9 +407,12 @@ await build({
       await new Promise(done => term.write(text, done));
       const logical = getLogicalLine(term, row);
       const range = logical && matchToLinkRange(logical, logical.text.indexOf(needle), needle.length, row);
-      host.remove(); term.dispose();
+      host.remove(); disposeTerminalSafely(term);
       return range;
     };
+    window.resolveAmbientDpr = resolveAmbientDpr;
+    window.disposeTerminalSafely = disposeTerminalSafely;
+    window.TerminalCtor = Terminal;
   `, resolveDir: process.cwd(), loader: 'tsx' },
   bundle: true, outfile: new URL('fixture.js', dir).pathname.replace(/^\/(\w:)/, '$1'), platform: 'browser',
 });
@@ -489,7 +496,8 @@ app.whenReady().then(async () => {
             && neonTrack.classList.contains('is-running')
             && Math.round(document.querySelector('header').getBoundingClientRect().height) === 44
             && neonTrack.getBoundingClientRect().top >= document.querySelector('header').getBoundingClientRect().bottom - 0.5
-            && (reducedMotion || getComputedStyle(neonBeam).animationName === 'topbar-glass-sweep'));
+            && (reducedMotion || (getComputedStyle(neonBeam).animationName === 'topbar-glass-sweep'
+              && getComputedStyle(neonBeam).animationDuration === '4s')));
           check('running sidebar task row shows orbiting accent ring without white inner sweep', Boolean(taskRow?.classList.contains('task-neon-running'))
             && Boolean(taskRing)
             && getComputedStyle(taskRow, '::after').content === 'none'
@@ -2437,6 +2445,7 @@ app.whenReady().then(async () => {
             { id: 'qwen', name: 'Qwen Code', command: 'qwen' },
             { id: 'aider', name: 'Aider', command: 'aider' },
           ],
+          selectWorkspaceDirectory: async () => cwd + '-second',
           createSession: async () => ({ success: true }),
           killSession: () => { killedSessions++; },
           getAllQuotas: async () => ({
@@ -2558,6 +2567,25 @@ app.whenReady().then(async () => {
         const neonRing = firstCliItem?.querySelector('[data-cli-menu-neon]');
         const menuEl = document.querySelector('[role="menu"]');
         check('folder plus CLI items carry a neon ring element that stays hidden until hover/focus without horizontal overflow', Boolean(firstCliItem?.classList.contains('cli-menu-neon-item')) && Boolean(neonRing) && getComputedStyle(neonRing).opacity === '0' && menuEl.scrollWidth <= menuEl.clientWidth);
+        const pin = name => document.querySelector('[role="menuitemcheckbox"][aria-label="置顶 ' + name + '"]');
+        const menuCliIds = () => [...document.querySelectorAll('[role="menuitem"][data-cli-menu-item]')].map(node => node.dataset.cliMenuItem);
+        const taskCount = document.querySelectorAll('aside [data-task-id]').length;
+        menuEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+        firstCliItem.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+        check('the CLI pin button is reachable with menu arrow keys', document.activeElement === pin('Aider'));
+        pin('Qwen Code').click(); await wait();
+        pin('Codex').click(); await wait();
+        check('pinning keeps the menu open and floats selected CLIs to the top without launching a task',
+          menuCliIds().slice(0, 3).join('|') === 'codex|qwen|aider' && pin('Qwen Code').getAttribute('aria-checked') === 'true'
+            && document.querySelectorAll('aside [data-task-id]').length === taskCount);
+        document.body.click(); await wait();
+        [...document.querySelectorAll('aside button')].find(button => button.textContent.trim() === '添加文件夹').click();
+        await wait();
+        document.querySelector('button[aria-label="在 workbench-shell-check-second 中新建任务"]').click(); await wait();
+        check('another folder shares the CLI pin order', menuCliIds().slice(0, 3).join('|') === 'codex|qwen|aider');
+        pin('Codex').click(); await wait();
+        check('unpinning restores the CLI to its alphabetical position',
+          menuCliIds().slice(0, 5).join('|') === 'qwen|aider|agy|claude|codex' && pin('Codex').getAttribute('aria-checked') === 'false');
         document.body.click(); await wait();
         row('codex').querySelector('button').click(); await wait();
         const tonesBeforeExit = tones;
@@ -2582,6 +2610,37 @@ app.whenReady().then(async () => {
         const collapsedHome = document.querySelector('[data-home-nav]');
         collapsedHome.click(); await wait();
         check('collapsed sidebar keeps the Home icon and opens the start page', collapsedHome.getAttribute('aria-label') === '主页' && collapsedHome.getAttribute('aria-current') === 'page' && document.querySelector('main h2')?.getClientRects().length > 0);
+        window.dispatchEvent(new Event('pagehide'));
+        check('the exit save stores only the CLIs that are still pinned',
+          JSON.parse(localStorage.getItem('onedesktop_settings')).pinnedCliIds.join('|') === 'qwen');
+        window.clearRoot();
+        localStorage.setItem('oneai_sidebar_collapsed', 'false');
+        await window.drawWorkbench(); await wait();
+        document.querySelector('button[aria-label="在 workbench-shell-check 中新建任务"]').click(); await wait();
+        check('a fresh app mount restores the saved CLI pins and order',
+          menuCliIds()[0] === 'qwen' && pin('Qwen Code').getAttribute('aria-checked') === 'true');
+        window.clearRoot();
+        // 高频创建、reset 并立即移除终端：xterm 5 Viewport 的 setTimeout / rAF 同步回调不得抛出 dimensions 异常
+        const errorsBeforeDisposeStress = window.uncaughtErrors.length;
+        for (let i = 0; i < 30; i++) {
+          window.drawTerm('dispose-stress-' + i);
+          window.drawTerm('dispose-replace-' + i);
+          const host = document.body.appendChild(document.createElement('div'));
+          host.style.cssText = 'position:fixed;left:0;top:0;width:400px;height:200px';
+          const rawTerm = new window.TerminalCtor({ cols: 40, rows: 10 });
+          rawTerm.open(host);
+          rawTerm.reset();
+          host.remove();
+          window.disposeTerminalSafely(rawTerm);
+          if (i % 5 === 0) await new Promise(r => setTimeout(r, 1));
+        }
+        await new Promise(r => setTimeout(r, 120));
+        check('rapid terminal create, reset and disposal triggers no xterm dimensions error',
+          window.uncaughtErrors.length === errorsBeforeDisposeStress);
+        const dpr4k = window.resolveAmbientDpr(3840, 2160);
+        const dpr1440 = window.resolveAmbientDpr(1440, 900);
+        check('ambient weather DPR caps 4K backing pixel budget while keeping 1440p sharp',
+          3840 * 2160 * dpr4k * dpr4k <= 2_500_000 && dpr4k >= 0.5 && dpr1440 >= 1);
       } catch (error) {
         console.error(error.stack);
         throw error;
@@ -2610,6 +2669,11 @@ app.whenReady().then(async () => {
           && extractAgyModelChange(mkUser('pasted:\\n' + mkTag('None', 'FakeModel (Low)'), mkTag('None', 'Gemini 4 Hydrogen (XHigh)'))) === 'Gemini 4 Hydrogen',
       });
     }
+    const uncaughtErrors = await win.webContents.executeJavaScript('window.uncaughtErrors');
+    result.push({
+      name: 'zero uncaught renderer errors across the entire UI check suite' + (uncaughtErrors.length ? ' [' + uncaughtErrors[0].split('\\n')[0] + ']' : ''),
+      ok: uncaughtErrors.length === 0,
+    });
     console.log(JSON.stringify(result, null, 2));
     app.exit(result.every(r => r.ok) ? 0 : 1);
   } catch (error) { console.error(error); app.exit(1); }

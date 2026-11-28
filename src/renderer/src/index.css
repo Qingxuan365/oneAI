@@ -1021,7 +1021,7 @@ html, body, #root {
 }
 @media (prefers-reduced-motion: no-preference) {
   .topbar-neon-track.is-running .topbar-neon-beam {
-    animation: topbar-glass-sweep 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
+    animation: topbar-glass-sweep 4s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
     will-change: transform;
   }
   .task-neon-ring::before {

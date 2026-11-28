@@ -189,6 +189,7 @@ export interface AppSettings {
   ignoredUpdateVersion: string; // 用户选择「忽略此版本」后记录的版本号，空串表示未忽略
   accounts: Account[]; // 多账号配置（Codex / Claude Code / Kimi Code），默认空；「恢复默认设置」不会清空
   customClis: CustomCli[]; // 用户自定义的 CLI，默认空；「恢复默认设置」不会清空
+  pinnedCliIds: string[];
 }
 
 export interface RestartSessionOptions {

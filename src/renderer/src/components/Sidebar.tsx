@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUpCircle, BedDouble, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Folder, FolderOpen, FolderPlus, GitBranch, GripVertical, History, House, LayoutDashboard, Moon, PanelLeftOpen, Pencil, Plus, RotateCcw, Settings, ShieldCheck, SlidersHorizontal, Sun, Trash2, User, X } from 'lucide-react';
+import { ArrowUpCircle, BedDouble, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Folder, FolderOpen, FolderPlus, GitBranch, GripVertical, History, House, LayoutDashboard, Moon, PanelLeftOpen, Pencil, Pin, Plus, RotateCcw, Settings, ShieldCheck, SlidersHorizontal, Sun, Trash2, User, X } from 'lucide-react';
 import { Account, CliDef, FolderEntry, GitStatusResult, HistoryEntry, MusicStream, TaskSession, UpdateState, WorkScheduleGreetings } from '../types';
 
 const NO_STREAMS: MusicStream[] = [];
@@ -96,6 +96,8 @@ interface SidebarProps {
   isCollapsed: boolean;
   /** 本机已安装、可以新建任务的 CLI */
   clis: CliDef[];
+  pinnedCliIds?: readonly string[];
+  onToggleCliPin?: (id: string) => void;
   folders: FolderEntry[];
   /** 可见任务（已过滤掉未安装 CLI 的任务），按全局顺序 */
   tasks: TaskSession[];
@@ -180,6 +182,8 @@ function clampSidebarWidth(width: number): number {
 export const Sidebar: React.FC<SidebarProps> = React.memo(({
   isCollapsed,
   clis,
+  pinnedCliIds,
+  onToggleCliPin,
   folders,
   tasks,
   accounts = [],
@@ -317,6 +321,10 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   const tasksOf = (folderPath: string) => tasksByFolder.get(folderKey(folderPath)) ?? [];
   const cliMap = useMemo(() => new Map(clis.map((cli) => [cli.id, cli])), [clis]);
   const newTaskClis = useMemo(() => sortClisAlphabetically(clis), [clis]);
+  const pinnedCliSet = useMemo(() => new Set(pinnedCliIds), [pinnedCliIds]);
+  const folderPlusClis = useMemo(() => [...newTaskClis].sort(
+    (a, b) => Number(pinnedCliSet.has(b.id)) - Number(pinnedCliSet.has(a.id)),
+  ), [newTaskClis, pinnedCliSet]);
   const accountMap = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
   const cliOf = (task: TaskSession) => cliMap.get(task.groupId);
   const accountOf = (task: TaskSession) => (task.accountId ? accountMap.get(task.accountId) : undefined);
@@ -530,7 +538,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
 
   const handleMenuKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const items = menuRef.current
-      ? [...menuRef.current.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')]
+      ? [...menuRef.current.querySelectorAll<HTMLButtonElement>(':is([role="menuitem"], [role="menuitemcheckbox"]):not(:disabled)')]
       : [];
     if (items.length === 0) return;
     const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
@@ -591,33 +599,53 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   };
 
   const cliMenuItemClass = 'cli-menu-neon-item flex items-center gap-2 px-2.5 py-1.5 text-left disabled:cursor-not-allowed disabled:opacity-40';
-  const newTaskItems = (folderPath: string) => (
-    <>
-      {newTaskClis.map((cli, idx) => (
-        <React.Fragment key={cli.id}>
-          {idx > 0 && accountedClis(newTaskClis[idx - 1].id).length > 0 && <div className="my-1 border-t border-line/60" role="separator" />}
-          <button type="button" role="menuitem" data-cli-menu-item={cli.id} className={cliMenuItemClass}
-            onClick={() => { setMenu(null); onNewTask(folderPath, cli.id); }}>
-            <span className="cli-menu-neon-ring" aria-hidden="true" data-cli-menu-neon />
-            <BrandIcon icon={cli.icon} size={14} /><span className="truncate">{cli.name}</span>
+  const newTaskItems = (folderPath: string, canPin: boolean) => {
+    const menuClis = canPin ? folderPlusClis : newTaskClis;
+    return (
+      <>
+        {menuClis.map((cli, idx) => (
+          <React.Fragment key={cli.id}>
+            {idx > 0 && accountedClis(menuClis[idx - 1].id).length > 0 && <div className="my-1 border-t border-line/60" role="separator" />}
+            <div role="none" className="flex items-center">
+              <button type="button" role="menuitem" data-cli-menu-item={cli.id} className={`${cliMenuItemClass} min-w-0 flex-1`}
+                onClick={() => { setMenu(null); onNewTask(folderPath, cli.id); }}>
+                <span className="cli-menu-neon-ring" aria-hidden="true" data-cli-menu-neon />
+                <BrandIcon icon={cli.icon} size={14} /><span className="truncate">{cli.name}</span>
+              </button>
+              {canPin && onToggleCliPin && (
+                <button type="button" role="menuitemcheckbox" aria-checked={pinnedCliSet.has(cli.id)}
+                  aria-label={t('置顶 {name}', { name: cli.name })}
+                  title={pinnedCliSet.has(cli.id) ? t('取消置顶 {name}', { name: cli.name }) : t('置顶 {name}', { name: cli.name })}
+                  className={`icon-btn mr-1 h-7 w-7 shrink-0 ${pinnedCliSet.has(cli.id) ? 'text-accent' : 'text-fg-faint'} enabled:hover:text-accent`}
+                  onClick={(e) => {
+                    const button = e.currentTarget;
+                    onToggleCliPin(cli.id);
+                    requestAnimationFrame(() => {
+                      if (button.isConnected && document.activeElement === document.body) button.focus();
+                    });
+                  }}>
+                  <Pin size={13} className={pinnedCliSet.has(cli.id) ? 'fill-current' : undefined} />
+                </button>
+              )}
+            </div>
+            {accountedClis(cli.id).map((account) => (
+              <button key={account.id} type="button" role="menuitem" data-cli-menu-item={`${cli.id}:${account.id}`} className={`${cliMenuItemClass} pl-7 text-fg-subtle`}
+                onClick={() => { setMenu(null); onNewTask(folderPath, cli.id, account.id); }}>
+                <span className="cli-menu-neon-ring" aria-hidden="true" data-cli-menu-neon />
+                <User size={12} /><span className="truncate">{t('用 {name} 新建', { name: account.name })}</span>
+              </button>
+            ))}
+          </React.Fragment>
+        ))}
+        {onCustomNewTask && (
+          <button type="button" role="menuitem" className={`${menuItemClass} mt-0.5 border-t border-line`}
+            onClick={() => { setMenu(null); onCustomNewTask(folderPath); }}>
+            <SlidersHorizontal size={13} />{t('自定义命令与目录…')}
           </button>
-          {accountedClis(cli.id).map((account) => (
-            <button key={account.id} type="button" role="menuitem" data-cli-menu-item={`${cli.id}:${account.id}`} className={`${cliMenuItemClass} pl-7 text-fg-subtle`}
-              onClick={() => { setMenu(null); onNewTask(folderPath, cli.id, account.id); }}>
-              <span className="cli-menu-neon-ring" aria-hidden="true" data-cli-menu-neon />
-              <User size={12} /><span className="truncate">{t('用 {name} 新建', { name: account.name })}</span>
-            </button>
-          ))}
-        </React.Fragment>
-      ))}
-      {onCustomNewTask && (
-        <button type="button" role="menuitem" className={`${menuItemClass} mt-0.5 border-t border-line`}
-          onClick={() => { setMenu(null); onCustomNewTask(folderPath); }}>
-          <SlidersHorizontal size={13} />{t('自定义命令与目录…')}
-        </button>
-      )}
-    </>
-  );
+        )}
+      </>
+    );
+  };
 
   const menuVisible = Boolean(
     menu && (
@@ -643,7 +671,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
       onContextMenu={(e) => e.preventDefault()}
       onKeyDown={handleMenuKeyDown}
     >
-      {(menu.kind === 'new' || menu.kind === 'folder') && menu.folderPath && newTaskItems(menu.folderPath)}
+      {(menu.kind === 'new' || menu.kind === 'folder') && menu.folderPath && newTaskItems(menu.folderPath, menu.kind === 'new')}
       {menu.kind === 'folder' && menu.folderPath && (
         <>
           <div className="my-1 border-t border-line" role="separator" />

@@ -1,6 +1,11 @@
 import React, { useEffect, useRef } from 'react';
 import { ThemeId } from '../types';
 import { THEME_MODE } from '../themes';
+import {
+  readStatusTextSurfaces,
+  registerAmbientCanvasLayer,
+  updateAmbientLayerIntensity,
+} from './statusTextSurfaces';
 
 interface WorkspaceRainProps {
   /** 下雨强度：0 关闭，1 ~ 100 连续调节雨滴密度、尺寸与下落速度 */
@@ -16,6 +21,7 @@ interface RainDrop {
   length: number;
   speed: number;
   jitter: number;
+  impactY?: number;
 }
 
 interface RainSplash {
@@ -24,12 +30,11 @@ interface RainSplash {
   age: number;
   maxAge: number;
   radius: number;
+  lift: number;
 }
 
-const MAX_DPR = 2;
-const MAX_DT_SEC = 0.05;
-// 限制氛围层最大绘制帧率为 36 FPS，避免在 120Hz/144Hz/240Hz 高刷屏上产生数倍全屏透明图层合成开销
-const TARGET_FRAME_INTERVAL_MS = 1000 / 36;
+const SPLASH_SPRAY = [-0.9, 0.15, 0.95];
+const SPLASH_ALPHA_BANDS = [0.85, 0.55, 0.25];
 
 export function clampRainIntensity(value: unknown, fallback = 0): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
@@ -46,14 +51,14 @@ function resolveRainColors(theme: ThemeId): [string, string, string, string] {
       `rgb(${accent} / 0.14)`,
       `rgb(${accent} / 0.24)`,
       `rgb(${fg} / 0.22)`,
-      `rgb(${accent} / 0.28)`,
+      `rgb(${accent} / 0.46)`,
     ];
   }
   return [
     `rgb(${fg} / 0.12)`,
     `rgb(${accent} / 0.22)`,
     `rgb(${fg} / 0.34)`,
-    `rgb(${accent} / 0.32)`,
+    `rgb(${fg} / 0.56)`,
   ];
 }
 
@@ -74,39 +79,30 @@ function makeDrop(width: number, height: number, factor: number, randomY: boolea
 }
 
 /**
- * 全工作区下雨氛围层：纯 Canvas 2D 分层绘制，pointer-events: none 不干扰任何交互，
- * 固定 36 FPS 帧率上限，拖动滑块热更新雨滴数量不重分配 GPU 帧缓冲，窗口隐藏/失焦或强度为 0 时零动画开销。
+ * 全工作区下雨氛围层：与雪景共用单个全屏 Canvas 与 36 FPS 帧时钟，
+ * pointer-events: none 不干扰任何交互，水花按透明度分桶合批描边，
+ * 拖动滑块热更新雨滴数量不重分配 GPU 帧缓冲，窗口隐藏/失焦或强度为 0 时零动画开销。
  */
 export const WorkspaceRain: React.FC<WorkspaceRainProps> = React.memo(({ intensity, theme }) => {
   const level = clampRainIntensity(intensity, 0);
   const active = level > 0;
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const levelRef = useRef(level);
   levelRef.current = level;
   const reconcileRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!active) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const colors = resolveRainColors(theme);
 
     let width = Math.max(1, window.innerWidth);
     let height = Math.max(1, window.innerHeight);
     let drops: RainDrop[] = [];
     const splashes: RainSplash[] = [];
-    let rafId = 0;
-    let lastDrawTime = 0;
-    let windowFocused = typeof document.hasFocus === 'function' ? document.hasFocus() : true;
 
     const currentFactor = () => Math.max(0.01, levelRef.current / 100);
 
     const targetCount = (factor: number) => {
-      const areaScale = Math.max(0.55, Math.min(2.2, (width * height) / (1440 * 900)));
+      const areaScale = Math.max(0.55, Math.min(1.6, (width * height) / (1440 * 900)));
       return Math.round((24 + factor * 186) * areaScale);
     };
 
@@ -119,157 +115,150 @@ export const WorkspaceRain: React.FC<WorkspaceRainProps> = React.memo(({ intensi
       }
     };
 
-    const syncSize = () => {
-      width = Math.max(1, window.innerWidth);
-      height = Math.max(1, window.innerHeight);
-      const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
-      const nextW = Math.round(width * dpr);
-      const nextH = Math.round(height * dpr);
-      if (canvas.width !== nextW) canvas.width = nextW;
-      if (canvas.height !== nextH) canvas.height = nextH;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      syncDropPool(currentFactor());
-    };
-
-    const renderFrame = (dt: number) => {
-      const factor = currentFactor();
-      const windRatio = 0.08 + factor * 0.14;
-      const widths: [number, number, number] = [
-        0.65 + factor * 0.35,
-        0.85 + factor * 0.55,
-        1.15 + factor * 0.75,
-      ];
-
-      ctx.clearRect(0, 0, width, height);
-      ctx.lineCap = 'round';
-
-      for (let layer = 0 as 0 | 1 | 2; layer < 3; layer = (layer + 1) as 0 | 1 | 2) {
-        ctx.beginPath();
-        ctx.strokeStyle = colors[layer];
-        ctx.lineWidth = widths[layer];
-        for (let i = 0; i < drops.length; i++) {
-          const drop = drops[i];
-          if (drop.layer !== layer) continue;
-          const slant = windRatio + drop.jitter;
-          if (dt > 0) {
-            const dy = drop.speed * dt;
-            drop.y += dy;
-            drop.x += dy * slant;
-            if (drop.y - drop.length > height || drop.x > width + 140) {
-              if (layer === 2 && drop.y - drop.length > height && splashes.length < 28 && Math.random() < 0.25 + factor * 0.45) {
-                splashes.push({
-                  x: Math.max(8, Math.min(width - 8, drop.x)),
-                  y: height - 2,
-                  age: 0,
-                  maxAge: 0.24 + Math.random() * 0.16,
-                  radius: 2.5 + factor * 4.5,
-                });
-              }
-              const next = makeDrop(width, height, factor, false);
-              next.layer = layer;
-              drops[i] = next;
-              continue;
-            }
-          }
-          ctx.moveTo(drop.x, drop.y);
-          ctx.lineTo(drop.x + drop.length * slant, drop.y + drop.length);
-        }
-        ctx.stroke();
-      }
-
-      if (splashes.length > 0) {
-        ctx.strokeStyle = colors[3];
-        ctx.lineWidth = 0.85;
-        for (let i = splashes.length - 1; i >= 0; i--) {
-          const s = splashes[i];
-          s.age += dt;
-          if (s.age >= s.maxAge) {
-            splashes[i] = splashes[splashes.length - 1];
-            splashes.pop();
-            continue;
-          }
-          const progress = s.age / s.maxAge;
-          const rx = s.radius * (0.35 + progress * 0.95);
-          const ry = Math.max(0.8, rx * 0.28);
-          ctx.globalAlpha = 1 - progress;
-          ctx.beginPath();
-          ctx.ellipse(s.x, s.y, rx, ry, 0, Math.PI, Math.PI * 2);
-          ctx.stroke();
-        }
-        ctx.globalAlpha = 1;
-      }
-    };
-
-    const shouldPause = () => document.hidden || !windowFocused;
-
-    const tick = (now: number) => {
-      rafId = 0;
-      if (shouldPause()) return;
-      if (lastDrawTime > 0 && now - lastDrawTime < TARGET_FRAME_INTERVAL_MS - 1) {
-        rafId = requestAnimationFrame(tick);
-        return;
-      }
-      const dt = lastDrawTime > 0 ? Math.min(MAX_DT_SEC, (now - lastDrawTime) / 1000) : 1 / 36;
-      lastDrawTime = now;
-      renderFrame(dt);
-      rafId = requestAnimationFrame(tick);
-    };
-
-    const start = () => {
-      if (reducedMotion) {
-        renderFrame(0);
-        return;
-      }
-      if (shouldPause() || rafId) return;
-      lastDrawTime = 0;
-      rafId = requestAnimationFrame(tick);
-    };
-
-    const stop = () => {
-      if (rafId) {
-        cancelAnimationFrame(rafId);
-        rafId = 0;
-      }
-    };
-
-    const onVisibility = () => {
-      if (shouldPause()) stop();
-      else start();
-    };
-
-    const onFocus = () => {
-      windowFocused = true;
-      start();
-    };
-
-    const onBlur = () => {
-      windowFocused = false;
-      stop();
-    };
-
-    const onResize = () => {
-      syncSize();
-      if (reducedMotion) renderFrame(0);
-    };
-
     reconcileRef.current = () => {
       syncDropPool(currentFactor());
-      if (reducedMotion) renderFrame(0);
+      updateAmbientLayerIntensity('rain', levelRef.current);
     };
 
-    syncSize();
-    start();
-    window.addEventListener('resize', onResize);
-    window.addEventListener('focus', onFocus);
-    window.addEventListener('blur', onBlur);
-    document.addEventListener('visibilitychange', onVisibility);
+    const unregister = registerAmbientCanvasLayer('rain', {
+      order: 0,
+      intensity: levelRef.current,
+      onResize: (nextWidth, nextHeight) => {
+        width = nextWidth;
+        height = nextHeight;
+        splashes.length = 0;
+        syncDropPool(currentFactor());
+      },
+      onDraw: (ctx, drawWidth, drawHeight, _scaleX, _scaleY, dt, now) => {
+        width = drawWidth;
+        height = drawHeight;
+        const factor = currentFactor();
+        const surfaces = dt > 0 ? readStatusTextSurfaces(now) : [];
+        const firstTextY = surfaces[0]?.y ?? height;
+        const lastTextY = surfaces[surfaces.length - 1]?.y ?? 0;
+        const windRatio = 0.08 + factor * 0.14;
+        const widths: [number, number, number] = [
+          0.65 + factor * 0.35,
+          0.85 + factor * 0.55,
+          1.15 + factor * 0.75,
+        ];
+
+        ctx.lineCap = 'round';
+        ctx.globalAlpha = 1;
+
+        for (let layer = 0 as 0 | 1 | 2; layer < 3; layer = (layer + 1) as 0 | 1 | 2) {
+          ctx.beginPath();
+          ctx.strokeStyle = colors[layer];
+          ctx.lineWidth = widths[layer];
+          for (let i = 0; i < drops.length; i++) {
+            const drop = drops[i];
+            if (drop.layer !== layer) continue;
+            const slant = windRatio + drop.jitter;
+            if (dt > 0) {
+              const previousTip = drop.y + drop.length;
+              const dy = drop.speed * dt;
+              drop.y += dy;
+              drop.x += dy * slant;
+              const tip = drop.y + drop.length;
+              if (drop.impactY === undefined && tip >= firstTextY) {
+                let hitTextY = -1;
+                if (previousTip < lastTextY) {
+                  for (let s = 0; s < surfaces.length; s++) {
+                    const surface = surfaces[s];
+                    if (previousTip >= surface.y || tip < surface.y) continue;
+                    const x = drop.x + (surface.y - drop.y) * slant;
+                    if (x >= surface.left && x <= surface.right) {
+                      hitTextY = surface.y;
+                      break;
+                    }
+                  }
+                }
+                const impactY = hitTextY >= 0 ? hitTextY : height;
+                if (previousTip < impactY && tip >= impactY) {
+                  drop.impactY = impactY;
+                }
+                const impactX = drop.x + (impactY - drop.y) * slant;
+                if (drop.impactY !== undefined && layer > 0 && splashes.length < 28 && impactX >= 0 && impactX <= width
+                  && Math.random() < (hitTextY >= 0 ? 0.55 : 0.12) + factor * 0.4) {
+                  splashes.push({
+                    x: impactX,
+                    y: impactY - 1,
+                    age: 0,
+                    maxAge: 0.3 + Math.random() * 0.12,
+                    radius: 3 + factor * 5,
+                    lift: (5 + factor * 9) * (0.8 + Math.random() * 0.4),
+                  });
+                }
+              }
+              if (drop.y >= (drop.impactY ?? height) || drop.x > width + 140) {
+                const next = makeDrop(width, height, factor, false);
+                next.layer = layer;
+                drops[i] = next;
+                continue;
+              }
+            }
+            ctx.moveTo(drop.x, drop.y);
+            const drawnLength = Math.max(0, Math.min(drop.length, (drop.impactY ?? height) - drop.y));
+            ctx.lineTo(drop.x + drawnLength * slant, drop.y + drawnLength);
+          }
+          ctx.stroke();
+        }
+
+        if (splashes.length > 0) {
+          if (dt > 0) {
+            for (let i = splashes.length - 1; i >= 0; i--) {
+              const s = splashes[i];
+              s.age += dt;
+              if (s.age >= s.maxAge) {
+                splashes[i] = splashes[splashes.length - 1];
+                splashes.pop();
+              }
+            }
+          }
+          if (splashes.length > 0) {
+            ctx.strokeStyle = colors[3];
+            ctx.lineWidth = 0.85;
+            for (let band = 0; band < SPLASH_ALPHA_BANDS.length; band++) {
+              let hasPath = false;
+              ctx.beginPath();
+              for (let i = 0; i < splashes.length; i++) {
+                const s = splashes[i];
+                const progress = s.age / s.maxAge;
+                const splashBand = progress < 0.33 ? 0 : progress < 0.66 ? 1 : 2;
+                if (splashBand !== band) continue;
+                hasPath = true;
+                const rx = s.radius * (0.35 + progress * 0.95);
+                const ry = Math.max(0.8, rx * 0.28);
+                ctx.moveTo(s.x - rx, s.y);
+                ctx.ellipse(s.x, s.y, rx, ry, 0, Math.PI, Math.PI * 2);
+                if (progress < 0.8) {
+                  const flight = progress / 0.8;
+                  const tail = Math.max(0, flight - 0.13);
+                  const lift = s.lift * 4 * flight * (1 - flight);
+                  const tailLift = s.lift * 4 * tail * (1 - tail);
+                  for (let d = 0; d < SPLASH_SPRAY.length; d++) {
+                    const direction = SPLASH_SPRAY[d];
+                    const spread = direction * s.radius * 1.65;
+                    const rise = 1 - Math.abs(direction) * 0.35;
+                    ctx.moveTo(s.x + spread * tail, s.y - tailLift * rise);
+                    ctx.lineTo(s.x + spread * flight, s.y - lift * rise);
+                  }
+                }
+              }
+              if (hasPath) {
+                ctx.globalAlpha = SPLASH_ALPHA_BANDS[band];
+                ctx.stroke();
+              }
+            }
+            ctx.globalAlpha = 1;
+          }
+        }
+      },
+    });
+
     return () => {
       reconcileRef.current = null;
-      stop();
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('focus', onFocus);
-      window.removeEventListener('blur', onBlur);
-      document.removeEventListener('visibilitychange', onVisibility);
+      unregister();
     };
   }, [active, theme]);
 
@@ -277,17 +266,7 @@ export const WorkspaceRain: React.FC<WorkspaceRainProps> = React.memo(({ intensi
     if (active) reconcileRef.current?.();
   }, [active, level]);
 
-  if (!active) return null;
-
-  return (
-    <canvas
-      ref={canvasRef}
-      aria-hidden="true"
-      data-workspace-rain
-      data-rain-intensity={level}
-      className="pointer-events-none fixed inset-0 z-40 h-full w-full"
-    />
-  );
+  return null;
 });
 
 WorkspaceRain.displayName = 'WorkspaceRain';

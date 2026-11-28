@@ -1,6 +1,12 @@
 import React, { useEffect, useRef } from 'react';
 import { ThemeId } from '../types';
 import { THEME_MODE } from '../themes';
+import {
+  readStatusTextSurfaces,
+  registerAmbientCanvasLayer,
+  StatusTextSurface,
+  updateAmbientLayerIntensity,
+} from './statusTextSurfaces';
 
 interface WorkspaceSnowProps {
   /** 下雪强度：0 关闭，1 ~ 100 连续调节雪花密度、尺寸与飘落速度 */
@@ -19,7 +25,7 @@ interface SnowFlake {
   swayAmp: number;
   swayFreq: number;
   phase: number;
-  opacity: number;
+  alphaBucket: 0 | 1 | 2;
   crystal: boolean;
   rotation: number;
   spin: number;
@@ -29,14 +35,45 @@ interface SnowPalette {
   core: [string, string, string];
   glow: [string, string, string];
   crystalStroke: string;
+  settled: string;
 }
 
-const MAX_DPR = 2;
-const MAX_DT_SEC = 0.05;
-// 限制氛围层最大绘制帧率为 36 FPS，避免在高刷屏上产生高频全屏合成
-const TARGET_FRAME_INTERVAL_MS = 1000 / 36;
+interface SnowColumn {
+  depth: number;
+  visibleDepth: number;
+  meltAfter: number;
+}
+
+interface SnowBank {
+  left: number;
+  right: number;
+  y: number;
+  columns: SnowColumn[];
+}
+
 const DOT_SPRITE_HALF = 16;
 const CRYSTAL_SPRITE_HALF = 24;
+const SNOW_BANK_COLUMN_WIDTH = 20;
+const SNOW_BANK_HOLD_SEC = 2.5;
+const MAX_TEXT_BANK_DEPTH = 7;
+const FLAKE_ALPHA_BUCKETS = [0.72, 0.86, 1] as const;
+
+function resizeBank(bank: SnowBank, left: number, right: number, y: number) {
+  bank.left = left;
+  bank.right = right;
+  bank.y = y;
+  const count = Math.max(3, Math.ceil((right - left) / SNOW_BANK_COLUMN_WIDTH) + 1);
+  if (bank.columns.length !== count) {
+    bank.columns = Array.from({ length: count }, (_, i) => bank.columns[i] ?? { depth: 0, visibleDepth: 0, meltAfter: 0 });
+  }
+}
+
+function columnAt(bank: SnowBank, x: number) {
+  const span = Math.max(1e-3, bank.right - bank.left);
+  const rawIndex = Math.round(((x - bank.left) / span) * (bank.columns.length - 1));
+  const index = Math.max(0, Math.min(bank.columns.length - 1, rawIndex));
+  return bank.columns[index];
+}
 
 export function clampSnowIntensity(value: unknown, fallback = 0): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
@@ -61,6 +98,7 @@ function resolveSnowPalette(theme: ThemeId): SnowPalette {
         `rgb(${accent} / 0.18)`,
       ],
       crystalStroke: `rgb(${accent} / 0.48)`,
+      settled: `rgb(${accent} / 0.31)`,
     };
   }
   return {
@@ -75,6 +113,7 @@ function resolveSnowPalette(theme: ThemeId): SnowPalette {
       'rgb(255 255 255 / 0.22)',
     ],
     crystalStroke: 'rgb(245 250 255 / 0.72)',
+    settled: 'rgb(230 244 255 / 0.70)',
   };
 }
 
@@ -147,6 +186,8 @@ function makeFlake(width: number, height: number, factor: number, randomY: boole
   const radius = (1.1 + factor * 1.4) * depth * (0.78 + Math.random() * 0.48);
   const baseSpeed = (22 + factor * 56) * depth;
   const crystal = layer === 2 && Math.random() < 0.36;
+  const alphaRoll = Math.random();
+  const alphaBucket: 0 | 1 | 2 = alphaRoll < 0.33 ? 0 : alphaRoll < 0.67 ? 1 : 2;
   return {
     x: Math.random() * (width + 160) - 80,
     y: randomY ? Math.random() * height : -radius * 4 - Math.random() * 120,
@@ -157,7 +198,7 @@ function makeFlake(width: number, height: number, factor: number, randomY: boole
     swayAmp: (8 + factor * 16) * (layer === 0 ? 0.65 : layer === 1 ? 1 : 1.25),
     swayFreq: 0.55 + Math.random() * 0.95,
     phase: Math.random() * Math.PI * 2,
-    opacity: 0.65 + Math.random() * 0.35,
+    alphaBucket,
     crystal,
     rotation: Math.random() * Math.PI * 2,
     spin: (Math.random() - 0.5) * 0.9,
@@ -165,25 +206,19 @@ function makeFlake(width: number, height: number, factor: number, randomY: boole
 }
 
 /**
- * 全工作区下雪氛围层：初始化时预烘焙离屏柔光雪点与六角冰晶精灵，帧内仅用 drawImage 合成，
- * 固定 36 FPS 上限、滑块热更新不重分配帧缓冲，窗口隐藏/失焦或强度为 0 时零动画开销。
+ * 全工作区下雪氛围层：与雨景共用单个全屏 Canvas 与 36 FPS 帧时钟，
+ * 雪花使用离屏精灵并按透明度分桶绘制，底部与状态栏积雪合并成一条轮廓，
+ * 滑块热更新不重分配帧缓冲，窗口隐藏/失焦或强度为 0 时零动画开销。
  */
 export const WorkspaceSnow: React.FC<WorkspaceSnowProps> = React.memo(({ intensity, theme }) => {
   const level = clampSnowIntensity(intensity, 0);
   const active = level > 0;
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const levelRef = useRef(level);
   levelRef.current = level;
   const reconcileRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!active) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const palette = resolveSnowPalette(theme);
     const dotSprites: [HTMLCanvasElement, HTMLCanvasElement, HTMLCanvasElement] = [
       createDotSprite(palette.core[0], palette.glow[0]),
@@ -194,17 +229,16 @@ export const WorkspaceSnow: React.FC<WorkspaceSnowProps> = React.memo(({ intensi
 
     let width = Math.max(1, window.innerWidth);
     let height = Math.max(1, window.innerHeight);
-    let dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
     let flakes: SnowFlake[] = [];
-    let rafId = 0;
-    let lastDrawTime = 0;
+    const floor: SnowBank = { left: 0, right: width, y: height, columns: [] };
+    let surfaces: readonly StatusTextSurface[] = [];
+    let textBanks = new Map<Text, SnowBank>();
     let elapsed = 0;
-    let windowFocused = typeof document.hasFocus === 'function' ? document.hasFocus() : true;
 
     const currentFactor = () => Math.max(0.01, levelRef.current / 100);
 
     const targetCount = (factor: number) => {
-      const areaScale = Math.max(0.55, Math.min(2.2, (width * height) / (1440 * 900)));
+      const areaScale = Math.max(0.55, Math.min(1.6, (width * height) / (1440 * 900)));
       return Math.round((28 + factor * 172) * areaScale);
     };
 
@@ -217,127 +251,167 @@ export const WorkspaceSnow: React.FC<WorkspaceSnowProps> = React.memo(({ intensi
       }
     };
 
-    const syncSize = () => {
-      width = Math.max(1, window.innerWidth);
-      height = Math.max(1, window.innerHeight);
-      dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
-      const nextW = Math.round(width * dpr);
-      const nextH = Math.round(height * dpr);
-      if (canvas.width !== nextW) canvas.width = nextW;
-      if (canvas.height !== nextH) canvas.height = nextH;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      syncFlakePool(currentFactor());
-    };
-
-    const renderFrame = (dt: number) => {
-      const factor = currentFactor();
-      elapsed += dt;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, width, height);
-
-      for (let i = 0; i < flakes.length; i++) {
-        const f = flakes[i];
-        if (dt > 0) {
-          f.y += f.speed * dt;
-          f.x += (f.drift + Math.sin(elapsed * f.swayFreq + f.phase) * f.swayAmp) * dt;
-          if (f.crystal) f.rotation += f.spin * dt;
-          const margin = f.radius * 4 + 40;
-          if (f.y > height + margin || f.x > width + margin || f.x < -margin) {
-            const next = makeFlake(width, height, factor, false);
-            next.layer = f.layer;
-            flakes[i] = next;
-            continue;
-          }
+    const appendSnowBank = (ctx: CanvasRenderingContext2D, bank: SnowBank, dt: number) => {
+      const { left, right, y, columns } = bank;
+      let hasSnow = false;
+      for (let i = 0; i < columns.length; i++) {
+        const column = columns[i];
+        if (elapsed > column.meltAfter && column.depth > 0) {
+          column.depth = Math.max(0, column.depth - (1.8 + column.depth * 0.28) * dt);
         }
+        column.visibleDepth = Math.min(column.depth, column.visibleDepth + 7 * dt);
+        if (column.visibleDepth > 0.05) hasSnow = true;
+      }
+      if (!hasSnow) return false;
 
-        ctx.globalAlpha = f.opacity;
-        if (f.crystal) {
-          const drawSize = (f.radius / (CRYSTAL_SPRITE_HALF * 0.62)) * (CRYSTAL_SPRITE_HALF * 2);
-          const half = drawSize * 0.5;
-          const cos = Math.cos(f.rotation) * dpr;
-          const sin = Math.sin(f.rotation) * dpr;
-          ctx.setTransform(cos, sin, -sin, cos, f.x * dpr, f.y * dpr);
-          ctx.drawImage(crystalSprite, -half, -half, drawSize, drawSize);
-          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        } else {
-          const drawSize = f.radius * 4;
-          const half = drawSize * 0.5;
-          ctx.drawImage(dotSprites[f.layer], f.x - half, f.y - half, drawSize, drawSize);
+      const step = (right - left) / (columns.length - 1);
+      // 跳过连续无积雪的平坦段落，只为有厚度的积雪丘陵生成曲线，降低 4K 路径顶点数
+      let i = 0;
+      while (i < columns.length) {
+        if (columns[i].visibleDepth <= 0.05) {
+          i++;
+          continue;
         }
+        const start = Math.max(0, i - 1);
+        let end = i;
+        while (end + 1 < columns.length && columns[end + 1].visibleDepth > 0.05) end++;
+        const stop = Math.min(columns.length - 1, end + 1);
+
+        const startX = left + start * step;
+        ctx.moveTo(startX, y);
+        ctx.lineTo(startX, y - columns[start].visibleDepth);
+        for (let j = start + 1; j <= stop; j++) {
+          const x = left + j * step;
+          const middleX = x - step * 0.5;
+          const previousY = y - columns[j - 1].visibleDepth;
+          const nextY = y - columns[j].visibleDepth;
+          ctx.bezierCurveTo(middleX, previousY, middleX, nextY, x, nextY);
+        }
+        ctx.lineTo(left + stop * step, y);
+        ctx.closePath();
+        i = stop + 1;
       }
-      ctx.globalAlpha = 1;
-    };
-
-    const shouldPause = () => document.hidden || !windowFocused;
-
-    const tick = (now: number) => {
-      rafId = 0;
-      if (shouldPause()) return;
-      if (lastDrawTime > 0 && now - lastDrawTime < TARGET_FRAME_INTERVAL_MS - 1) {
-        rafId = requestAnimationFrame(tick);
-        return;
-      }
-      const dt = lastDrawTime > 0 ? Math.min(MAX_DT_SEC, (now - lastDrawTime) / 1000) : 1 / 36;
-      lastDrawTime = now;
-      renderFrame(dt);
-      rafId = requestAnimationFrame(tick);
-    };
-
-    const start = () => {
-      if (reducedMotion) {
-        renderFrame(0);
-        return;
-      }
-      if (shouldPause() || rafId) return;
-      lastDrawTime = 0;
-      rafId = requestAnimationFrame(tick);
-    };
-
-    const stop = () => {
-      if (rafId) {
-        cancelAnimationFrame(rafId);
-        rafId = 0;
-      }
-    };
-
-    const onVisibility = () => {
-      if (shouldPause()) stop();
-      else start();
-    };
-
-    const onFocus = () => {
-      windowFocused = true;
-      start();
-    };
-
-    const onBlur = () => {
-      windowFocused = false;
-      stop();
-    };
-
-    const onResize = () => {
-      syncSize();
-      if (reducedMotion) renderFrame(0);
+      return true;
     };
 
     reconcileRef.current = () => {
       syncFlakePool(currentFactor());
-      if (reducedMotion) renderFrame(0);
+      updateAmbientLayerIntensity('snow', levelRef.current);
     };
 
-    syncSize();
-    start();
-    window.addEventListener('resize', onResize);
-    window.addEventListener('focus', onFocus);
-    window.addEventListener('blur', onBlur);
-    document.addEventListener('visibilitychange', onVisibility);
+    const unregister = registerAmbientCanvasLayer('snow', {
+      order: 1,
+      intensity: levelRef.current,
+      onResize: (nextWidth, nextHeight) => {
+        width = nextWidth;
+        height = nextHeight;
+        resizeBank(floor, 0, width, height);
+        syncFlakePool(currentFactor());
+      },
+      onDraw: (ctx, drawWidth, drawHeight, scaleX, scaleY, dt, now) => {
+        width = drawWidth;
+        height = drawHeight;
+        const factor = currentFactor();
+        elapsed += dt;
+        const currentSurfaces = dt > 0 ? readStatusTextSurfaces(now) : surfaces;
+        if (surfaces !== currentSurfaces) {
+          surfaces = currentSurfaces;
+          const next = new Map<Text, SnowBank>();
+          for (let s = 0; s < surfaces.length; s++) {
+            const { node, left, right, y } = surfaces[s];
+            const bank = textBanks.get(node) ?? { left, right, y, columns: [] };
+            resizeBank(bank, left, right, y);
+            next.set(node, bank);
+          }
+          textBanks = next;
+        }
+        const firstTextY = surfaces[0]?.y ?? height;
+        const hitThresholdY = firstTextY - (surfaces.length ? MAX_TEXT_BANK_DEPTH : 13);
+
+        if (dt > 0) {
+          for (let i = 0; i < flakes.length; i++) {
+            const f = flakes[i];
+            f.y += f.speed * dt;
+            f.x += (f.drift + Math.sin(elapsed * f.swayFreq + f.phase) * f.swayAmp) * dt;
+            if (f.crystal) f.rotation += f.spin * dt;
+            const margin = f.radius * 4 + 40;
+            const tip = f.y + f.radius;
+            let landed = tip >= height;
+            if (tip >= hitThresholdY && f.x >= 0 && f.x <= width) {
+              const previousY = f.y - f.speed * dt;
+              let hitNode: Text | null = null;
+              for (let s = 0; s < surfaces.length; s++) {
+                const surface = surfaces[s];
+                if (f.x >= surface.left && f.x <= surface.right && tip >= surface.y - MAX_TEXT_BANK_DEPTH && previousY <= surface.y) {
+                  hitNode = surface.node;
+                  break;
+                }
+              }
+              const bank = (hitNode && textBanks.get(hitNode)) || floor;
+              const column = columnAt(bank, f.x);
+              landed = tip >= bank.y - column.visibleDepth || landed;
+              const maxDepth = bank === floor ? 3 + factor * 10 : 2 + factor * (MAX_TEXT_BANK_DEPTH - 2);
+              if (landed && column.depth < maxDepth) {
+                column.depth = Math.min(maxDepth, column.depth + 0.65 + f.radius * 0.8);
+                column.meltAfter = elapsed + SNOW_BANK_HOLD_SEC;
+              }
+            }
+            if (landed || f.x > width + margin || f.x < -margin) {
+              const next = makeFlake(width, height, factor, false);
+              next.layer = f.layer;
+              flakes[i] = next;
+            }
+          }
+        }
+
+        // 按透明度分桶批量绘制圆点雪花，将每帧 globalAlpha 状态切换从数百次降至 3 次
+        for (let bucket = 0; bucket < FLAKE_ALPHA_BUCKETS.length; bucket++) {
+          ctx.globalAlpha = FLAKE_ALPHA_BUCKETS[bucket];
+          for (let i = 0; i < flakes.length; i++) {
+            const f = flakes[i];
+            if (f.crystal || f.alphaBucket !== bucket) continue;
+            const drawSize = f.radius * 4;
+            const half = drawSize * 0.5;
+            ctx.drawImage(dotSprites[f.layer], f.x - half, f.y - half, drawSize, drawSize);
+          }
+        }
+
+        // 集中绘制旋转六角冰晶，最后统一恢复单位变换
+        let drewCrystal = false;
+        for (let bucket = 0; bucket < FLAKE_ALPHA_BUCKETS.length; bucket++) {
+          let alphaSet = false;
+          for (let i = 0; i < flakes.length; i++) {
+            const f = flakes[i];
+            if (!f.crystal || f.alphaBucket !== bucket) continue;
+            if (!alphaSet) {
+              ctx.globalAlpha = FLAKE_ALPHA_BUCKETS[bucket];
+              alphaSet = true;
+            }
+            drewCrystal = true;
+            const drawSize = (f.radius / (CRYSTAL_SPRITE_HALF * 0.62)) * (CRYSTAL_SPRITE_HALF * 2);
+            const half = drawSize * 0.5;
+            const cos = Math.cos(f.rotation);
+            const sin = Math.sin(f.rotation);
+            ctx.setTransform(cos * scaleX, sin * scaleY, -sin * scaleX, cos * scaleY, f.x * scaleX, f.y * scaleY);
+            ctx.drawImage(crystalSprite, -half, -half, drawSize, drawSize);
+          }
+        }
+        if (drewCrystal) ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+        ctx.globalAlpha = 1;
+        ctx.beginPath();
+        let hasSnow = appendSnowBank(ctx, floor, dt);
+        for (const bank of textBanks.values()) hasSnow = appendSnowBank(ctx, bank, dt) || hasSnow;
+        if (hasSnow) {
+          ctx.fillStyle = palette.settled;
+          ctx.fill();
+        }
+      },
+    });
+
     return () => {
       reconcileRef.current = null;
-      stop();
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('focus', onFocus);
-      window.removeEventListener('blur', onBlur);
-      document.removeEventListener('visibilitychange', onVisibility);
+      unregister();
     };
   }, [active, theme]);
 
@@ -345,17 +419,7 @@ export const WorkspaceSnow: React.FC<WorkspaceSnowProps> = React.memo(({ intensi
     if (active) reconcileRef.current?.();
   }, [active, level]);
 
-  if (!active) return null;
-
-  return (
-    <canvas
-      ref={canvasRef}
-      aria-hidden="true"
-      data-workspace-snow
-      data-snow-intensity={level}
-      className="pointer-events-none fixed inset-0 z-40 h-full w-full"
-    />
-  );
+  return null;
 });
 
 WorkspaceSnow.displayName = 'WorkspaceSnow';

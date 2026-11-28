@@ -80,6 +80,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   ignoredUpdateVersion: '',
   accounts: [],
   customClis: [],
+  pinnedCliIds: [],
 };
 
 const workReminderText = (hours: number) => t('主人，您已经工作 {n} 小时了，该休息一下了。', { n: hours });
@@ -133,6 +134,9 @@ function loadSavedSettings(): AppSettings {
         greetingMessages: sanitizeGreetingMessages(saved?.greetingMessages),
         accounts: sanitizeAccounts(saved?.accounts),
         customClis: sanitizeCustomClis(saved?.customClis),
+        pinnedCliIds: Array.isArray(saved?.pinnedCliIds)
+          ? [...new Set<string>(saved.pinnedCliIds.filter((id: unknown): id is string => typeof id === 'string' && id.length > 0))]
+          : [],
         musicStreams: sanitizeMusicStreams(saved?.musicStreams),
         language: isLanguage(saved?.language) ? saved.language : systemLanguage(),
         onboardingDone: saved?.onboardingDone === true,
@@ -1223,7 +1227,20 @@ export const App: React.FC = () => {
         setActiveTaskId(orderedTasks(foldersRef.current, visibleTasksRef.current.filter((task) => !removed.has(task.groupId)))[0]?.id ?? null);
       }
     }
-    setSettings((prev) => ({ ...prev, customClis: next }));
+    setSettings((prev) => ({
+      ...prev,
+      customClis: next,
+      pinnedCliIds: prev.pinnedCliIds.filter((id) => !removed.has(id)),
+    }));
+  }, []);
+
+  const handleToggleCliPin = useCallback((id: string) => {
+    setSettings((prev) => ({
+      ...prev,
+      pinnedCliIds: prev.pinnedCliIds.includes(id)
+        ? prev.pinnedCliIds.filter((pinnedId) => pinnedId !== id)
+        : [...prev.pinnedCliIds, id],
+    }));
   }, []);
 
   // 触发新建任务弹窗：在哪个文件夹里、预选哪个 CLI 与账号
@@ -1750,6 +1767,8 @@ ${entry.cwd}`}
         onClearStoppedTasks={handleClearStoppedTasks}
         onPinRecentFolder={handlePinRecentFolder}
         clis={visibleClis}
+        pinnedCliIds={settings.pinnedCliIds}
+        onToggleCliPin={handleToggleCliPin}
         folders={folders}
         tasks={visibleTasks}
         accounts={settings.accounts}
@@ -1995,7 +2014,7 @@ ${entry.cwd}`}
                 confirmLabel: t('恢复默认'),
                 danger: true,
               })) return;
-              setSettings((prev) => ({ ...DEFAULT_SETTINGS, accounts: prev.accounts, customClis: prev.customClis, musicStreams: prev.musicStreams, language: prev.language, onboardingDone: prev.onboardingDone }));
+              setSettings((prev) => ({ ...DEFAULT_SETTINGS, accounts: prev.accounts, customClis: prev.customClis, pinnedCliIds: prev.pinnedCliIds, musicStreams: prev.musicStreams, language: prev.language, onboardingDone: prev.onboardingDone }));
             }}
             onLoginAccount={(account) => void handleLoginAccount(account)}
             fallbackKnownClis={fallbackKnownClis}
